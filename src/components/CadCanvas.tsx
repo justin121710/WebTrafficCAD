@@ -42,8 +42,10 @@ import {
   smoothBezierControlPoints,
   calculateSteeringAngle,
   getWheelbaseForVehicle,
-  getMaxSteeringAngleForPath
+  getMaxSteeringAngleForPath,
+  getRoadArrowOutlinePoints
 } from '../geometry';
+import { arrowData } from '../arrowData';
 import { calculateIntersectionCurve } from '../utils/pathInterpolator';
 import { calculateCorners, calculateTrailerCorners } from '../utils/vehicleSimulator';
 import { Search } from 'lucide-react';
@@ -179,6 +181,10 @@ function getElementVertices(el: CadElement): Point2D[] {
     case 'bicycle_lane': {
       const bl = el as BicycleLaneElement;
       return bl.points || [];
+    }
+    case 'road_arrow': {
+      const arrow = el as any;
+      return [arrow.p, ...getRoadArrowOutlinePoints(arrow)];
     }
     default:
       return [];
@@ -849,6 +855,11 @@ function getElementBoundingBox(el: any): { minX: number; maxX: number; minY: num
     collect.push(...el.cpRight);
   }
 
+  if (el.type === 'road_arrow') {
+    const pts = getRoadArrowOutlinePoints(el);
+    collect.push(...pts);
+  }
+
   if (collect.length === 0) return { minX: 0, maxX: 0, minY: 0, maxY: 0 };
 
   let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
@@ -963,6 +974,8 @@ interface CadCanvasProps {
   setSimIsCalibrating?: (b: boolean) => void;
   editingPathId?: string | null;
   setSimIsDragging?: (dragging: boolean) => void;
+  roadArrowConfig?: { arrowType: 'straight' | 'left' | 'right' | 'straight_left' | 'straight_right', length: number, angle: number };
+  setRoadArrowConfig?: (cfg: any) => void;
 }
 
 export default function CadCanvas({
@@ -978,6 +991,8 @@ export default function CadCanvas({
   parkingStampConfig,
   setParkingStampConfig,
   parkingZoneConfig,
+  roadArrowConfig,
+  setRoadArrowConfig,
   R2,
   designVehicle,
   snapToGrid,
@@ -2884,6 +2899,86 @@ export default function CadCanvas({
         }
       }
 
+      // Class B.6: Road arrow rotation handle
+      if (el.type === 'road_arrow') {
+        const arrow = el as any;
+        const sCenter = worldToScreen(arrow.p.x, arrow.p.y);
+
+        if (Math.hypot(sx - sCenter.x, sy - sCenter.y) < 12) {
+          onSaveHistoryBeforeDrag();
+          setActiveHandle({ elementId: el.id, nodeIndex: 30 }); // 30 representing road arrow rotation handle
+          
+          rotatingCenterRef.current = arrow.p;
+          detectionRefPointRef.current = arrow.p;
+          latestMouseWorldPosRef.current = clickPt;
+          
+          if (rotationIntervalRef.current) {
+            clearInterval(rotationIntervalRef.current);
+          }
+          
+          let lastProcessedMousePos: { x: number; y: number } | null = null;
+          let isMouseStationary = false;
+          
+          rotationIntervalRef.current = setInterval(() => {
+            if (!rotatingCenterRef.current || !latestMouseWorldPosRef.current) return;
+            
+            const curMouse = {
+              x: latestMouseWorldPosRef.current.x,
+              y: latestMouseWorldPosRef.current.y
+            };
+            
+            const didMouseNotMove = lastProcessedMousePos &&
+                                    lastProcessedMousePos.x === curMouse.x &&
+                                    lastProcessedMousePos.y === curMouse.y;
+            
+            if (didMouseNotMove) {
+              isMouseStationary = true;
+            } else {
+              if (isMouseStationary && lastProcessedMousePos) {
+                detectionRefPointRef.current = { ...lastProcessedMousePos };
+              }
+              isMouseStationary = false;
+            }
+            
+            lastProcessedMousePos = { ...curMouse };
+            
+            const curElements = latestElementsRef.current;
+            const currentArrow = curElements.find(item => item.id === el.id) as any;
+            if (!currentArrow) return;
+            
+            const detPt = detectionRefPointRef.current || rotatingCenterRef.current;
+            const d = distance(curMouse, detPt);
+            const isUp = curMouse.y > detPt.y;
+            
+            const baseDelta = (1 * Math.PI) / 180;
+            const speedFactor = Math.max(0.5, d / 3.0);
+            const angleDelta = baseDelta * speedFactor;
+            
+            const currentAngle = currentArrow.angle !== undefined ? currentArrow.angle : 0;
+            
+            let newAngle = isUp ? (currentAngle + angleDelta) : (currentAngle - angleDelta);
+            while (newAngle > Math.PI) newAngle -= 2 * Math.PI;
+            while (newAngle < -Math.PI) newAngle += 2 * Math.PI;
+            
+            const updatedArrow = {
+              ...currentArrow,
+              angle: newAngle
+            };
+            
+            onUpdateElement(updatedArrow);
+            
+            if (setRoadArrowConfig) {
+              setRoadArrowConfig({
+                arrowType: currentArrow.arrowType,
+                length: currentArrow.length,
+                angle: newAngle
+              });
+            }
+          }, 100);
+          return;
+        }
+      }
+
       // Class C: Crosswalk drag handles
       if (el.type === 'crosswalk') {
         const cw = el as any;
@@ -3174,6 +3269,36 @@ export default function CadCanvas({
               }
             } catch (e) {}
           }
+        } else if (el.type === 'road_arrow') {
+          const arrow = el as any;
+          const boundaryPoints = getRoadArrowOutlinePoints(arrow);
+          if (boundaryPoints.length > 0) {
+            let inside = false;
+            for (let i = 0, j = boundaryPoints.length - 1; i < boundaryPoints.length; j = i++) {
+              const xi = boundaryPoints[i].x, yi = boundaryPoints[i].y;
+              const xj = boundaryPoints[j].x, yj = boundaryPoints[j].y;
+              const intersect = ((yi > clickPt.y) !== (yj > clickPt.y))
+                  && (clickPt.x < (xj - xi) * (clickPt.y - yi) / (yj - yi) + xi);
+              if (intersect) inside = !inside;
+            }
+
+            if (inside) {
+              selected = el;
+              minDistanceScreen = 0;
+            } else {
+              for (let i = 0; i < boundaryPoints.length; i++) {
+                const p1 = boundaryPoints[i];
+                const p2 = boundaryPoints[(i + 1) % boundaryPoints.length];
+                const proj = projectPointOnSegment(clickPt, p1, p2);
+                const screenProj = worldToScreen(proj.point.x, proj.point.y);
+                const d = Math.hypot(sx - screenProj.x, sy - screenProj.y);
+                if (d < minDistanceScreen) {
+                  minDistanceScreen = d;
+                  selected = el;
+                }
+              }
+            }
+          }
         }
       });
 
@@ -3427,6 +3552,98 @@ export default function CadCanvas({
             slotType: currentPk.slotType,
             width: W,
             length: L,
+            angle: newAngle
+          });
+        }
+      }, 100);
+      return;
+    }
+
+    // 4.6. Road Arrow drafting - Stamp Mode
+    if (activeTool === 'road_arrow') {
+      const newId = `arrow-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+      const stampType = roadArrowConfig?.arrowType || 'straight';
+      const stampLength = roadArrowConfig?.length || 6.0;
+      const stampAngle = roadArrowConfig?.angle || 0;
+
+      const arrowEl: CadElement = {
+        id: newId,
+        type: 'road_arrow',
+        p: clickPt,
+        arrowType: stampType,
+        length: stampLength,
+        angle: stampAngle
+      };
+
+      onAddElement(arrowEl);
+      onSelectElement(arrowEl);
+      setDraftPoints([]);
+
+      // 立刻啟動旋轉定時器以實現「按下時上下拉旋轉」
+      setActiveHandle({ elementId: newId, nodeIndex: 30 });
+      rotatingCenterRef.current = clickPt;
+      detectionRefPointRef.current = clickPt;
+      latestMouseWorldPosRef.current = clickPt;
+
+      if (rotationIntervalRef.current) {
+        clearInterval(rotationIntervalRef.current);
+      }
+
+      let lastProcessedMousePos: { x: number; y: number } | null = null;
+      let isMouseStationary = false;
+
+      rotationIntervalRef.current = setInterval(() => {
+        if (!rotatingCenterRef.current || !latestMouseWorldPosRef.current) return;
+        
+        const curMouse = {
+          x: latestMouseWorldPosRef.current.x,
+          y: latestMouseWorldPosRef.current.y
+        };
+        
+        const didMouseNotMove = lastProcessedMousePos &&
+                                lastProcessedMousePos.x === curMouse.x &&
+                                lastProcessedMousePos.y === curMouse.y;
+        
+        if (didMouseNotMove) {
+          isMouseStationary = true;
+        } else {
+          if (isMouseStationary && lastProcessedMousePos) {
+            detectionRefPointRef.current = { ...lastProcessedMousePos };
+          }
+          isMouseStationary = false;
+        }
+        
+        lastProcessedMousePos = { ...curMouse };
+        
+        const curElements = latestElementsRef.current;
+        const currentArrow = curElements.find(item => item.id === newId) as any;
+        if (!currentArrow) return;
+        
+        const detPt = detectionRefPointRef.current || rotatingCenterRef.current;
+        const d = distance(curMouse, detPt);
+        const isUp = curMouse.y > detPt.y;
+        
+        const baseDelta = (1 * Math.PI) / 180;
+        const speedFactor = Math.max(0.5, d / 3.0);
+        const angleDelta = baseDelta * speedFactor;
+        
+        const currentAngle = currentArrow.angle !== undefined ? currentArrow.angle : 0;
+        
+        let newAngle = isUp ? (currentAngle + angleDelta) : (currentAngle - angleDelta);
+        while (newAngle > Math.PI) newAngle -= 2 * Math.PI;
+        while (newAngle < -Math.PI) newAngle += 2 * Math.PI;
+        
+        const updatedArrow = {
+          ...currentArrow,
+          angle: newAngle
+        };
+        
+        onUpdateElement(updatedArrow);
+        
+        if (setRoadArrowConfig) {
+          setRoadArrowConfig({
+            arrowType: stampType,
+            length: stampLength,
             angle: newAngle
           });
         }
@@ -4530,6 +4747,41 @@ export default function CadCanvas({
           ctx.fill();
           ctx.stroke();
         }
+      } else if (el.type === 'road_arrow') {
+        const arrow = el as any;
+        const pts = getRoadArrowOutlinePoints(arrow);
+        if (pts.length > 0) {
+          ctx.save();
+          ctx.lineCap = 'round';
+          ctx.lineJoin = 'round';
+          
+          ctx.strokeStyle = isSelected ? '#38bdf8' : '#ffffff';
+          ctx.lineWidth = isSelected ? Math.max(2, zoom * 0.08) : Math.max(1, zoom * 0.03);
+          ctx.fillStyle = isSelected ? 'rgba(56, 189, 248, 0.25)' : '#ffffff';
+
+          ctx.beginPath();
+          const pStart = worldToScreen(pts[0].x, pts[0].y);
+          ctx.moveTo(pStart.x, pStart.y);
+          for (let i = 1; i < pts.length; i++) {
+            const p = worldToScreen(pts[i].x, pts[i].y);
+            ctx.lineTo(p.x, p.y);
+          }
+          ctx.closePath();
+          ctx.fill();
+          ctx.stroke();
+          ctx.restore();
+
+          if (isSelected) {
+            const hs = worldToScreen(arrow.p.x, arrow.p.y);
+            ctx.fillStyle = '#a855f7'; // purple lever
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            ctx.arc(hs.x, hs.y, 6.5, 0, 2 * Math.PI);
+            ctx.fill();
+            ctx.stroke();
+          }
+        }
       } else if (el.type === 'parking_zone') {
         const zone = el as any;
         const ref = getLineBezierRepresentation(zone);
@@ -4614,6 +4866,43 @@ export default function CadCanvas({
       ctx.stroke();
 
       ctx.restore();
+    }
+
+    // Stamp Preview for road_arrow
+    if (activeTool === 'road_arrow' && draftPoints.length === 0) {
+      const stampType = roadArrowConfig?.arrowType || 'straight';
+      const stampLength = roadArrowConfig?.length || 6.0;
+      const stampAngle = roadArrowConfig?.angle || 0;
+
+      const tempArrow = {
+        p: mouseWorld,
+        arrowType: stampType,
+        length: stampLength,
+        angle: stampAngle
+      };
+
+      const pts = getRoadArrowOutlinePoints(tempArrow);
+      if (pts.length > 0) {
+        ctx.save();
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.strokeStyle = 'rgba(56, 189, 248, 0.75)';
+        ctx.lineWidth = Math.max(1.5, zoom * 0.05);
+        ctx.fillStyle = 'rgba(56, 189, 248, 0.18)';
+        ctx.setLineDash([4, 4]);
+
+        ctx.beginPath();
+        const pStart = worldToScreen(pts[0].x, pts[0].y);
+        ctx.moveTo(pStart.x, pStart.y);
+        for (let i = 1; i < pts.length; i++) {
+          const p = worldToScreen(pts[i].x, pts[i].y);
+          ctx.lineTo(p.x, p.y);
+        }
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+        ctx.restore();
+      }
     }
 
     // DRAW INTERACTIVE DRAFT TEMPORARY GRAPHICS

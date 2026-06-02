@@ -214,6 +214,12 @@ function renderToolIcon(id: CadTool) {
           <rect x="18" y="15" width="2" height="3" rx="0.5" fill="currentColor" />
         </svg>
       );
+    case 'road_arrow':
+      return (
+        <svg viewBox="0 0 24 24" className="w-[24px] h-[24px]" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M12 19V5M12 5l-5 5M12 5l5 5" />
+        </svg>
+      );
     default:
       return null;
   }
@@ -266,7 +272,8 @@ export default function Toolbar({
         { id: 'crosswalk' as CadTool, desc: '行穿線 / 斑馬線：40cm線寬40cm間隙之枕木紋' },
         { id: 'bicycle_lane' as CadTool, desc: '腳踏車道：品紅色專用車道鋪面' },
         { id: 'parking_space' as CadTool, desc: '停車格：汽車、機車位印章繪製與屬性控制' },
-        { id: 'parking_zone' as CadTool, desc: '停車區：以鋼筆繪製彎曲或直行路徑，自動沿路向填滿車格，可調整角度、間隔與尺寸' }
+        { id: 'parking_zone' as CadTool, desc: '停車區：以鋼筆繪製彎曲或直行路徑，自動沿路向填滿車格，可調整角度、間隔與尺寸' },
+        { id: 'road_arrow' as CadTool, desc: '指向線箭頭：路面方向指示印章（直行、左右轉與混合）' }
       ]
     }
   ];

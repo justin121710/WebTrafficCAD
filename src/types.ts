@@ -20,7 +20,8 @@ export type CadTool =
   | 'parking_space'   // Custom parking spaces
   | 'bicycle_lane'    // Custom pink bicycle lanes
   | 'reversible_lane' // Double white dashed lines with 10cm gap
-  | 'parking_zone';  // Multi-slot parking generator along a path
+  | 'parking_zone'    // Multi-slot parking generator along a path
+  | 'road_arrow';     // Road markings direction arrows
 
 export interface Point2D {
   x: number; // in meters (World coordinate)
@@ -35,7 +36,7 @@ export interface ViewportState {
 
 export interface BaseElement {
   id: string;
-  type: 'guideline' | 'yellow_double' | 'white_double' | 'white_dashed' | 'yellow_dashed' | 'white_solid' | 'three_center_curve' | 'island' | 'text' | 'smart_path' | 'sketch_circle' | 'crosswalk' | 'BuildingLine' | 'crossing_dashed' | 'stop_line' | 'yield_line' | 'Sidewalk' | 'parking_space' | 'bicycle_lane' | 'reversible_lane' | 'parking_zone';
+  type: 'guideline' | 'yellow_double' | 'white_double' | 'white_dashed' | 'yellow_dashed' | 'white_solid' | 'three_center_curve' | 'island' | 'text' | 'smart_path' | 'sketch_circle' | 'crosswalk' | 'BuildingLine' | 'crossing_dashed' | 'stop_line' | 'yield_line' | 'Sidewalk' | 'parking_space' | 'bicycle_lane' | 'reversible_lane' | 'parking_zone' | 'road_arrow';
   color?: string;
   lineWidth?: number; // in meters or pixels
 }
@@ -157,6 +158,14 @@ export interface ParkingZoneElement extends BaseElement {
   showSizeLabel?: boolean;
 }
 
+export interface RoadArrowElement extends BaseElement {
+  type: 'road_arrow';
+  p: Point2D;
+  arrowType: 'straight' | 'left' | 'right' | 'straight_left' | 'straight_right';
+  length: number;
+  angle: number; // in radians
+}
+
 export type CadElement = 
   | LineElement 
   | ThreeCenterCurveElement 
@@ -168,7 +177,8 @@ export type CadElement =
   | BuildingLineElement
   | ParkingSpaceElement
   | BicycleLaneElement
-  | ParkingZoneElement;
+  | ParkingZoneElement
+  | RoadArrowElement;
 
 export interface SnapTarget {
   point: Point2D;

@@ -301,6 +301,12 @@ export default function App() {
     side: 'right' as 'left' | 'right'
   });
 
+  const [roadArrowConfig, setRoadArrowConfig] = useState({
+    arrowType: 'straight' as 'straight' | 'left' | 'right' | 'straight_left' | 'straight_right',
+    length: 6.0,
+    angle: 0 // in radians
+  });
+
   // Undo / Redo system historical timeline
   const [historyStack, setHistoryStack] = useState<CadElement[][]>([]);
   const [redoStack, setRedoStack] = useState<CadElement[][]>([]);
@@ -2512,6 +2518,8 @@ export default function App() {
           parkingStampConfig={parkingStampConfig}
           setParkingStampConfig={setParkingStampConfig}
           parkingZoneConfig={parkingZoneConfig}
+          roadArrowConfig={roadArrowConfig}
+          setRoadArrowConfig={setRoadArrowConfig}
           R2={R2}
           designVehicle={designVehicle}
           snapToGrid={snapToGrid}
@@ -2729,6 +2737,8 @@ export default function App() {
                 setParkingStampConfig={setParkingStampConfig}
                 parkingZoneConfig={parkingZoneConfig}
                 setParkingZoneConfig={setParkingZoneConfig}
+                roadArrowConfig={roadArrowConfig}
+                setRoadArrowConfig={setRoadArrowConfig}
                 onClearSelectedAnchors={() => setSelectedAnchorIndices([])}
                 onTranslateSelectedAnchors={(dx, dy) => {
                   if (!selectedElement) return;

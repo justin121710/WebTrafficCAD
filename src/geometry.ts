@@ -1,4 +1,22 @@
 import { Point2D, ThreeCenterCurveElement, IslandElement, CadElement, CrosswalkElement } from './types';
+import { arrowData } from './arrowData';
+
+export function getRoadArrowOutlinePoints(el: { p: Point2D; arrowType: string; length: number; angle: number }): Point2D[] {
+  const data = arrowData[el.arrowType];
+  if (!data) return [];
+  const cos = Math.cos(el.angle);
+  const sin = Math.sin(el.angle);
+  return data.points.map(pt => {
+    const mx = pt.x * el.length;
+    const my = (pt.y - 0.5) * el.length;
+    const rotX = mx * cos - my * sin;
+    const rotY = mx * sin + my * cos;
+    return {
+      x: el.p.x + rotX,
+      y: el.p.y + rotY
+    };
+  });
+}
 
 // Simple vector operations
 export function distance(p1: Point2D, p2: Point2D): number {
@@ -1213,8 +1231,28 @@ ${line.p2.y.toFixed(4)}
 `;
         });
       });
+    } else if (el.type === 'road_arrow') {
+      const arrow = el as any;
+      const boundaryPoints = getRoadArrowOutlinePoints(arrow);
+      dxf += `  0
+LWPOLYLINE
+  8
+MARKING_ROAD_ARROWS
+ 90
+${boundaryPoints.length}
+ 70
+1
+`;
+      boundaryPoints.forEach((p) => {
+        dxf += ` 10
+${p.x.toFixed(4)}
+ 20
+${p.y.toFixed(4)}
+`;
+      });
     }
   });
+
 
   dxf += `  0
 ENDSEC

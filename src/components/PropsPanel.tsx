@@ -197,6 +197,12 @@ function renderPropsIcon(type: string) {
           <path d="M4 7V4h16v3M9 20h6M12 4v16" />
         </svg>
       );
+    case 'road_arrow':
+      return (
+        <svg viewBox="0 0 24 24" className={baseClass} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M12 19V5M12 5l-5 5M12 5l5 5" />
+        </svg>
+      );
     default:
       return null;
   }
@@ -228,6 +234,8 @@ interface PropsPanelProps {
   setParkingStampConfig?: (cfg: any) => void;
   parkingZoneConfig?: { slotType: 'car' | 'motorcycle', width: number, length: number, angle: number, gap: number, side: 'left' | 'right' };
   setParkingZoneConfig?: (cfg: any) => void;
+  roadArrowConfig?: { arrowType: 'straight' | 'left' | 'right' | 'straight_left' | 'straight_right', length: number, angle: number };
+  setRoadArrowConfig?: (cfg: any) => void;
 }
 
 export default function PropsPanel({
@@ -247,7 +255,9 @@ export default function PropsPanel({
   parkingStampConfig,
   setParkingStampConfig,
   parkingZoneConfig,
-  setParkingZoneConfig
+  setParkingZoneConfig,
+  roadArrowConfig,
+  setRoadArrowConfig
 }: PropsPanelProps) {
   const [nudgeStep, setNudgeStep] = useState<number>(0.1);
   
@@ -704,6 +714,131 @@ export default function PropsPanel({
                     side === 'left' ? 'translate-x-5' : 'translate-x-0'
                   }`} />
                 </button>
+              </div>
+            </div>
+          </div>
+        );
+      }
+      
+      if (activeTool === 'road_arrow' && roadArrowConfig && setRoadArrowConfig) {
+        const arrowType = roadArrowConfig.arrowType;
+        const length = roadArrowConfig.length;
+        const angleDeg = Math.round((roadArrowConfig.angle * 180) / Math.PI);
+        const arrowLabels: Record<string, string> = {
+          straight: '直行',
+          left: '左轉',
+          right: '右轉',
+          straight_left: '直行左轉',
+          straight_right: '直行右轉'
+        };
+
+        return (
+          <div className="space-y-4">
+            <div className="p-3 bg-[#1f2229]/40 rounded-lg border border-[#2d3039]">
+              <h4 className="text-xs font-semibold text-blue-400 mb-2">指向線標記印章設定</h4>
+              <p className="text-[10px] text-slate-500">（滑鼠單擊即可印下，拖曳旋轉）將依此設定的尺寸與角度放置指向箭頭。</p>
+            </div>
+
+            <div className="space-y-1.5 text-xs">
+              <label className="text-slate-400 block font-medium">箭頭類型</label>
+              <select
+                value={arrowType}
+                onChange={(e) => {
+                  setRoadArrowConfig({
+                    ...roadArrowConfig,
+                    arrowType: e.target.value as any
+                  });
+                }}
+                className="w-full bg-[#1f2229] border border-[#2d3039] px-2 py-1.5 rounded text-white focus:outline-none focus:border-blue-500 text-xs"
+              >
+                {Object.entries(arrowLabels).map(([val, label]) => (
+                  <option key={val} value={val} className="bg-[#14161c]">{label}</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="space-y-1 text-xs">
+              <div className="flex justify-between">
+                <span className="text-slate-400">長度 (m)</span>
+                <span className="text-slate-200 font-mono font-bold">{length.toFixed(1)} m</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  type="range"
+                  min="1.0"
+                  max="10.0"
+                  step="0.1"
+                  value={length}
+                  onChange={(e) => {
+                    setRoadArrowConfig({
+                      ...roadArrowConfig,
+                      length: parseFloat(e.target.value)
+                    });
+                  }}
+                  className="flex-1 accent-blue-500 cursor-pointer"
+                />
+                <input
+                  type="number"
+                  min="1.0"
+                  max="10.0"
+                  step="0.1"
+                  value={parseFloat(length.toFixed(1))}
+                  onChange={(e) => {
+                    let val = parseFloat(e.target.value);
+                    if (!isNaN(val)) {
+                      if (val < 1.0) val = 1.0;
+                      if (val > 10.0) val = 10.0;
+                      setRoadArrowConfig({
+                        ...roadArrowConfig,
+                        length: val
+                      });
+                    }
+                  }}
+                  className="w-16 bg-[#1f2229] border border-[#2d3039] px-1 py-0.5 rounded text-white text-right focus:outline-none focus:border-blue-500 font-mono text-xs"
+                />
+              </div>
+            </div>
+
+            <div className="space-y-1 text-xs">
+              <div className="flex justify-between">
+                <span className="text-slate-400">角度 (度)</span>
+                <span className="text-slate-200 font-mono font-bold">{angleDeg}°</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  type="range"
+                  min="-180"
+                  max="180"
+                  step="5"
+                  value={angleDeg}
+                  onChange={(e) => {
+                    const rad = (parseFloat(e.target.value) * Math.PI) / 180;
+                    setRoadArrowConfig({
+                      ...roadArrowConfig,
+                      angle: rad
+                    });
+                  }}
+                  className="flex-1 accent-blue-500 cursor-pointer"
+                />
+                <input
+                  type="number"
+                  min="-180"
+                  max="180"
+                  step="1"
+                  value={angleDeg}
+                  onChange={(e) => {
+                    let val = parseFloat(e.target.value);
+                    if (!isNaN(val)) {
+                      if (val < -180) val = -180;
+                      if (val > 180) val = 180;
+                      setRoadArrowConfig({
+                        ...roadArrowConfig,
+                        angle: (val * Math.PI) / 180
+                      });
+                    }
+                  }}
+                  className="w-16 bg-[#1f2229] border border-[#2d3039] px-1 py-0.5 rounded text-white text-right focus:outline-none focus:border-blue-500 font-mono text-xs"
+                />
               </div>
             </div>
           </div>
@@ -2151,6 +2286,154 @@ export default function PropsPanel({
               className="w-full py-2 bg-red-950/20 text-red-400 border border-red-950/40 hover:bg-red-950/40 hover:text-red-350 text-xs rounded transition-colors"
             >
               刪除此行穿線
+            </button>
+          </div>
+        );
+      }
+
+      case 'road_arrow': {
+        const arrow = selectedElement as any;
+        const arrowType = arrow.arrowType;
+        const length = arrow.length;
+        const angleDeg = Math.round((arrow.angle * 180) / Math.PI);
+        const arrowLabels: Record<string, string> = {
+          straight: '直行',
+          left: '左轉',
+          right: '右轉',
+          straight_left: '直行左轉',
+          straight_right: '直行右轉'
+        };
+
+        return (
+          <div className="space-y-4">
+            <div className="p-3 bg-[#1f2229]/40 rounded-lg border border-[#2d3039] space-y-2">
+              <h4 className="text-xs font-semibold text-slate-350 flex items-center gap-1.5">
+                {renderPropsIcon(selectedElement.type)}
+                <span>路面指向線 (Direction Arrow)</span>
+              </h4>
+              <p className="text-[10px] text-slate-455 leading-normal">
+                指示車輛行駛方向之指向線標記。
+              </p>
+              <div className="grid grid-cols-2 gap-x-2 gap-y-1 font-mono text-[10px] text-slate-400 pt-1">
+                <span>中心坐標 X:</span> <span className="text-slate-200">{arrow.p.x.toFixed(2)} m</span>
+                <span>中心坐標 Y:</span> <span className="text-slate-200">{arrow.p.y.toFixed(2)} m</span>
+              </div>
+            </div>
+
+            <div className="space-y-3 p-3 bg-[#1f2229]/40 border border-[#2d3039] rounded-lg">
+              <div className="space-y-1.5 text-xs">
+                <label className="text-slate-400 block font-medium">箭頭類型</label>
+                <select
+                  value={arrowType}
+                  onChange={(e) => {
+                    onUpdateElement({
+                      ...arrow,
+                      arrowType: e.target.value as any
+                    });
+                  }}
+                  className="w-full bg-[#1f2229] border border-[#2d3039] px-2 py-1.5 rounded text-white focus:outline-none focus:border-blue-500 text-xs"
+                >
+                  {Object.entries(arrowLabels).map(([val, label]) => (
+                    <option key={val} value={val} className="bg-[#14161c]">{label}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="space-y-1 text-xs">
+                <div className="flex justify-between">
+                  <span className="text-slate-400">長度 (m)</span>
+                  <span className="text-slate-200 font-mono font-bold">{length.toFixed(1)} m</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="range"
+                    min="1.0"
+                    max="10.0"
+                    step="0.1"
+                    value={length}
+                    onChange={(e) => {
+                      onUpdateElement({
+                        ...arrow,
+                        length: parseFloat(e.target.value)
+                      });
+                    }}
+                    className="flex-1 accent-blue-500 cursor-pointer"
+                  />
+                  <input
+                    type="number"
+                    min="1.0"
+                    max="10.0"
+                    step="0.1"
+                    value={parseFloat(length.toFixed(1))}
+                    onChange={(e) => {
+                      let val = parseFloat(e.target.value);
+                      if (!isNaN(val)) {
+                        if (val < 1.0) val = 1.0;
+                        if (val > 10.0) val = 10.0;
+                        onUpdateElement({
+                          ...arrow,
+                          length: val
+                        });
+                      }
+                    }}
+                    className="w-16 bg-[#1f2229] border border-[#2d3039] px-1 py-0.5 rounded text-white text-right focus:outline-none focus:border-blue-500 font-mono text-xs"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-1 text-xs">
+                <div className="flex justify-between">
+                  <span className="text-slate-400">旋轉偏角 (度)</span>
+                  <span className="text-slate-200 font-mono font-bold">{angleDeg}°</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="range"
+                    min="-180"
+                    max="180"
+                    step="1"
+                    value={angleDeg}
+                    onChange={(e) => {
+                      const rad = (parseFloat(e.target.value) * Math.PI) / 180;
+                      onUpdateElement({
+                        ...arrow,
+                        angle: rad
+                      });
+                    }}
+                    className="flex-1 accent-blue-500 cursor-pointer"
+                  />
+                  <input
+                    type="number"
+                    min="-180"
+                    max="180"
+                    step="1"
+                    value={angleDeg}
+                    onChange={(e) => {
+                      let val = parseFloat(e.target.value);
+                      if (!isNaN(val)) {
+                        if (val < -180) val = -180;
+                        if (val > 180) val = 180;
+                        onUpdateElement({
+                          ...arrow,
+                          angle: (val * Math.PI) / 180
+                        });
+                      }
+                    }}
+                    className="w-16 bg-[#1f2229] border border-[#2d3039] px-1 py-0.5 rounded text-white text-right focus:outline-none focus:border-blue-500 font-mono text-xs"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => {
+                onSaveHistory?.();
+                onDeleteElement(selectedElement.id);
+              }}
+              className="w-full py-2 bg-red-950/20 text-red-400 border border-red-950/40 hover:bg-red-950/40 hover:text-red-350 text-xs rounded transition-colors"
+            >
+              刪除此指向線標記
             </button>
           </div>
         );
