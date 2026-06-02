@@ -2224,23 +2224,57 @@ export default function App() {
       <div className="flex flex-1 min-h-0 w-full relative">
         {/* Left Sidebar (CAD Toolbar / Simulation control) */}
         {appMode === 'cad' ? (
-          <Toolbar 
-            activeTool={activeTool} 
-            setActiveTool={setActiveTool} 
-            onLoadDemo={handleLoadDemo}
-            designVehicle={designVehicle}
-            setDesignVehicle={setDesignVehicle}
-            snapToGrid={snapToGrid}
-            setSnapToGrid={setSnapToGrid}
-            snapToEndpoint={snapToEndpoint}
-            setSnapToEndpoint={setSnapToEndpoint}
-            snapToMidpoint={snapToMidpoint}
-            setSnapToMidpoint={setSnapToMidpoint}
-            snapToNearest={snapToNearest}
-            setSnapToNearest={setSnapToNearest}
-            roadArrowConfig={roadArrowConfig}
-            setRoadArrowConfig={setRoadArrowConfig}
-          />
+          <>
+            <Toolbar 
+              activeTool={activeTool} 
+              setActiveTool={setActiveTool} 
+              onLoadDemo={handleLoadDemo}
+              designVehicle={designVehicle}
+              setDesignVehicle={setDesignVehicle}
+              snapToGrid={snapToGrid}
+              setSnapToGrid={setSnapToGrid}
+              snapToEndpoint={snapToEndpoint}
+              setSnapToEndpoint={setSnapToEndpoint}
+              snapToMidpoint={snapToMidpoint}
+              setSnapToMidpoint={setSnapToMidpoint}
+              snapToNearest={snapToNearest}
+              setSnapToNearest={setSnapToNearest}
+              roadArrowConfig={roadArrowConfig}
+              setRoadArrowConfig={setRoadArrowConfig}
+            />
+            {/* Floating style selector for road_arrow - Rendered outside Toolbar to prevent boundary clipping */}
+            {activeTool === 'road_arrow' && (
+              <div className="flex flex-col gap-1.5 p-2.5 bg-[#1f2229] border border-[#2d3039] rounded-lg w-[115px] absolute left-[153px] top-[290px] z-50 shadow-2xl shadow-black/80 animate-fade-in">
+                <span className="text-[10px] font-bold text-cyan-400 border-b border-[#2d3039]/50 pb-1 text-center">箭頭樣式</span>
+                <div className="flex flex-col gap-1.5 w-full mt-1.5">
+                  {[
+                    { type: 'straight', name: '直行' },
+                    { type: 'left', name: '左轉' },
+                    { type: 'right', name: '右轉' },
+                    { type: 'straight_left', name: '直左' },
+                    { type: 'straight_right', name: '直右' }
+                  ].map(item => (
+                    <button 
+                      key={item.type}
+                      onClick={() => { 
+                        setRoadArrowConfig({
+                          ...roadArrowConfig,
+                          arrowType: item.type
+                        }); 
+                      }} 
+                      className={`px-2 py-1 rounded text-[11px] font-bold cursor-pointer text-left transition-all ${
+                        roadArrowConfig.arrowType === item.type 
+                          ? 'bg-gradient-to-r from-blue-500 to-cyan-500 text-white shadow-md shadow-blue-500/20' 
+                          : 'text-slate-300 hover:bg-[#252830] hover:text-white'
+                      }`} 
+                    >
+                      {item.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </>
         ) : (
           <div 
             id="left-sim-panel" 
