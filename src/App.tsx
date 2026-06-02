@@ -303,7 +303,7 @@ export default function App() {
 
   const [roadArrowConfig, setRoadArrowConfig] = useState({
     arrowType: 'straight' as 'straight' | 'left' | 'right' | 'straight_left' | 'straight_right',
-    length: 6.0,
+    length: 5.0,
     angle: 0 // in radians
   });
 
@@ -2238,6 +2238,8 @@ export default function App() {
             setSnapToMidpoint={setSnapToMidpoint}
             snapToNearest={snapToNearest}
             setSnapToNearest={setSnapToNearest}
+            roadArrowConfig={roadArrowConfig}
+            setRoadArrowConfig={setRoadArrowConfig}
           />
         ) : (
           <div 

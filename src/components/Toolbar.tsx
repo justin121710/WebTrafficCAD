@@ -19,6 +19,8 @@ interface ToolbarProps {
   setSnapToMidpoint: (b: boolean) => void;
   snapToNearest: boolean;
   setSnapToNearest: (b: boolean) => void;
+  roadArrowConfig?: { arrowType: 'straight' | 'left' | 'right' | 'straight_left' | 'straight_right'; length: number; angle: number };
+  setRoadArrowConfig?: (cfg: any) => void;
 }
 
 // Render dynamic custom professional vector Traffic CAD SVGs
@@ -217,7 +219,10 @@ function renderToolIcon(id: CadTool) {
     case 'road_arrow':
       return (
         <svg viewBox="0 0 24 24" className="w-[24px] h-[24px]" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M12 19V5M12 5l-5 5M12 5l5 5" />
+          {/* 直行 */}
+          <path d="M9 19V5M9 5L6 8M9 5l3 3" />
+          {/* 右轉分叉 */}
+          <path d="M9 14Q15 14 15 11V8M15 8l-3 3M15 8l3 3" />
         </svg>
       );
     default:
@@ -238,7 +243,9 @@ export default function Toolbar({
   snapToMidpoint,
   setSnapToMidpoint,
   snapToNearest,
-  setSnapToNearest
+  setSnapToNearest,
+  roadArrowConfig,
+  setRoadArrowConfig
 }: ToolbarProps) {
   
   const categories = [
@@ -359,6 +366,40 @@ export default function Toolbar({
                             >
                               T
                             </button>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Floating style selector for road_arrow */}
+                      {tool.id === 'road_arrow' && isActive && roadArrowConfig && setRoadArrowConfig && (
+                        <div className="flex flex-col gap-1.5 p-2 bg-[#1f2229] border border-[#2d3039] rounded-lg w-[110px] absolute left-[62px] top-0 z-40 shadow-2xl shadow-black/80 animate-fade-in">
+                          <span className="text-[10px] font-bold text-cyan-400 border-b border-[#2d3039]/50 pb-1 text-center">箭頭樣式</span>
+                          <div className="flex flex-col gap-1 w-full">
+                            {[
+                              { type: 'straight', name: '直行' },
+                              { type: 'left', name: '左轉' },
+                              { type: 'right', name: '右轉' },
+                              { type: 'straight_left', name: '直左' },
+                              { type: 'straight_right', name: '直右' }
+                            ].map(item => (
+                              <button 
+                                key={item.type}
+                                onClick={(e) => { 
+                                  e.stopPropagation(); 
+                                  setRoadArrowConfig({
+                                    ...roadArrowConfig,
+                                    arrowType: item.type
+                                  }); 
+                                }} 
+                                className={`px-2 py-1 rounded text-[11px] font-bold cursor-pointer text-left transition-all ${
+                                  roadArrowConfig.arrowType === item.type 
+                                    ? 'bg-gradient-to-r from-blue-500 to-cyan-500 text-white shadow-md shadow-blue-500/20' 
+                                    : 'text-slate-300 hover:bg-[#252830] hover:text-white'
+                                }`} 
+                              >
+                                {item.name}
+                              </button>
+                            ))}
                           </div>
                         </div>
                       )}

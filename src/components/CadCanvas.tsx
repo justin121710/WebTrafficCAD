@@ -1902,6 +1902,10 @@ export default function CadCanvas({
         latestMouseWorldPosRef.current = activeWorldPos;
         return;
       }
+      if (activeHandle.nodeIndex === 30) { // dragging road arrow center (rotation)
+        latestMouseWorldPosRef.current = activeWorldPos;
+        return;
+      }
       if (activeHandle.nodeIndex === 10) { // dragging sketch circle center
         const circ = elements.find(el => el.id === activeHandle.elementId) as any;
         if (circ) {
@@ -3563,7 +3567,7 @@ export default function CadCanvas({
     if (activeTool === 'road_arrow') {
       const newId = `arrow-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
       const stampType = roadArrowConfig?.arrowType || 'straight';
-      const stampLength = roadArrowConfig?.length || 6.0;
+      const stampLength = roadArrowConfig?.length || 5.0;
       const stampAngle = roadArrowConfig?.angle || 0;
 
       const arrowEl: CadElement = {
@@ -4871,7 +4875,7 @@ export default function CadCanvas({
     // Stamp Preview for road_arrow
     if (activeTool === 'road_arrow' && draftPoints.length === 0) {
       const stampType = roadArrowConfig?.arrowType || 'straight';
-      const stampLength = roadArrowConfig?.length || 6.0;
+      const stampLength = roadArrowConfig?.length || 5.0;
       const stampAngle = roadArrowConfig?.angle || 0;
 
       const tempArrow = {
