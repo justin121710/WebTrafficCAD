@@ -1,0 +1,26 @@
+@import "tailwindcss";
+
+/* 自訂全域滾動條樣式，使其與精緻暗色UI風格契合 */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #2d3039;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #474b59;
+}
+
+/* 針對 Firefox 的滾動條樣式 */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #2d3039 transparent;
+}
