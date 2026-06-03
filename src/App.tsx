@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { CadElement, CadTool, IslandElement, TextElement, Waypoint, VehicleConfig, CornerPoints, SimulationState, ControllerMode, Point, PathPoint } from './types';
 import { 
   calculateWidening, 
@@ -2500,17 +2500,17 @@ export default function App() {
         ) : (
           <div 
             id="left-sim-panel" 
-            className="flex flex-col bg-[#14161c] border-r border-[#2d3039] w-[145px] h-full p-2.5 justify-between select-none overflow-y-auto shrink-0 space-y-4"
+            className="flex flex-col bg-[#14161c] border-r border-[#2d3039] w-[110px] h-full p-2 justify-between select-none overflow-y-auto shrink-0 space-y-4"
           >
             <div className="space-y-4">
               {/* SIM Brand Mini Header */}
               <div className="flex flex-col items-center justify-center py-2 border-b border-[#2d3039]/40 mb-1 text-center">
-                <div className="w-[55px] h-[55px] rounded-lg bg-gradient-to-br from-indigo-500 to-purple-500 flex items-center justify-center font-black text-white text-sm shadow-lg shadow-indigo-500/20 mb-1.5 border border-indigo-400/20">
+                <div className="w-[42px] h-[42px] rounded-lg bg-gradient-to-br from-indigo-500 to-purple-500 flex items-center justify-center font-black text-white text-base shadow-lg shadow-indigo-500/20 mb-1.5 border border-indigo-400/20">
                   SIM
                 </div>
-                <span className="text-[10px] font-bold text-indigo-400 tracking-widest uppercase">軌跡模擬</span>
+                <span className="text-xs font-black text-indigo-400 tracking-widest uppercase">軌跡模擬</span>
               </div>
-
+ 
               {/* 選擇按鈕 */}
               <div className="space-y-1">
                 <div className="flex justify-center">
@@ -2520,13 +2520,13 @@ export default function App() {
                       setSimDrawMode('select');
                       setSimIsIntersectionMode(false);
                     }}
-                    className={`w-[115px] py-2 rounded-lg flex items-center justify-center gap-1 transition-all border cursor-pointer text-[10px] font-bold ${
+                    className={`w-full py-2.5 rounded-lg flex flex-col items-center justify-center gap-1.5 transition-all border cursor-pointer text-[11px] font-black ${
                       simDrawMode === 'select' && !simIsIntersectionMode
                         ? 'bg-indigo-950/60 text-[#00FFFF] border-[#00FFFF]/80 shadow-[0_0_8px_rgba(0,255,255,0.25)]'
                         : 'text-slate-400 bg-[#0f1115]/40 border-[#2d3039]/20 hover:border-[#3b4252] hover:bg-[#1f2229] hover:text-slate-200'
                     }`}
                   >
-                    <svg viewBox="0 0 24 24" className="w-[14px] h-[14px]" fill="none" stroke="currentColor" strokeWidth="1.5">
+                    <svg viewBox="0 0 24 24" className="w-[18px] h-[18px]" fill="none" stroke="currentColor" strokeWidth="1.5">
                       <path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z" fill="currentColor" />
                       <path d="M13 13l6 6" />
                     </svg>
@@ -2534,10 +2534,10 @@ export default function App() {
                   </button>
                 </div>
               </div>
-
+ 
               {/* 軌跡路徑模式 */}
               <div className="space-y-1">
-                <div className="text-[9px] font-bold text-slate-500 uppercase tracking-wider text-center border-b border-[#2d3039]/30 pb-0.5">
+                <div className="text-[10px] font-black text-slate-500 uppercase tracking-wider text-center border-b border-[#2d3039]/30 pb-0.5">
                   軌跡路徑
                 </div>
                 <div className="flex flex-col gap-1.5 items-center">
@@ -2555,7 +2555,7 @@ export default function App() {
                         }
                       }
                     }}
-                    className={`w-[115px] py-2 rounded-lg flex items-center justify-center gap-1 transition-all border text-[10px] font-bold ${
+                    className={`w-full py-2.5 rounded-lg flex flex-col items-center justify-center gap-1.5 transition-all border text-[11px] font-black ${
                       simRawPoints.length > 0 && simIsIntersectionMode
                         ? 'opacity-30 cursor-not-allowed text-slate-500 bg-[#0f1115]/20 border-transparent'
                         : !simIsIntersectionMode && simDrawMode !== 'select'
@@ -2564,7 +2564,7 @@ export default function App() {
                     }`}
                     title="自由點擊/拖曳軌跡（可選擇點選、筆刷、鋼筆）"
                   >
-                    <svg viewBox="0 0 24 24" className="w-[13px] h-[13px]" fill="none" stroke="currentColor" strokeWidth="1.5">
+                    <svg viewBox="0 0 24 24" className="w-[18px] h-[18px]" fill="none" stroke="currentColor" strokeWidth="1.5">
                       <path d="M4 18C4 10 10 4 12 12C14 20 20 14 20 6" strokeLinecap="round" strokeLinejoin="round" />
                       <circle cx="4" cy="18" r="1.5" fill="currentColor" stroke="none" />
                       <circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none" />
@@ -2583,7 +2583,7 @@ export default function App() {
                       setSimP3Y(null);
                       setSimIntersectionPickState("p0");
                     }}
-                    className={`w-[115px] py-2 rounded-lg flex items-center justify-center gap-1 transition-all border text-[10px] font-bold ${
+                    className={`w-full py-2.5 rounded-lg flex flex-col items-center justify-center gap-1.5 transition-all border text-[11px] font-black ${
                       simRawPoints.length > 0 && !simIsIntersectionMode
                         ? 'opacity-30 cursor-not-allowed text-slate-500 bg-[#0f1115]/20 border-transparent'
                         : simIsIntersectionMode
@@ -2592,7 +2592,7 @@ export default function App() {
                     }`}
                     title="在路口依照切線比率與偏移距離生成引導軌跡"
                   >
-                    <svg viewBox="0 0 24 24" className="w-[13px] h-[13px]" fill="none" stroke="currentColor" strokeWidth="1.5">
+                    <svg viewBox="0 0 24 24" className="w-[18px] h-[18px]" fill="none" stroke="currentColor" strokeWidth="1.5">
                       <path d="M2 9Q9 9 9 2" strokeLinecap="round" strokeLinejoin="round" />
                       <path d="M15 2Q15 9 22 9" strokeLinecap="round" strokeLinejoin="round" />
                       <path d="M22 15Q15 15 15 22" strokeLinecap="round" strokeLinejoin="round" />
@@ -2602,11 +2602,11 @@ export default function App() {
                   </button>
                 </div>
               </div>
-
+ 
               {/* 自由描繪設定 (條件跳出) */}
               {!simIsIntersectionMode && simDrawMode !== 'select' && (
                 <div className="space-y-1 animate-fade-in">
-                  <div className="text-[9px] font-bold text-slate-500 uppercase tracking-wider text-center border-b border-[#2d3039]/30 pb-0.5">
+                  <div className="text-[10px] font-black text-slate-500 uppercase tracking-wider text-center border-b border-[#2d3039]/30 pb-0.5">
                     描繪選項
                   </div>
                   <div className="grid grid-cols-3 gap-1 p-0.5 bg-[#0a0b0e] border border-[#2d3039] rounded-lg">
@@ -2614,7 +2614,7 @@ export default function App() {
                       type="button"
                       disabled={(simRawPoints.length > 0 && simDrawMode !== 'click') || (editingPathId !== null && simDrawMode !== 'click')}
                       onClick={() => setSimDrawMode('click')}
-                      className={`py-1 text-[9px] font-bold rounded transition-all text-center ${
+                      className={`py-1.5 text-[10px] font-black rounded transition-all text-center ${
                         ((simRawPoints.length > 0 && simDrawMode !== 'click') || (editingPathId !== null && simDrawMode !== 'click'))
                           ? 'opacity-20 cursor-not-allowed text-slate-500'
                           : simDrawMode === 'click'
@@ -2629,7 +2629,7 @@ export default function App() {
                       type="button"
                       disabled={(simRawPoints.length > 0 && simDrawMode !== 'smartpath') || (editingPathId !== null && simDrawMode !== 'smartpath')}
                       onClick={() => setSimDrawMode('smartpath')}
-                      className={`py-1 text-[9px] font-bold rounded transition-all text-center ${
+                      className={`py-1.5 text-[10px] font-black rounded transition-all text-center ${
                         ((simRawPoints.length > 0 && simDrawMode !== 'smartpath') || (editingPathId !== null && simDrawMode !== 'smartpath'))
                           ? 'opacity-20 cursor-not-allowed text-slate-500'
                           : simDrawMode === 'smartpath'
@@ -2644,7 +2644,7 @@ export default function App() {
                       type="button"
                       disabled={(simRawPoints.length > 0 && simDrawMode !== 'drag') || (editingPathId !== null && simDrawMode !== 'drag')}
                       onClick={() => setSimDrawMode('drag')}
-                      className={`py-1 text-[9px] font-bold rounded transition-all text-center ${
+                      className={`py-1.5 text-[10px] font-black rounded transition-all text-center ${
                         ((simRawPoints.length > 0 && simDrawMode !== 'drag') || (editingPathId !== null && simDrawMode !== 'drag'))
                           ? 'opacity-20 cursor-not-allowed text-slate-500'
                           : simDrawMode === 'drag'
@@ -2659,23 +2659,23 @@ export default function App() {
                 </div>
               )}
             </div>
-
+ 
             {/* 圖層顯示偏好區塊放在左側面板最下方 */}
             <div className="space-y-1.5 pt-2 border-t border-[#2d3039]/40 mt-auto select-none">
-              <div className="text-[9px] font-bold text-slate-500 uppercase tracking-wider text-center pb-0.5">
+              <div className="text-[10px] font-black text-slate-500 uppercase tracking-wider text-center pb-0.5">
                 圖層顯示偏好
               </div>
               <div className="flex flex-col gap-1.5 items-center">
                 <button
                   type="button"
                   onClick={() => setSimShowSweptPath(!simShowSweptPath)}
-                  className={`w-[115px] py-1.5 rounded-lg flex items-center justify-start pl-2 gap-1.5 transition-all border text-[9px] font-bold cursor-pointer ${
+                  className={`w-full py-2.5 rounded-lg flex flex-col items-center justify-center gap-1 transition-all border text-[10px] font-black cursor-pointer text-center ${
                     simShowSweptPath
                       ? 'bg-indigo-950/60 text-[#00FFFF] border-[#00FFFF]/80 shadow-[0_0_6px_rgba(0,255,255,0.2)]'
                       : 'text-slate-400 bg-[#0f1115]/40 border-[#2d3039]/20 hover:border-[#3b4252] hover:bg-[#1f2229]'
                   }`}
                 >
-                  <svg viewBox="0 0 24 24" className="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" strokeWidth="1.5">
+                  <svg viewBox="0 0 24 24" className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" strokeWidth="1.5">
                     <path d="M4 10h16M4 14h16" strokeDasharray="2 2" />
                     <path d="M8 6h8v12H8z" opacity="0.3" fill="currentColor" />
                     <path d="M8 6v12M16 6v12" />
@@ -2684,8 +2684,8 @@ export default function App() {
                 </button>
                 
                 {simShowSweptPath && (
-                  <div className="w-[115px] p-1.5 bg-[#0a0b0e] border border-[#2d3039] rounded-md space-y-1 animate-fade-in">
-                    <div className="flex justify-between text-[8px] text-slate-500 font-bold">
+                  <div className="w-full p-1.5 bg-[#0a0b0e] border border-[#2d3039] rounded-md space-y-1 animate-fade-in">
+                    <div className="flex justify-between text-[9px] text-slate-500 font-black">
                       <span>不透明度</span>
                       <span className="font-mono text-indigo-400">{Math.round(simSweptOpacity * 100)}%</span>
                     </div>
@@ -2700,34 +2700,34 @@ export default function App() {
                     />
                   </div>
                 )}
-
+ 
                 <button
                   type="button"
                   onClick={() => setSimShowAxleTracks(!simShowAxleTracks)}
-                  className={`w-[115px] py-1.5 rounded-lg flex items-center justify-start pl-2 gap-1.5 transition-all border text-[9px] font-bold cursor-pointer ${
+                  className={`w-full py-2.5 rounded-lg flex flex-col items-center justify-center gap-1 transition-all border text-[10px] font-black cursor-pointer text-center ${
                     simShowAxleTracks
                       ? 'bg-indigo-950/60 text-[#00FFFF] border-[#00FFFF]/80 shadow-[0_0_6px_rgba(0,255,255,0.2)]'
                       : 'text-slate-400 bg-[#0f1115]/40 border-[#2d3039]/20 hover:border-[#3b4252] hover:bg-[#1f2229]'
                   }`}
                 >
-                  <svg viewBox="0 0 24 24" className="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" strokeWidth="1.5">
+                  <svg viewBox="0 0 24 24" className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" strokeWidth="1.5">
                     <line x1="12" y1="4" x2="12" y2="20" />
                     <circle cx="12" cy="7" r="2" fill="currentColor" />
                     <circle cx="12" cy="17" r="2" fill="currentColor" />
                   </svg>
                   <span>前後軸中心軌跡</span>
                 </button>
-
+ 
                 <button
                   type="button"
                   onClick={() => setSimShowBodyWireframe(!simShowBodyWireframe)}
-                  className={`w-[115px] py-1.5 rounded-lg flex items-center justify-start pl-2 gap-1.5 transition-all border text-[9px] font-bold cursor-pointer ${
+                  className={`w-full py-2.5 rounded-lg flex flex-col items-center justify-center gap-1 transition-all border text-[10px] font-black cursor-pointer text-center ${
                     simShowBodyWireframe
                       ? 'bg-indigo-950/60 text-[#00FFFF] border-[#00FFFF]/80 shadow-[0_0_6px_rgba(0,255,255,0.25)]'
                       : 'text-slate-400 bg-[#0f1115]/40 border-[#2d3039]/20 hover:border-[#3b4252] hover:bg-[#1f2229]'
                   }`}
                 >
-                  <svg viewBox="0 0 24 24" className="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" strokeWidth="1.5">
+                  <svg viewBox="0 0 24 24" className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" strokeWidth="1.5">
                     <rect x="4" y="6" width="16" height="12" rx="1" />
                     <line x1="4" y1="12" x2="20" y2="12" strokeDasharray="2 2" />
                     <line x1="10" y1="6" x2="10" y2="18" />
@@ -2735,18 +2735,18 @@ export default function App() {
                   </svg>
                   <span>連續骨架投影</span>
                 </button>
-
+ 
                 {simIsIntersectionMode && (
                   <button
                     type="button"
                     onClick={() => setSimShowIntersectionHelpers(!simShowIntersectionHelpers)}
-                    className={`w-[115px] py-1.5 rounded-lg flex items-center justify-start pl-2 gap-1.5 transition-all border text-[9px] font-bold cursor-pointer ${
+                    className={`w-full py-2.5 rounded-lg flex flex-col items-center justify-center gap-1 transition-all border text-[10px] font-black cursor-pointer text-center ${
                       simShowIntersectionHelpers
                         ? 'bg-indigo-950/60 text-[#00FFFF] border-[#00FFFF]/80 shadow-[0_0_6px_rgba(0,255,255,0.25)]'
                         : 'text-slate-400 bg-[#0f1115]/40 border-[#2d3039]/20 hover:border-[#3b4252] hover:bg-[#1f2229]'
                     }`}
                   >
-                    <svg viewBox="0 0 24 24" className="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" strokeWidth="1.5">
+                    <svg viewBox="0 0 24 24" className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" strokeWidth="1.5">
                       <path d="M4 12h16M12 4v16" strokeDasharray="2 2" />
                       <path d="M8 8l8 8M16 8l-8 8" />
                     </svg>
@@ -2761,6 +2761,7 @@ export default function App() {
         {/* Central CAD Infinite Canvas */}
         <div className="flex-1 h-full min-w-0 relative flex flex-col">
           <CadCanvas 
+            theme={theme}
             elements={elements}
             onAddElement={handleAddElement}
             onUpdateElement={handleUpdateElement}

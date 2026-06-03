@@ -906,6 +906,7 @@ interface CadCanvasProps {
   selectedElementIds?: string[];
   onSelectElementIdsChange?: (ids: string[]) => void;
   onUpdateElements?: (elements: CadElement[]) => void;
+  theme?: 'dark' | 'light';
 
   // Simulation Mode Props
   appMode?: 'cad' | 'simulation';
@@ -1075,7 +1076,8 @@ export default function CadCanvas({
   simIsCalibrating = false,
   setSimIsCalibrating,
   editingPathId = null,
-  setSimIsDragging
+  setSimIsDragging,
+  theme = 'dark'
 }: CadCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -3899,8 +3901,15 @@ export default function CadCanvas({
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
+    const isLight = theme === 'light';
+    const whiteColor = isLight ? '#1e293b' : '#ffffff';
+    const yellowColor = isLight ? '#b45309' : '#f59e0b';
+    const yellowDashedColor = isLight ? '#b45309' : '#eab308';
+    const primaryLineColor = isLight ? '#1e293b' : '#ffffff';
+    const textDrawColor = isLight ? '#0f172a' : '#e2e8f0';
+
     // Clear Screen
-    ctx.fillStyle = '#101216';
+    ctx.fillStyle = isLight ? '#f8fafc' : '#101216';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
     const { zoom, panX, panY } = viewport;
@@ -3939,7 +3948,7 @@ export default function CadCanvas({
       const endY = Math.ceil(maxYWorld / minorGridInterval) * minorGridInterval;
 
       // Minor Grid (dotted slate)
-      ctx.strokeStyle = '#1a1d24';
+      ctx.strokeStyle = isLight ? 'rgba(148, 163, 184, 0.15)' : '#1a1d24';
       ctx.setLineDash([2, 5]);
       for (let x = startX; x <= endX; x += minorGridInterval) {
         if (x === 0) continue;
@@ -3959,7 +3968,7 @@ export default function CadCanvas({
       }
 
       // Major Grid & Axes
-      ctx.strokeStyle = '#292d38';
+      ctx.strokeStyle = isLight ? 'rgba(148, 163, 184, 0.35)' : '#292d38';
       ctx.setLineDash([]);
       for (let x = Math.floor(minXWorld / majorGridInterval) * majorGridInterval; x <= maxXWorld; x += majorGridInterval) {
         const screenPt = worldToScreen(x, 0);
@@ -3969,7 +3978,7 @@ export default function CadCanvas({
         ctx.stroke();
 
         if (zoom > 4) {
-          ctx.fillStyle = '#525a6c';
+          ctx.fillStyle = isLight ? '#64748b' : '#525a6c';
           ctx.font = '8px monospace';
           ctx.fillText(`${x}m`, screenPt.x + 3, canvas.height - 8);
         }
@@ -3982,7 +3991,7 @@ export default function CadCanvas({
         ctx.stroke();
 
         if (zoom > 4) {
-          ctx.fillStyle = '#525a6c';
+          ctx.fillStyle = isLight ? '#64748b' : '#525a6c';
           ctx.font = '8px monospace';
           ctx.fillText(`${y}m`, 8, screenPt.y - 3);
         }
@@ -3990,7 +3999,7 @@ export default function CadCanvas({
 
       // Primary central axes coordinate crosses
       const origin = worldToScreen(0, 0);
-      ctx.strokeStyle = 'rgba(59, 130, 246, 0.28)';
+      ctx.strokeStyle = isLight ? 'rgba(59, 130, 246, 0.45)' : 'rgba(59, 130, 246, 0.28)';
       ctx.lineWidth = 1.5;
       ctx.beginPath();
       ctx.moveTo(0, origin.y); ctx.lineTo(canvas.width, origin.y);
@@ -4040,7 +4049,7 @@ export default function CadCanvas({
             ctx.stroke();
             ctx.setLineDash([]);
           } else if (el.type === 'yellow_double') {
-            ctx.strokeStyle = '#f59e0b';
+            ctx.strokeStyle = yellowColor;
             ctx.lineWidth = Math.max(1.5, zoom * 0.1);
 
             const leftOffset = getPathOffsetCurves(ref.points, ref.cpLeft, ref.cpRight, 0.08, 25);
@@ -4062,7 +4071,7 @@ export default function CadCanvas({
             });
             ctx.stroke();
           } else if (el.type === 'white_double') {
-            ctx.strokeStyle = '#ffffff';
+            ctx.strokeStyle = primaryLineColor;
             ctx.lineWidth = Math.max(1.5, zoom * 0.1);
 
             const leftOffset = getPathOffsetCurves(ref.points, ref.cpLeft, ref.cpRight, 0.08, 25);
@@ -4085,7 +4094,7 @@ export default function CadCanvas({
             ctx.stroke();
           } else if (el.type === 'white_dashed') {
             const isLeftTurnGuide = (el as any).isLeftTurnGuide;
-            ctx.strokeStyle = '#ffffff';
+            ctx.strokeStyle = primaryLineColor;
             if (isLeftTurnGuide) {
               ctx.lineWidth = Math.max(3.0, zoom * 0.3);
               ctx.setLineDash([zoom * 1.0, zoom * 2.0]);
@@ -4105,7 +4114,7 @@ export default function CadCanvas({
             ctx.setLineDash([]);
           } else if (el.type === 'yellow_dashed') {
             const isLeftTurnGuide = (el as any).isLeftTurnGuide;
-            ctx.strokeStyle = '#eab308'; // yellow color
+            ctx.strokeStyle = yellowDashedColor; // yellow color
             if (isLeftTurnGuide) {
               ctx.lineWidth = Math.max(3.0, zoom * 0.3);
               ctx.setLineDash([zoom * 1.0, zoom * 2.0]);
@@ -4124,7 +4133,7 @@ export default function CadCanvas({
             ctx.stroke();
             ctx.setLineDash([]);
           } else if (el.type === 'white_solid') {
-            ctx.strokeStyle = '#ffffff';
+            ctx.strokeStyle = primaryLineColor;
             // Width 15cm
             ctx.lineWidth = Math.max(2, zoom * 0.15);
 
@@ -4138,7 +4147,7 @@ export default function CadCanvas({
             ctx.stroke();
           } else if (el.type === 'crossing_dashed') {
             // crossing_dashed (30cm wide line, cycle: 1m solid line and 2m gap)
-            ctx.strokeStyle = '#ffffff';
+            ctx.strokeStyle = primaryLineColor;
             ctx.lineWidth = Math.max(3.0, zoom * 0.3);
             ctx.setLineDash([zoom * 1.0, zoom * 2.0]);
 
@@ -4153,7 +4162,7 @@ export default function CadCanvas({
             ctx.setLineDash([]);
           } else if (el.type === 'stop_line') {
             // stop_line (30cm - 40cm wide white solid, we use 35cm/0.35m)
-            ctx.strokeStyle = '#ffffff';
+            ctx.strokeStyle = primaryLineColor;
             ctx.lineWidth = Math.max(3.5, zoom * 0.35);
 
             const segPts = getPathOffsetCurves(ref.points, ref.cpLeft, ref.cpRight, 0, 25);
@@ -4172,7 +4181,7 @@ export default function CadCanvas({
             // 單線寬 10cm (0.1m)，內側間隔 10cm (0.1m) -> 中心間距 20公分 (0.2m) -> 左右各 offset 0.1m
             // 採用標準車道虛線比例（如實線 4m、空白 6m）
             ctx.save();
-            ctx.strokeStyle = '#ffffff';
+            ctx.strokeStyle = primaryLineColor;
             ctx.lineWidth = Math.max(1.0, zoom * 0.1); // 線寬 10公分 (0.1m)
             ctx.setLineDash([zoom * 4.0, zoom * 6.0]); // 4米實線, 6米空白
 
@@ -4247,8 +4256,8 @@ export default function CadCanvas({
             const segPts = getPathOffsetCurves(ref.points, ref.cpLeft, ref.cpRight, 0, 30);
             if (segPts.length >= 2) {
               ctx.save();
-              ctx.fillStyle = '#A9A9A9'; // Engineering gray (#A9A9A9) pavement fill
-              ctx.strokeStyle = '#1e293b'; // 10cm dark gray border
+              ctx.fillStyle = isLight ? '#cbd5e1' : '#A9A9A9'; // Engineering gray pavement fill
+              ctx.strokeStyle = isLight ? '#475569' : '#1e293b'; // 10cm dark gray border
               ctx.lineWidth = Math.max(1.5, zoom * 0.1); // 10cm border
 
               ctx.beginPath();
@@ -4271,7 +4280,7 @@ export default function CadCanvas({
               ctx.restore();
             }
           } else if (el.type === 'BuildingLine') {
-            ctx.strokeStyle = '#00ffff';
+            ctx.strokeStyle = isLight ? '#0891b2' : '#00ffff';
             ctx.lineWidth = 2.5;
 
             const segPts = getPathOffsetCurves(ref.points, ref.cpLeft, ref.cpRight, 0, 25);
@@ -4309,7 +4318,7 @@ export default function CadCanvas({
 
               const isAnchorSelected = selectedAnchorIndices?.includes(j);
               ctx.fillStyle = isAnchorSelected ? '#10b981' : '#06b6d4'; // Emerald green if selected, cyan if regular
-              ctx.strokeStyle = '#ffffff';
+              ctx.strokeStyle = whiteColor;
               ctx.lineWidth = isAnchorSelected ? 2.5 : 1.5;
               ctx.beginPath();
               const size = isAnchorSelected ? 12 : 9;
@@ -4342,7 +4351,7 @@ export default function CadCanvas({
         if (isSelected) {
           ctx.beginPath();
           ctx.fillStyle = '#0e7490';
-          ctx.strokeStyle = '#ffffff';
+          ctx.strokeStyle = whiteColor;
           ctx.lineWidth = 1.5;
           ctx.arc(sCenter.x, sCenter.y, 4, 0, 2 * Math.PI);
           ctx.fill();
@@ -4421,17 +4430,17 @@ export default function CadCanvas({
         });
         ctx.closePath();
         
-        ctx.fillStyle = 'rgba(15, 23, 42, 0.55)';
+        ctx.fillStyle = isLight ? 'rgba(30, 41, 59, 0.12)' : 'rgba(15, 23, 42, 0.55)';
         ctx.fill();
 
-        ctx.strokeStyle = (island.color || '#ffffff');
+        ctx.strokeStyle = (island.color || whiteColor);
         ctx.lineWidth = Math.max(1.5, zoom * 0.1);
         ctx.stroke();
 
         if (island.hasHatching && boundaryPoints.length >= 3) {
           const hatching = generateHatchingLines(boundaryPoints, 0.45, 45);
           
-          ctx.strokeStyle = (island.color || 'rgba(255, 255, 255, 0.75)');
+          ctx.strokeStyle = island.color || (isLight ? 'rgba(30, 41, 59, 0.75)' : 'rgba(255, 255, 255, 0.75)');
           ctx.lineWidth = Math.max(1.5, zoom * 0.12);
           ctx.beginPath();
           hatching.forEach((line) => {
@@ -4469,7 +4478,7 @@ export default function CadCanvas({
 
               const isAnchorSelected = selectedAnchorIndices?.includes(j);
               ctx.fillStyle = isAnchorSelected ? '#10b981' : '#06b6d4'; // Emerald green if selected, cyan if regular
-              ctx.strokeStyle = '#ffffff';
+              ctx.strokeStyle = whiteColor;
               ctx.lineWidth = isAnchorSelected ? 2.5 : 1.5;
               ctx.beginPath();
               const size = isAnchorSelected ? 12 : 9;
@@ -4482,7 +4491,7 @@ export default function CadCanvas({
       } else if (el.type === 'text') {
         const txt = el as TextElement;
         const screenPt = worldToScreen(txt.p.x, txt.p.y);
-        ctx.fillStyle = '#e2e8f0';
+        ctx.fillStyle = textDrawColor;
         const pxFontSize = Math.max(9, txt.fontSize * zoom);
         
         ctx.font = `${pxFontSize}px sans-serif`;
@@ -4650,7 +4659,7 @@ export default function CadCanvas({
 
             const isAnchorSelected = selectedAnchorIndices?.includes(j);
             ctx.fillStyle = isAnchorSelected ? '#10b981' : '#06b6d4'; // Emerald green if selected, cyan if regular
-            ctx.strokeStyle = '#ffffff';
+            ctx.strokeStyle = whiteColor;
             ctx.lineWidth = isAnchorSelected ? 2.5 : 1.5;
             ctx.beginPath();
             const size = isAnchorSelected ? 12 : 9;
@@ -4666,7 +4675,7 @@ export default function CadCanvas({
         const stripes = generateCrosswalkStripes(cw.pA1, cw.pA2, cw.pB1, cw.pB2, stripeWidth, stripeGap);
 
         // Render crosswalk white pillow stripes
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.95)';
+        ctx.fillStyle = isLight ? 'rgba(30, 41, 59, 0.95)' : 'rgba(255, 255, 255, 0.95)';
         
         stripes.forEach((stripe) => {
           ctx.beginPath();
@@ -4717,9 +4726,9 @@ export default function CadCanvas({
 
         ctx.lineCap = 'round';
         ctx.lineJoin = 'round';
-        ctx.strokeStyle = '#ffffff';
+        ctx.strokeStyle = whiteColor;
         ctx.lineWidth = Math.max(1.5, zoom * 0.1); // 10cm standard paint lines
-        ctx.fillStyle = isSelected ? 'rgba(56, 189, 248, 0.22)' : 'rgba(255, 255, 255, 0.05)';
+        ctx.fillStyle = isSelected ? 'rgba(56, 189, 248, 0.22)' : (isLight ? 'rgba(30, 41, 59, 0.05)' : 'rgba(255, 255, 255, 0.05)');
 
         ctx.beginPath();
         ctx.moveTo(0, 0);
@@ -4731,7 +4740,7 @@ export default function CadCanvas({
         ctx.stroke();
 
         if (pk.showSizeLabel !== false && zoom > 7) {
-          ctx.fillStyle = isSelected ? '#38bdf8' : 'rgba(255, 255, 255, 0.55)';
+          ctx.fillStyle = isSelected ? '#38bdf8' : (isLight ? 'rgba(30, 41, 59, 0.65)' : 'rgba(255, 255, 255, 0.55)');
           ctx.font = '9px JetBrains Mono, monospace, sans-serif';
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
@@ -4744,7 +4753,7 @@ export default function CadCanvas({
           const center = getParkingSpaceCenter(pk);
           const hs = worldToScreen(center.x, center.y);
           ctx.fillStyle = '#38bdf8'; // Sky blue handle
-          ctx.strokeStyle = '#ffffff';
+          ctx.strokeStyle = whiteColor;
           ctx.lineWidth = 1.5;
           ctx.beginPath();
           ctx.arc(hs.x, hs.y, 6.5, 0, 2 * Math.PI);
@@ -4759,9 +4768,9 @@ export default function CadCanvas({
           ctx.lineCap = 'round';
           ctx.lineJoin = 'round';
           
-          ctx.strokeStyle = isSelected ? '#38bdf8' : '#ffffff';
+          ctx.strokeStyle = isSelected ? '#38bdf8' : whiteColor;
           ctx.lineWidth = isSelected ? Math.max(2, zoom * 0.08) : Math.max(1, zoom * 0.03);
-          ctx.fillStyle = isSelected ? 'rgba(56, 189, 248, 0.25)' : '#ffffff';
+          ctx.fillStyle = isSelected ? 'rgba(56, 189, 248, 0.25)' : whiteColor;
 
           ctx.beginPath();
           const pStart = worldToScreen(pts[0].x, pts[0].y);
@@ -4778,7 +4787,7 @@ export default function CadCanvas({
           if (isSelected) {
             const hs = worldToScreen(arrow.p.x, arrow.p.y);
             ctx.fillStyle = '#a855f7'; // purple lever
-            ctx.strokeStyle = '#ffffff';
+            ctx.strokeStyle = whiteColor;
             ctx.lineWidth = 1.5;
             ctx.beginPath();
             ctx.arc(hs.x, hs.y, 6.5, 0, 2 * Math.PI);
@@ -4791,7 +4800,7 @@ export default function CadCanvas({
         const ref = getLineBezierRepresentation(zone);
         if (ref) {
           ctx.save();
-          ctx.strokeStyle = isSelected ? 'rgba(56, 189, 248, 0.4)' : 'rgba(255, 255, 255, 0.15)';
+          ctx.strokeStyle = isSelected ? 'rgba(56, 189, 248, 0.4)' : (isLight ? 'rgba(30, 41, 59, 0.15)' : 'rgba(255, 255, 255, 0.15)');
           ctx.lineWidth = 1.0;
           ctx.setLineDash([4, 6]);
           ctx.beginPath();
@@ -4810,9 +4819,9 @@ export default function CadCanvas({
           ctx.save();
           ctx.lineCap = 'round';
           ctx.lineJoin = 'round';
-          ctx.strokeStyle = '#ffffff';
+          ctx.strokeStyle = whiteColor;
           ctx.lineWidth = Math.max(1.5, zoom * 0.1);
-          ctx.fillStyle = isSelected ? 'rgba(56, 189, 248, 0.22)' : 'rgba(255, 255, 255, 0.05)';
+          ctx.fillStyle = isSelected ? 'rgba(56, 189, 248, 0.22)' : (isLight ? 'rgba(30, 41, 59, 0.05)' : 'rgba(255, 255, 255, 0.05)');
 
           const s1 = worldToScreen(slot.corners[0].x, slot.corners[0].y);
           const s2 = worldToScreen(slot.corners[1].x, slot.corners[1].y);
@@ -4829,7 +4838,7 @@ export default function CadCanvas({
           ctx.stroke();
 
           if ((el as any).showSizeLabel !== false && zoom > 7) {
-            ctx.fillStyle = isSelected ? '#38bdf8' : 'rgba(255, 255, 255, 0.55)';
+            ctx.fillStyle = isSelected ? '#38bdf8' : (isLight ? 'rgba(30, 41, 59, 0.65)' : 'rgba(255, 255, 255, 0.55)');
             ctx.font = '9px JetBrains Mono, monospace, sans-serif';
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
@@ -5206,7 +5215,7 @@ export default function CadCanvas({
             ctx.stroke();
             ctx.setLineDash([]);
           } else if (activeTool === 'yellow_double') {
-            ctx.strokeStyle = '#f59e0b';
+            ctx.strokeStyle = yellowColor;
             ctx.lineWidth = Math.max(1.5, zoom * 0.1);
 
             const leftOffset = getPathOffsetCurves(previewPoints, previewCpLeft, previewCpRight, 0.08, 25);
@@ -5228,7 +5237,7 @@ export default function CadCanvas({
             });
             ctx.stroke();
           } else if (activeTool === 'white_double') {
-            ctx.strokeStyle = '#ffffff';
+            ctx.strokeStyle = primaryLineColor;
             ctx.lineWidth = Math.max(1.5, zoom * 0.1);
 
             const leftOffset = getPathOffsetCurves(previewPoints, previewCpLeft, previewCpRight, 0.08, 25);
@@ -5250,7 +5259,7 @@ export default function CadCanvas({
             });
             ctx.stroke();
           } else if (activeTool === 'white_dashed') {
-            ctx.strokeStyle = '#ffffff';
+            ctx.strokeStyle = primaryLineColor;
             ctx.lineWidth = Math.max(1.5, zoom * 0.1);
             ctx.setLineDash([zoom * 4.0, zoom * 6.0]);
 
@@ -5264,7 +5273,7 @@ export default function CadCanvas({
             ctx.stroke();
             ctx.setLineDash([]);
           } else if (activeTool === 'yellow_dashed') {
-            ctx.strokeStyle = '#eab308';
+            ctx.strokeStyle = yellowDashedColor;
             ctx.lineWidth = Math.max(1.5, zoom * 0.1);
             ctx.setLineDash([zoom * 4.0, zoom * 6.0]);
 
@@ -5278,7 +5287,7 @@ export default function CadCanvas({
             ctx.stroke();
             ctx.setLineDash([]);
           } else if (activeTool === 'white_solid') {
-            ctx.strokeStyle = '#ffffff';
+            ctx.strokeStyle = primaryLineColor;
             ctx.lineWidth = Math.max(2, zoom * 0.15);
 
             const segPts = getPathOffsetCurves(previewPoints, previewCpLeft, previewCpRight, 0, 25);
@@ -5290,7 +5299,7 @@ export default function CadCanvas({
             });
             ctx.stroke();
           } else if (activeTool === 'crossing_dashed') {
-            ctx.strokeStyle = '#ffffff';
+            ctx.strokeStyle = primaryLineColor;
             ctx.lineWidth = Math.max(3.0, zoom * 0.3);
             ctx.setLineDash([zoom * 1.0, zoom * 2.0]);
 
@@ -5304,7 +5313,7 @@ export default function CadCanvas({
             ctx.stroke();
             ctx.setLineDash([]);
           } else if (activeTool === 'stop_line') {
-            ctx.strokeStyle = '#ffffff';
+            ctx.strokeStyle = primaryLineColor;
             ctx.lineWidth = Math.max(3.5, zoom * 0.35);
 
             const segPts = getPathOffsetCurves(previewPoints, previewCpLeft, previewCpRight, 0, 25);
@@ -5319,7 +5328,7 @@ export default function CadCanvas({
             drawYieldLineBezier(ctx, previewPoints, previewCpLeft, previewCpRight, 1, zoom, worldToScreen);
           } else if (activeTool === 'reversible_lane') {
             ctx.save();
-            ctx.strokeStyle = '#ffffff';
+            ctx.strokeStyle = primaryLineColor;
             ctx.lineWidth = Math.max(1.0, zoom * 0.1);
             ctx.setLineDash([zoom * 4.0, zoom * 6.0]);
 
@@ -6604,7 +6613,7 @@ export default function CadCanvas({
 
         // A. Draw Tractor Body
         ctx.fillStyle = 'rgba(30, 41, 59, 0.9)'; // Slate fill
-        ctx.strokeStyle = '#ffffff'; // White outline (主車車身邊框白色化)
+        ctx.strokeStyle = whiteColor; // Dynamic outline (主車車身邊框白色/暗色化)
         ctx.lineWidth = 2;
         ctx.beginPath();
         ctx.moveTo(sFl.x, sFl.y);
@@ -6658,7 +6667,7 @@ export default function CadCanvas({
           const stRl = simToScreen(state.trailerCorners.rl.x, state.trailerCorners.rl.y);
 
           ctx.fillStyle = 'rgba(71, 85, 105, 0.9)'; // Slate-600 fill
-          ctx.strokeStyle = '#f59e0b'; // Amber outline
+          ctx.strokeStyle = yellowColor; // Amber outline
           ctx.lineWidth = 2;
           ctx.beginPath();
           ctx.moveTo(stFl.x, stFl.y);
@@ -6674,7 +6683,7 @@ export default function CadCanvas({
             x: (stFl.x + stFr.x) / 2,
             y: (stFl.y + stFr.y) / 2
           };
-          ctx.strokeStyle = '#f59e0b';
+          ctx.strokeStyle = yellowColor;
           ctx.lineWidth = 1.5;
           ctx.beginPath();
           const sRearAxle = simToScreen(state.rearAxle.x, state.rearAxle.y);
