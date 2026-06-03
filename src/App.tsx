@@ -35,7 +35,7 @@ import {
 import Toolbar from './components/Toolbar';
 import PropsPanel from './components/PropsPanel';
 import CadCanvas from './components/CadCanvas';
-import { Compass, Info, CheckCircle2, RotateCcw, RotateCw, Image as ImageIcon, Download, Upload, Trash2, Ruler, X, Grid, ChevronLeft, ChevronRight, Play, Pause, Sliders, Layers, Truck, Lock, Unlock, GitBranch, MapPin, Save, FolderOpen } from 'lucide-react';
+import { Compass, Info, CheckCircle2, RotateCcw, RotateCw, Image as ImageIcon, Download, Upload, Trash2, Ruler, X, Grid, ChevronLeft, ChevronRight, Play, Pause, Sliders, Layers, Truck, Lock, Unlock, GitBranch, MapPin, Save, FolderOpen, ChevronDown } from 'lucide-react';
 
 export default function App() {
   // App Mode State: 'cad' | 'simulation' (預設為 'cad')
@@ -892,6 +892,8 @@ export default function App() {
   const [bgImage, setBgImage] = useState<any>(null);
   const [exportedImage, setExportedImage] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [isExportDropdownOpen, setIsExportDropdownOpen] = useState<boolean>(false);
+
 
 
   // Snapping options
@@ -966,7 +968,21 @@ export default function App() {
     handleSimUndoLastNode, handleSimLockCurrentPath, handleSimClear
   ]);
 
+  // 點擊外部時關閉匯出選單
+  useEffect(() => {
+    if (!isExportDropdownOpen) return;
+    const handleOutsideClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (!target.closest('#export-dropdown-container')) {
+        setIsExportDropdownOpen(false);
+      }
+    };
+    window.addEventListener('click', handleOutsideClick);
+    return () => window.removeEventListener('click', handleOutsideClick);
+  }, [isExportDropdownOpen]);
+
   const saveHistory = (currentElements: CadElement[]) => {
+
     try {
       const clone = JSON.parse(JSON.stringify(currentElements));
       setHistoryStack(prev => [...prev, clone]);
@@ -1955,16 +1971,10 @@ export default function App() {
       {/* CAD App Elegant Top Header */}
       <header className="flex items-center justify-between px-6 py-3 bg-[#14161c] border-b border-[#2d3039] shrink-0 select-none h-12 z-20">
         <div className="flex items-center gap-3">
-          <div className="flex items-center justify-center p-1.5 rounded bg-blue-600/10 border border-blue-500/20 text-blue-500">
-            <Compass className="w-5 h-5" />
-          </div>
           <div>
             <h1 className="text-sm font-black tracking-wider uppercase bg-gradient-to-r from-blue-500 to-indigo-300 bg-clip-text text-transparent">
-              WebTrafficCAD <span className="text-[9px] bg-blue-900/40 text-blue-400 px-1.5 py-0.5 rounded font-mono uppercase">v1.3.0-Beta</span>
+              WebTrafficCAD
             </h1>
-            <p className="text-[9px] text-slate-500 font-mono tracking-tight">
-              ROADWAY GEOMETRY & PAVEMENT MARKING ENGINE
-            </p>
           </div>
         </div>
 
@@ -2042,22 +2052,20 @@ export default function App() {
           <button
             id="save-project-btn"
             onClick={handleSaveProject}
-            className="flex items-center gap-1.5 h-8 px-3 text-xs rounded bg-emerald-500/10 border border-emerald-500/30 hover:bg-emerald-500/20 text-emerald-400 font-medium cursor-pointer transition-all shrink-0"
-            title="將當前畫布、背景圖與模擬軌跡儲存為 JSON 專案檔"
+            className="flex items-center justify-center w-8 h-8 rounded bg-emerald-500/10 border border-emerald-500/30 hover:bg-emerald-500/20 text-emerald-400 cursor-pointer transition-all shrink-0"
+            title="儲存專案 (JSON)"
           >
-            <Save className="w-3.5 h-3.5 text-emerald-400" />
-            <span>儲存專案 (JSON)</span>
+            <Save className="w-4 h-4 text-emerald-400" />
           </button>
 
           {/* Load Project (JSON) */}
           <button
             id="load-project-btn"
             onClick={() => fileInputRef.current?.click()}
-            className="flex items-center gap-1.5 h-8 px-3 text-xs rounded bg-amber-500/10 border border-amber-500/30 hover:bg-amber-500/20 text-amber-400 font-medium cursor-pointer transition-all shrink-0"
-            title="載入先前儲存的 JSON 專案檔以繼續編輯"
+            className="flex items-center justify-center w-8 h-8 rounded bg-amber-500/10 border border-amber-500/30 hover:bg-amber-500/20 text-amber-400 cursor-pointer transition-all shrink-0"
+            title="開啟專案 (JSON)"
           >
-            <FolderOpen className="w-3.5 h-3.5 text-amber-400" />
-            <span>開啟專案 (JSON)</span>
+            <FolderOpen className="w-4 h-4 text-amber-400" />
           </button>
           <input
             type="file"
@@ -2069,27 +2077,43 @@ export default function App() {
 
           <div className="h-4 w-px bg-[#2d3039]" />
 
-          {/* Export PNG */}
-          <button
-            id="export-png-direct-btn"
-            onClick={handleExportPNG}
-            className="flex items-center gap-1.5 h-8 px-3 text-xs rounded bg-[#1f2229] border border-[#2d3039] hover:bg-slate-800 text-blue-400 font-medium cursor-pointer transition-all shrink-0"
-            title="匯出高解析度 PNG 工程圖檔"
-          >
-            <ImageIcon className="w-3.5 h-3.5 text-blue-400" />
-            <span>匯出工程圖 (PNG)</span>
-          </button>
-
-          {/* Export DXF */}
-          <button
-            id="export-dxf-btn"
-            onClick={handleExportDXF}
-            className="flex items-center gap-1.5 h-8 px-3 text-xs rounded bg-[#1f2229] border border-[#2d3039] hover:bg-slate-800 text-blue-400 font-medium cursor-pointer transition-all shrink-0"
-            title="匯出 AutoCAD DXF 向量圖檔，支援標準 CAD 圖層與 Unicode 格式"
-          >
-            <Download className="w-3.5 h-3.5 text-blue-400" />
-            <span>匯出 AutoCAD DXF 向量檔</span>
-          </button>
+          {/* Export Dropdown */}
+          <div id="export-dropdown-container" className="relative shrink-0">
+            <button
+              id="export-dropdown-toggle-btn"
+              onClick={() => setIsExportDropdownOpen(!isExportDropdownOpen)}
+              className="flex items-center gap-1.5 h-8 px-3 text-xs rounded bg-[#1f2229] border border-[#2d3039] hover:bg-slate-800 text-blue-400 font-medium cursor-pointer transition-all shrink-0"
+              title="匯出工程圖 (PNG) 或 AutoCAD DXF 向量檔"
+            >
+              <Download className="w-3.5 h-3.5 text-blue-400" />
+              <span>匯出</span>
+              <ChevronDown className="w-3 h-3 text-blue-400/70" />
+            </button>
+            {isExportDropdownOpen && (
+              <div className="absolute right-0 top-full mt-1.5 w-48 rounded bg-[#1f2229] border border-[#2d3039] shadow-xl py-1 z-30">
+                <button
+                  onClick={() => {
+                    handleExportPNG();
+                    setIsExportDropdownOpen(false);
+                  }}
+                  className="flex items-center gap-2 w-full px-3 py-2 text-xs text-left text-slate-350 hover:bg-slate-800 hover:text-white transition-all cursor-pointer"
+                >
+                  <ImageIcon className="w-3.5 h-3.5 text-blue-400" />
+                  <span>匯出工程圖 (PNG)</span>
+                </button>
+                <button
+                  onClick={() => {
+                    handleExportDXF();
+                    setIsExportDropdownOpen(false);
+                  }}
+                  className="flex items-center gap-2 w-full px-3 py-2 text-xs text-left text-slate-350 hover:bg-slate-800 hover:text-white transition-all cursor-pointer"
+                >
+                  <Download className="w-3.5 h-3.5 text-blue-400" />
+                  <span>匯出 AutoCAD DXF 向量檔</span>
+                </button>
+              </div>
+            )}
+          </div>
 
           <div className="h-4 w-px bg-[#2d3039]" />
 
