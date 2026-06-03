@@ -6896,7 +6896,8 @@ export default function CadCanvas({
     simFirstVecStart, simFirstVecEnd, simIsIntersectionMode, simP0X, simP0Y, simP0Angle, simP3X, simP3Y, simP3Angle, 
     simP1RatioPercent, simP2RatioPercent, simIntersectionPickState, simShowIntersectionHelpers, simEnableOutswing, 
     simI1RatioPercent, simI1OffsetDistance, simI2RatioPercent, simI2OffsetDistance, simStartExtensionM, simEndExtensionM, 
-    simIsCalibrating
+    simIsCalibrating,
+    theme
   ]);
 
   // Curvature check for floating top error warnings
