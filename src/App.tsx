@@ -35,7 +35,7 @@ import {
 import Toolbar from './components/Toolbar';
 import PropsPanel from './components/PropsPanel';
 import CadCanvas from './components/CadCanvas';
-import { Compass, Info, CheckCircle2, RotateCcw, RotateCw, Image as ImageIcon, Download, Upload, Trash2, Ruler, X, Grid, ChevronLeft, ChevronRight, Play, Pause, Sliders, Layers, Truck, Lock, Unlock, GitBranch, MapPin, Save, FolderOpen, ChevronDown } from 'lucide-react';
+import { Compass, Info, CheckCircle2, RotateCcw, RotateCw, Image as ImageIcon, Download, Upload, Trash2, Ruler, X, Grid, ChevronLeft, ChevronRight, Play, Pause, Sliders, Layers, Truck, Lock, Unlock, GitBranch, MapPin, Save, FolderOpen, ChevronDown, Sun, Moon } from 'lucide-react';
 
 export default function App() {
   // App Mode State: 'cad' | 'simulation' (預設為 'cad')
@@ -893,6 +893,8 @@ export default function App() {
   const [exportedImage, setExportedImage] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isExportDropdownOpen, setIsExportDropdownOpen] = useState<boolean>(false);
+  const [theme, setTheme] = useState<'dark' | 'light'>('dark');
+
 
 
 
@@ -1966,46 +1968,46 @@ export default function App() {
   };
 
   return (
-    <div id="webtrafficcad-app-root" className="flex flex-col h-screen w-screen bg-[#0a0b0e] text-slate-300 overflow-hidden font-sans">
+    <div id="webtrafficcad-app-root" className={`flex flex-col h-screen w-screen bg-[#0a0b0e] text-slate-300 overflow-hidden font-sans ${theme === 'light' ? 'theme-light' : ''}`}>
       
       {/* CAD App Elegant Top Header */}
       <header className="flex items-center justify-between px-6 py-3 bg-[#14161c] border-b border-[#2d3039] shrink-0 select-none h-12 z-20">
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-6">
           <div>
             <h1 className="text-sm font-black tracking-wider uppercase bg-gradient-to-r from-blue-500 to-indigo-300 bg-clip-text text-transparent">
               WebTrafficCAD
             </h1>
           </div>
-        </div>
 
-        {/* App Mode Switcher (左右合體按鈕) */}
-        <div className="flex items-center bg-[#0a0b0e] border border-[#2d3039] rounded-lg p-0.5 select-none shrink-0">
-          <button
-            onClick={() => setAppMode('cad')}
-            className={`px-4 py-1 text-xs font-bold rounded-md transition-all cursor-pointer ${
-              appMode === 'cad'
-                ? 'bg-blue-600 text-white shadow-sm font-extrabold'
-                : 'text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            CAD 繪圖
-          </button>
-          <button
-            onClick={() => {
-              setAppMode('simulation');
-              setSimDrawMode('select');
-              setActiveTool('select'); // 預設進去為選擇或無操作狀態
-              setSelectedElement(null);
-              setSelectedElementIds([]);
-            }}
-            className={`px-4 py-1 text-xs font-bold rounded-md transition-all cursor-pointer ${
-              appMode === 'simulation'
-                ? 'bg-blue-600 text-white shadow-sm font-extrabold'
-                : 'text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            車流軌跡模擬
-          </button>
+          {/* App Mode Switcher (左右合體按鈕) */}
+          <div className="flex items-center bg-[#0a0b0e] border border-[#2d3039] rounded-lg p-0.5 select-none shrink-0">
+            <button
+              onClick={() => setAppMode('cad')}
+              className={`px-4 py-1 text-xs font-bold rounded-md transition-all cursor-pointer ${
+                appMode === 'cad'
+                  ? 'bg-blue-600 text-white shadow-sm font-extrabold'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              CAD 繪圖
+            </button>
+            <button
+              onClick={() => {
+                setAppMode('simulation');
+                setSimDrawMode('select');
+                setActiveTool('select'); // 預設進去為選擇或無操作狀態
+                setSelectedElement(null);
+                setSelectedElementIds([]);
+              }}
+              className={`px-4 py-1 text-xs font-bold rounded-md transition-all cursor-pointer ${
+                appMode === 'simulation'
+                  ? 'bg-blue-600 text-white shadow-sm font-extrabold'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              車流軌跡模擬
+            </button>
+          </div>
         </div>
 
         {/* Global Control Group: Undo, Redo, Exports, and Background Image Management */}
@@ -2426,6 +2428,17 @@ export default function App() {
               </button>
             </div>
           )}
+
+          <div className="h-4 w-px bg-[#2d3039]" />
+
+          {/* Theme switcher */}
+          <button
+            onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+            className="flex items-center justify-center w-8 h-8 rounded bg-[#1f2229] border border-[#2d3039] hover:bg-slate-800 text-slate-350 cursor-pointer transition-all shrink-0 ml-1"
+            title={theme === 'dark' ? "切換至亮色主題" : "切換至暗色主題"}
+          >
+            {theme === 'dark' ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4 text-indigo-400" />}
+          </button>
         </div>
       </header>
 

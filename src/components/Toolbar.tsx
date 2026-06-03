@@ -265,7 +265,7 @@ export default function Toolbar({
       ]
     },
     {
-      title: "線標",
+      title: "標線",
       items: [
         { id: 'yellow_double' as CadTool, desc: '雙黃實線（世界座標 10cm 寬 + 10cm 間隔，分向限制線）' },
         { id: 'white_double' as CadTool, desc: '雙白實線（15cm雙白實線，禁止變換車道線）' },
@@ -296,12 +296,12 @@ export default function Toolbar({
   return (
     <div 
       id="left-toolbar" 
-      className="flex flex-col bg-[#14161c] border-r border-[#2d3039] w-[145px] h-full p-2 justify-between select-none overflow-y-auto shrink-0"
+      className="flex flex-col bg-[#14161c] border-r border-[#2d3039] w-[110px] h-full p-2 justify-between select-none overflow-y-auto shrink-0"
     >
       <div className="space-y-4">
         {/* CAD Brand Mini Header */}
         <div className="flex flex-col items-center justify-center py-2 border-b border-[#2d3039]/40 mb-1 text-center">
-          <div className="w-[55px] h-[55px] rounded-lg bg-gradient-to-br from-blue-500 to-cyan-500 flex items-center justify-center font-black text-white text-base shadow-lg shadow-blue-500/20 mb-1.5 border border-blue-400/20">
+          <div className="w-[42px] h-[42px] rounded-lg bg-gradient-to-br from-blue-500 to-cyan-500 flex items-center justify-center font-black text-white text-sm shadow-lg shadow-blue-500/20 mb-1.5 border border-blue-400/20">
             CAD
           </div>
           <span className="text-[10px] font-bold text-slate-500 tracking-widest uppercase">Traffic</span>
@@ -312,7 +312,7 @@ export default function Toolbar({
           <button
             id="tool-btn-select"
             onClick={() => setActiveTool('select')}
-            className={`w-[55px] h-[55px] rounded-lg flex items-center justify-center transition-all cursor-pointer border ${
+            className={`w-[42px] h-[42px] rounded-lg flex items-center justify-center transition-all cursor-pointer border ${
               activeTool === 'select'
                 ? 'bg-blue-950/60 text-[#00FFFF] border-[#00FFFF]/80 shadow-[0_0_8px_rgba(0,255,255,0.25)]'
                 : 'text-slate-400 bg-[#0f1115]/30 border-[#2d3039]/20 hover:bg-[#1f2229] hover:text-slate-200 hover:border-[#2d3039]'
@@ -338,7 +338,7 @@ export default function Toolbar({
                       <button
                         id={`tool-btn-${tool.id}`}
                         onClick={() => setActiveTool(tool.id)}
-                        className={`w-[55px] h-[55px] rounded-lg flex items-center justify-center transition-all border cursor-pointer ${
+                        className={`w-[42px] h-[42px] rounded-lg flex items-center justify-center transition-all border cursor-pointer ${
                           isActive 
                             ? 'bg-blue-950/60 text-[#00FFFF] border-[#00FFFF]/80 shadow-[0_0_8px_rgba(0,255,255,0.25)]' 
                             : 'text-slate-400 bg-[#0f1115]/40 border-[#2d3039]/20 hover:border-[#3b4252] hover:bg-[#1f2229] hover:text-slate-200'
@@ -350,7 +350,7 @@ export default function Toolbar({
 
                       {/* Smart Vehicle selectors inside the grid if smart_path is active */}
                       {tool.id === 'smart_path' && isActive && (
-                        <div className="col-span-2 mt-1 p-1 bg-cyan-950/20 border border-cyan-800/30 rounded flex flex-col items-center gap-1 w-[100px] absolute -left-[22.5px] top-15 z-10 shadow-xl shadow-black/80 animate-fade-in">
+                        <div className="col-span-2 mt-1 p-1 bg-cyan-950/20 border border-cyan-800/30 rounded flex flex-col items-center gap-1 w-[100px] absolute left-1/2 -translate-x-1/2 top-[46px] z-10 shadow-xl shadow-black/80 animate-fade-in">
                           <span className="text-[8px] font-bold text-cyan-400 leading-none">車種模擬</span>
                           <div className="flex gap-1.5 justify-center w-full">
                             <button 
@@ -388,5 +388,6 @@ export default function Toolbar({
         </div>
       </div>
     </div>
+
   );
 }

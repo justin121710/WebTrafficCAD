@@ -6197,6 +6197,52 @@ export default function CadCanvas({
           ctx.restore();
         }
 
+        // 車流軌跡模擬的鋼筆與點擊繪圖預覽線
+        if (simRawPoints.length > 0 && (simDrawMode === 'smartpath' || simDrawMode === 'click')) {
+          ctx.save();
+          ctx.strokeStyle = 'rgba(99, 102, 241, 0.6)'; // 預覽線顏色 (indigo)
+          ctx.lineWidth = 1.5;
+          ctx.setLineDash([3, 3]);
+
+          const lastPt = simRawPoints[simRawPoints.length - 1];
+          const sStart = simToScreen(lastPt.x, lastPt.y);
+          const sEnd = simToScreen(mouseWorld.x * simConfig.scale, mouseWorld.y * simConfig.scale);
+
+          // 如果是 smartpath 並且最後一個點有 handleOut，則繪製貝茲曲線預覽
+          if (simDrawMode === 'smartpath' && lastPt.handleOut && (lastPt.handleOut.x !== 0 || lastPt.handleOut.y !== 0)) {
+            const A = { x: lastPt.x, y: lastPt.y };
+            const B = { x: lastPt.x + lastPt.handleOut.x, y: lastPt.y + lastPt.handleOut.y };
+            // 下一個點（滑鼠點）尚未決定手柄，所以 C 和 D 都重合在滑鼠點上
+            const C = { x: mouseWorld.x * simConfig.scale, y: mouseWorld.y * simConfig.scale };
+            const D = C;
+            
+            // 將 A, B, C, D 縮放到物理座標以進行 sampleCubicBezier
+            const scale = simConfig.scale;
+            const bPts = sampleCubicBezier(
+              { x: A.x / scale, y: A.y / scale },
+              { x: B.x / scale, y: B.y / scale },
+              { x: C.x / scale, y: C.y / scale },
+              { x: D.x / scale, y: D.y / scale },
+              20
+            );
+
+            ctx.beginPath();
+            bPts.forEach((pt, idx) => {
+              const s = simToScreen(pt.x * scale, pt.y * scale);
+              if (idx === 0) ctx.moveTo(s.x, s.y);
+              else ctx.lineTo(s.x, s.y);
+            });
+            ctx.stroke();
+          } else {
+            // 普通折線預覽
+            ctx.beginPath();
+            ctx.moveTo(sStart.x, sStart.y);
+            ctx.lineTo(sEnd.x, sEnd.y);
+            ctx.stroke();
+          }
+          ctx.restore();
+        }
+
         simRawPoints.forEach((wp, idx) => {
           const sAnchor = simToScreen(wp.x, wp.y);
 
