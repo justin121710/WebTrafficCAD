@@ -35,7 +35,7 @@ import {
 import Toolbar from './components/Toolbar';
 import PropsPanel from './components/PropsPanel';
 import CadCanvas from './components/CadCanvas';
-import { Compass, Info, CheckCircle2, RotateCcw, RotateCw, Image as ImageIcon, Download, Upload, Trash2, Ruler, X, Grid, ChevronLeft, ChevronRight, Play, Pause, Sliders, Layers, Truck, Lock, Unlock, GitBranch, MapPin } from 'lucide-react';
+import { Compass, Info, CheckCircle2, RotateCcw, RotateCw, Image as ImageIcon, Download, Upload, Trash2, Ruler, X, Grid, ChevronLeft, ChevronRight, Play, Pause, Sliders, Layers, Truck, Lock, Unlock, GitBranch, MapPin, Save, FolderOpen } from 'lucide-react';
 
 export default function App() {
   // App Mode State: 'cad' | 'simulation' (預設為 'cad')
@@ -891,6 +891,8 @@ export default function App() {
   const [designVehicle, setDesignVehicle] = useState<'passenger' | 'semi_trailer' | 'articulated'>('semi_trailer');
   const [bgImage, setBgImage] = useState<any>(null);
   const [exportedImage, setExportedImage] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
 
   // Snapping options
   const [snapToGrid, setSnapToGrid] = useState<boolean>(false);
@@ -1182,8 +1184,160 @@ export default function App() {
     }
   };
 
+  // 儲存整個專案狀態為 JSON
+  const handleSaveProject = () => {
+    try {
+      const projectData = {
+        version: '1.0.0',
+        appMode,
+        cad: {
+          elements,
+          R2,
+          designVehicle,
+        },
+        bgImage,
+        simulation: {
+          simConfig,
+          simControllerMode,
+          simRawPoints,
+          simIsIntersectionMode,
+          simP0X,
+          simP0Y,
+          simP0Angle,
+          simP3X,
+          simP3Y,
+          simP3Angle,
+          simP1RatioPercent,
+          simP2RatioPercent,
+          simEnableOutswing,
+          simI1RatioPercent,
+          simI1OffsetDistance,
+          simI2RatioPercent,
+          simI2OffsetDistance,
+          simStartExtensionM,
+          simEndExtensionM,
+          simLockedPaths,
+        },
+        settings: {
+          snapToGrid,
+          snapToEndpoint,
+          snapToMidpoint,
+          snapToNearest,
+          showGrid,
+          minorGridInterval,
+          majorGridInterval,
+        }
+      };
+
+      const jsonString = JSON.stringify(projectData, null, 2);
+      const blob = new Blob([jsonString], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `WebTrafficCAD_Project_${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      
+      showToast('專案已成功儲存！', 'success');
+    } catch (e) {
+      console.error(e);
+      showToast('儲存專案時發生錯誤！', 'error');
+    }
+  };
+
+  // 匯入 JSON 專案檔
+  const handleLoadProject = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const json = JSON.parse(e.target?.result as string);
+        
+        if (!json || !json.cad || !Array.isArray(json.cad.elements)) {
+          showToast('無效的專案檔案格式！', 'error');
+          return;
+        }
+
+        // 復原狀態
+        if (json.appMode) setAppMode(json.appMode);
+        
+        // CAD 狀態
+        if (json.cad.elements) {
+          setElements(json.cad.elements);
+          setHistoryStack([]);
+          setRedoStack([]);
+        }
+        if (typeof json.cad.R2 === 'number') setR2(json.cad.R2);
+        if (json.cad.designVehicle) setDesignVehicle(json.cad.designVehicle);
+
+        // 背景底圖
+        if (json.bgImage !== undefined) {
+          setBgImage(json.bgImage);
+        }
+
+        // 模擬軌跡狀態
+        if (json.simulation) {
+          const sim = json.simulation;
+          if (sim.simConfig) setSimConfig(sim.simConfig);
+          if (sim.simControllerMode) setSimControllerMode(sim.simControllerMode);
+          if (sim.simRawPoints) setSimRawPoints(sim.simRawPoints);
+          if (typeof sim.simIsIntersectionMode === 'boolean') setSimIsIntersectionMode(sim.simIsIntersectionMode);
+          if (sim.simP0X !== undefined) setSimP0X(sim.simP0X);
+          if (sim.simP0Y !== undefined) setSimP0Y(sim.simP0Y);
+          if (typeof sim.simP0Angle === 'number') setSimP0Angle(sim.simP0Angle);
+          if (sim.simP3X !== undefined) setSimP3X(sim.simP3X);
+          if (sim.simP3Y !== undefined) setSimP3Y(sim.simP3Y);
+          if (typeof sim.simP3Angle === 'number') setSimP3Angle(sim.simP3Angle);
+          if (typeof sim.simP1RatioPercent === 'number') setSimP1RatioPercent(sim.simP1RatioPercent);
+          if (typeof sim.simP2RatioPercent === 'number') setSimP2RatioPercent(sim.simP2RatioPercent);
+          if (typeof sim.simEnableOutswing === 'boolean') setSimEnableOutswing(sim.simEnableOutswing);
+          if (typeof sim.simI1RatioPercent === 'number') setSimI1RatioPercent(sim.simI1RatioPercent);
+          if (typeof sim.simI1OffsetDistance === 'number') setSimI1OffsetDistance(sim.simI1OffsetDistance);
+          if (typeof sim.simI2RatioPercent === 'number') setSimI2RatioPercent(sim.simI2RatioPercent);
+          if (typeof sim.simI2OffsetDistance === 'number') setSimI2OffsetDistance(sim.simI2OffsetDistance);
+          if (typeof sim.simStartExtensionM === 'number') setSimStartExtensionM(sim.simStartExtensionM);
+          if (typeof sim.simEndExtensionM === 'number') setSimEndExtensionM(sim.simEndExtensionM);
+          if (Array.isArray(sim.simLockedPaths)) setSimLockedPaths(sim.simLockedPaths);
+        }
+
+        // 其他設定
+        if (json.settings) {
+          const s = json.settings;
+          if (typeof s.snapToGrid === 'boolean') setSnapToGrid(s.snapToGrid);
+          if (typeof s.snapToEndpoint === 'boolean') setSnapToEndpoint(s.snapToEndpoint);
+          if (typeof s.snapToMidpoint === 'boolean') setSnapToMidpoint(s.snapToMidpoint);
+          if (typeof s.snapToNearest === 'boolean') setSnapToNearest(s.snapToNearest);
+          if (typeof s.showGrid === 'boolean') setShowGrid(s.showGrid);
+          if (typeof s.minorGridInterval === 'number') setMinorGridInterval(s.minorGridInterval);
+          if (typeof s.majorGridInterval === 'number') setMajorGridInterval(s.majorGridInterval);
+        }
+
+        // 重設選擇狀態
+        setSelectedElement(null);
+        setSelectedElementIds([]);
+        setSelectedAnchorIndices([]);
+        setEditingPathId(null);
+        setSimCurrentStepIndex(0);
+        simFractionalStepRef.current = 0;
+        setSimIsPlaying(false);
+
+        showToast('專案已成功匯入！', 'success');
+      } catch (err) {
+        console.error(err);
+        showToast('解析專案檔案失敗，請確保是合法的 JSON 專案檔！', 'error');
+      }
+    };
+    reader.readAsText(file);
+    event.target.value = '';
+  };
+
   // Export CAD Geometry as vector text AutoCAD DXF file trigger
   const handleExportDXF = () => {
+
     if (elements.length === 0) {
       showToast('當前畫布為空，無幾何資料可以匯出為 DXF！', 'error');
       return;
@@ -1881,6 +2035,37 @@ export default function App() {
           >
             <RotateCw className="w-4 h-4 text-slate-400" />
           </button>
+
+          <div className="h-4 w-px bg-[#2d3039]" />
+
+          {/* Save Project (JSON) */}
+          <button
+            id="save-project-btn"
+            onClick={handleSaveProject}
+            className="flex items-center gap-1.5 h-8 px-3 text-xs rounded bg-emerald-500/10 border border-emerald-500/30 hover:bg-emerald-500/20 text-emerald-400 font-medium cursor-pointer transition-all shrink-0"
+            title="將當前畫布、背景圖與模擬軌跡儲存為 JSON 專案檔"
+          >
+            <Save className="w-3.5 h-3.5 text-emerald-400" />
+            <span>儲存專案 (JSON)</span>
+          </button>
+
+          {/* Load Project (JSON) */}
+          <button
+            id="load-project-btn"
+            onClick={() => fileInputRef.current?.click()}
+            className="flex items-center gap-1.5 h-8 px-3 text-xs rounded bg-amber-500/10 border border-amber-500/30 hover:bg-amber-500/20 text-amber-400 font-medium cursor-pointer transition-all shrink-0"
+            title="載入先前儲存的 JSON 專案檔以繼續編輯"
+          >
+            <FolderOpen className="w-3.5 h-3.5 text-amber-400" />
+            <span>開啟專案 (JSON)</span>
+          </button>
+          <input
+            type="file"
+            ref={fileInputRef}
+            accept=".json"
+            onChange={handleLoadProject}
+            style={{ display: 'none' }}
+          />
 
           <div className="h-4 w-px bg-[#2d3039]" />
 
