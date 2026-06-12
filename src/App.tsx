@@ -207,6 +207,8 @@ export default function App() {
   const [simShowAxleTracks, setSimShowAxleTracks] = useState<boolean>(true);
   const [simShowBodyWireframe, setSimShowBodyWireframe] = useState<boolean>(true);
   const [simSweptOpacity, setSimSweptOpacity] = useState<number>(0.1);
+  const [simWheelTracksOpacity, setSimWheelTracksOpacity] = useState<number>(0.45);
+  const [simAxleTracksOpacity, setSimAxleTracksOpacity] = useState<number>(1.0);
 
   // 繪製與拖曳狀態
   const [simDraggingWaypointIndex, setSimDraggingWaypointIndex] = useState<number | null>(null);
@@ -2822,7 +2824,13 @@ export default function App() {
           minorGridInterval={minorGridInterval}
           majorGridInterval={majorGridInterval}
           onSelectLockedPath={handleSelectLockedPath}
-          
+          onDeselectAll={() => {
+            setSelectedElement(null);
+            if (appMode === 'simulation') {
+              setEditingPathId(null);
+            }
+          }}
+
            // Simulation Props
            appMode={appMode}
            simConfig={simConfig}
@@ -2848,6 +2856,8 @@ export default function App() {
            editingPathId={editingPathId}
            setSimIsDragging={setSimIsDragging}
           simSweptOpacity={simSweptOpacity}
+          simWheelTracksOpacity={simWheelTracksOpacity}
+          simAxleTracksOpacity={simAxleTracksOpacity}
           simDraggingWaypointIndex={simDraggingWaypointIndex}
           setSimDraggingWaypointIndex={setSimDraggingWaypointIndex}
           simDraggingHandleType={simDraggingHandleType}
@@ -3030,6 +3040,20 @@ export default function App() {
                 setParkingZoneConfig={setParkingZoneConfig}
                 roadArrowConfig={roadArrowConfig}
                 setRoadArrowConfig={setRoadArrowConfig}
+                onAddElement={handleAddElement}
+                appMode={appMode}
+                simShowSweptPath={simShowSweptPath}
+                setSimShowSweptPath={setSimShowSweptPath}
+                simShowCornerTracks={simShowCornerTracks}
+                setSimShowCornerTracks={setSimShowCornerTracks}
+                simShowAxleTracks={simShowAxleTracks}
+                setSimShowAxleTracks={setSimShowAxleTracks}
+                simSweptOpacity={simSweptOpacity}
+                setSimSweptOpacity={setSimSweptOpacity}
+                simWheelTracksOpacity={simWheelTracksOpacity}
+                setSimWheelTracksOpacity={setSimWheelTracksOpacity}
+                simAxleTracksOpacity={simAxleTracksOpacity}
+                setSimAxleTracksOpacity={setSimAxleTracksOpacity}
                 onClearSelectedAnchors={() => setSelectedAnchorIndices([])}
                 onTranslateSelectedAnchors={(dx, dy) => {
                   if (!selectedElement) return;

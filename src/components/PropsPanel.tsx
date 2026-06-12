@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { CadElement, ThreeCenterCurveElement, IslandElement, TextElement, Point2D } from '../types';
-import { calculateWidening, distance, sampleCubicBezier, getMaxSteeringAngleForPath, generateParkingZoneSlots, offsetSegment, getPathOffsetCurves } from '../geometry';
+import { calculateWidening, distance, sampleCubicBezier, getMaxSteeringAngleForPath, generateParkingZoneSlots, offsetSegment, offsetBezierPath } from '../geometry';
 import { 
   Compass, 
   HelpCircle, 
@@ -237,6 +237,23 @@ interface PropsPanelProps {
   setParkingZoneConfig?: (cfg: any) => void;
   roadArrowConfig?: { arrowType: 'straight' | 'left' | 'right' | 'straight_left' | 'straight_right', length: number, angle: number };
   setRoadArrowConfig?: (cfg: any) => void;
+
+  // App mode (for context-sensitive panels)
+  appMode?: string;
+
+  // Simulation layer visibility & opacity
+  simShowSweptPath?: boolean;
+  setSimShowSweptPath?: (v: boolean) => void;
+  simShowCornerTracks?: boolean;
+  setSimShowCornerTracks?: (v: boolean) => void;
+  simShowAxleTracks?: boolean;
+  setSimShowAxleTracks?: (v: boolean) => void;
+  simSweptOpacity?: number;
+  setSimSweptOpacity?: (v: number) => void;
+  simWheelTracksOpacity?: number;
+  setSimWheelTracksOpacity?: (v: number) => void;
+  simAxleTracksOpacity?: number;
+  setSimAxleTracksOpacity?: (v: number) => void;
 }
 
 export default function PropsPanel({
@@ -260,6 +277,19 @@ export default function PropsPanel({
   setParkingZoneConfig,
   roadArrowConfig,
   setRoadArrowConfig,
+  appMode,
+  simShowSweptPath = true,
+  setSimShowSweptPath,
+  simShowCornerTracks = true,
+  setSimShowCornerTracks,
+  simShowAxleTracks = true,
+  setSimShowAxleTracks,
+  simSweptOpacity = 0.12,
+  setSimSweptOpacity,
+  simWheelTracksOpacity = 0.45,
+  setSimWheelTracksOpacity,
+  simAxleTracksOpacity = 1.0,
+  setSimAxleTracksOpacity,
 }: PropsPanelProps) {
   const [nudgeStep, setNudgeStep] = useState<number>(0.1);
   const [offsetDistance, setOffsetDistance] = useState<number>(3.5);
@@ -268,33 +298,26 @@ export default function PropsPanel({
     if (!onAddElement) return;
     onSaveHistory?.();
     const newId = `${el.type}-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
-    
     const line = el as any;
+
+    // Simple 2-point straight segment (p1/p2 only, no multi-anchor bezier)
     if (line.p1 && line.p2 && (!line.points || line.points.length === 0)) {
-      const offset = offsetSegment(line.p1, line.p2, distM);
-      const newEl = {
-        ...line,
-        id: newId,
-        p1: offset.p1,
-        p2: offset.p2
-      };
-      onAddElement(newEl);
+      const off = offsetSegment(line.p1, line.p2, distM);
+      onAddElement({ ...line, id: newId, p1: off.p1, p2: off.p2 });
       return;
     }
 
+    // Multi-anchor Bezier path — translate anchors + control handles by the
+    // per-anchor bisector normal, preserving the full bezier curve shape.
     if (line.points && line.points.length >= 2) {
-      const cpL = line.cpLeft || line.points;
-      const cpR = line.cpRight || line.points;
-      const offsetPts = getPathOffsetCurves(line.points, cpL, cpR, distM, 25);
-      
-      const newEl = {
-        ...line,
-        id: newId,
-        points: offsetPts,
-        cpLeft: offsetPts,
-        cpRight: offsetPts
-      };
-      onAddElement(newEl);
+      // Fall back to degeneate straight handles when the element lacks cp arrays
+      const cpL: Point2D[] = line.cpLeft  ?? line.points.map((p: Point2D) => ({ ...p }));
+      const cpR: Point2D[] = line.cpRight ?? line.points.map((p: Point2D) => ({ ...p }));
+
+      const { points: newPts, cpLeft: newCpL, cpRight: newCpR } =
+        offsetBezierPath(line.points, cpL, cpR, distM);
+
+      onAddElement({ ...line, id: newId, points: newPts, cpLeft: newCpL, cpRight: newCpR });
     }
   };
   
@@ -2746,6 +2769,91 @@ export default function PropsPanel({
           </div>
           {renderSelectedElementProps()}
         </div>
+
+        {/* Simulation Layer Preferences — visible in simulation mode */}
+        {appMode === 'simulation' && (
+          <div className="pt-3 space-y-2 border-t border-[#2d3039]">
+            <div className="flex items-center gap-1.5 mb-2">
+              <Layers className="w-3.5 h-3.5 text-slate-500" />
+              <h4 className="text-[11px] font-bold uppercase tracking-wider text-slate-500">圖層顯示偏好</h4>
+            </div>
+
+            {/* Swept Path */}
+            <div className="space-y-1">
+              <div className="flex items-center justify-between">
+                <label className="text-[11px] text-slate-400">掃掠包絡線</label>
+                <button
+                  onClick={() => setSimShowSweptPath?.(!simShowSweptPath)}
+                  className={`relative inline-flex h-4 w-8 items-center rounded-full transition-colors ${simShowSweptPath ? 'bg-indigo-600' : 'bg-slate-600'}`}
+                >
+                  <span className={`inline-block h-3 w-3 transform rounded-full bg-white transition-transform ${simShowSweptPath ? 'translate-x-4' : 'translate-x-1'}`} />
+                </button>
+              </div>
+              {simShowSweptPath && (
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] text-slate-500 w-10">不透明</span>
+                  <input
+                    type="range" min={0} max={100} step={1}
+                    value={Math.round(simSweptOpacity * 100)}
+                    onChange={e => setSimSweptOpacity?.(Number(e.target.value) / 100)}
+                    className="flex-1 h-1 accent-indigo-500"
+                  />
+                  <span className="text-[10px] text-slate-400 w-7 text-right">{Math.round(simSweptOpacity * 100)}%</span>
+                </div>
+              )}
+            </div>
+
+            {/* Corner (Wheel) Tracks */}
+            <div className="space-y-1">
+              <div className="flex items-center justify-between">
+                <label className="text-[11px] text-slate-400">輪胎軌跡線</label>
+                <button
+                  onClick={() => setSimShowCornerTracks?.(!simShowCornerTracks)}
+                  className={`relative inline-flex h-4 w-8 items-center rounded-full transition-colors ${simShowCornerTracks ? 'bg-indigo-600' : 'bg-slate-600'}`}
+                >
+                  <span className={`inline-block h-3 w-3 transform rounded-full bg-white transition-transform ${simShowCornerTracks ? 'translate-x-4' : 'translate-x-1'}`} />
+                </button>
+              </div>
+              {simShowCornerTracks && (
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] text-slate-500 w-10">不透明</span>
+                  <input
+                    type="range" min={0} max={100} step={1}
+                    value={Math.round(simWheelTracksOpacity * 100)}
+                    onChange={e => setSimWheelTracksOpacity?.(Number(e.target.value) / 100)}
+                    className="flex-1 h-1 accent-indigo-500"
+                  />
+                  <span className="text-[10px] text-slate-400 w-7 text-right">{Math.round(simWheelTracksOpacity * 100)}%</span>
+                </div>
+              )}
+            </div>
+
+            {/* Axle Tracks */}
+            <div className="space-y-1">
+              <div className="flex items-center justify-between">
+                <label className="text-[11px] text-slate-400">軸心軌跡線</label>
+                <button
+                  onClick={() => setSimShowAxleTracks?.(!simShowAxleTracks)}
+                  className={`relative inline-flex h-4 w-8 items-center rounded-full transition-colors ${simShowAxleTracks ? 'bg-indigo-600' : 'bg-slate-600'}`}
+                >
+                  <span className={`inline-block h-3 w-3 transform rounded-full bg-white transition-transform ${simShowAxleTracks ? 'translate-x-4' : 'translate-x-1'}`} />
+                </button>
+              </div>
+              {simShowAxleTracks && (
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] text-slate-500 w-10">不透明</span>
+                  <input
+                    type="range" min={0} max={100} step={1}
+                    value={Math.round(simAxleTracksOpacity * 100)}
+                    onChange={e => setSimAxleTracksOpacity?.(Number(e.target.value) / 100)}
+                    className="flex-1 h-1 accent-indigo-500"
+                  />
+                  <span className="text-[10px] text-slate-400 w-7 text-right">{Math.round(simAxleTracksOpacity * 100)}%</span>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
 
       </div>
     </div>

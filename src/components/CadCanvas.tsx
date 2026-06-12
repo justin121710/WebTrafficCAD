@@ -976,6 +976,8 @@ interface CadCanvasProps {
   simShowAxleTracks?: boolean;
   simShowBodyWireframe?: boolean;
   simSweptOpacity?: number;
+  simWheelTracksOpacity?: number;
+  simAxleTracksOpacity?: number;
   simDraggingWaypointIndex?: number | null;
   setSimDraggingWaypointIndex?: (idx: number | null) => void;
   simDraggingHandleType?: "anchor" | "handleIn" | "handleOut" | null;
@@ -989,6 +991,7 @@ interface CadCanvasProps {
   simClickStartHeadingRef?: React.MutableRefObject<number | null>;
   simFractionalStepRef?: React.MutableRefObject<number>;
   onSelectLockedPath?: (id: string) => void;
+  onDeselectAll?: () => void;
 
   // Intersection simulation props
   simIsIntersectionMode?: boolean;
@@ -1057,6 +1060,7 @@ export default function CadCanvas({
   onSelectElementIdsChange,
   onUpdateElements,
   onSelectLockedPath,
+  onDeselectAll,
 
   // Simulation Props
   appMode = 'cad',
@@ -1081,6 +1085,8 @@ export default function CadCanvas({
   simShowAxleTracks = true,
   simShowBodyWireframe = true,
   simSweptOpacity = 0.12,
+  simWheelTracksOpacity = 0.45,
+  simAxleTracksOpacity = 1.0,
   simDraggingWaypointIndex = null,
   setSimDraggingWaypointIndex,
   simDraggingHandleType = null,
@@ -1223,6 +1229,7 @@ export default function CadCanvas({
   const detectionRefPointRef = useRef<Point2D | null>(null);
   const latestMouseWorldPosRef = useRef<Point2D | null>(null);
   const latestElementsRef = useRef(elements);
+  const pointerDownScreenPosRef = useRef<{ x: number; y: number } | null>(null);
 
   useEffect(() => {
     latestElementsRef.current = elements;
@@ -2511,6 +2518,7 @@ export default function CadCanvas({
     const rect = canvasRef.current.getBoundingClientRect();
     const sx = e.clientX - rect.left;
     const sy = e.clientY - rect.top;
+    pointerDownScreenPosRef.current = { x: sx, y: sy };
 
     if (appMode === 'simulation') {
       if (e.button === 1 || (e.button === 0 && spacePressed)) {
@@ -2692,6 +2700,14 @@ export default function CadCanvas({
               }
               return;
             }
+          }
+        }
+        // Empty canvas click in sim select mode — deselect if not panning
+        {
+          const downPos = pointerDownScreenPosRef.current;
+          const moved = downPos && Math.hypot(sx - downPos.x, sy - downPos.y) > 5;
+          if (!moved) {
+            onDeselectAll?.();
           }
         }
         return;
@@ -3526,7 +3542,11 @@ export default function CadCanvas({
         }
       });
 
-      onSelectElement(selected);
+      const downPos = pointerDownScreenPosRef.current;
+      const movedFarEnough = downPos && Math.hypot(sx - downPos.x, sy - downPos.y) > 5;
+      if (selected !== null || !movedFarEnough) {
+        onSelectElement(selected);
+      }
       if (setSelectedAnchorIndices) {
         setSelectedAnchorIndices([]);
       }
@@ -6488,6 +6508,7 @@ export default function CadCanvas({
         // D. 繪製已鎖定軌跡的 Corner 輪胎/角點軌跡線 (Corner Tracks)
         if (!isEditing && simShowCornerTracks && lp.trajectory && lp.trajectory.length > 1) {
           ctx.save();
+          ctx.globalAlpha = simWheelTracksOpacity;
           ctx.lineWidth = 1;
           ctx.setLineDash([2, 3]);
           ctx.strokeStyle = `rgba(${colorRgb}, 0.45)`;
@@ -6987,6 +7008,7 @@ export default function CadCanvas({
       // 5. 繪製 Corner 輪胎/角點軌跡線 (Corner Tracks)
       if (simShowCornerTracks && simTrajectory && simTrajectory.length > 1) {
         ctx.save();
+        ctx.globalAlpha = simWheelTracksOpacity;
         ctx.lineWidth = 1;
         ctx.setLineDash([2, 3]);
 
@@ -7059,6 +7081,7 @@ export default function CadCanvas({
       // 6. 繪製前後軸中心軌跡 (Axle Tracks)
       if (simShowAxleTracks && simTrajectory && simTrajectory.length > 1) {
         ctx.save();
+        ctx.globalAlpha = simAxleTracksOpacity;
         ctx.lineWidth = 1.2;
         const stepsToTrack = simTrajectory.slice(0, simCurrentStepIndex + 1);
 
@@ -7530,7 +7553,7 @@ export default function CadCanvas({
     // Simulation Modes dependencies to drive fluid rendering
     appMode, simConfig, simControllerMode, simRawPoints, simDrawMode, simIsPlaying, simCurrentStepIndex, simTrajectory, 
     simInterpolatedPath, simLockedPaths, simThemeColor, simShowSweptPath, simShowCornerTracks, simShowAxleTracks, 
-    simShowBodyWireframe, simSweptOpacity, simBodyOpacity, simDraggingWaypointIndex, simDraggingHandleType, simIsDraggingFirstVec, 
+    simShowBodyWireframe, simSweptOpacity, simWheelTracksOpacity, simAxleTracksOpacity, simBodyOpacity, simDraggingWaypointIndex, simDraggingHandleType, simIsDraggingFirstVec, 
     simFirstVecStart, simFirstVecEnd, simIsIntersectionMode, simP0X, simP0Y, simP0Angle, simP3X, simP3Y, simP3Angle, 
     simP1RatioPercent, simP2RatioPercent, simIntersectionPickState, simShowIntersectionHelpers, simEnableOutswing, 
     simI1RatioPercent, simI1OffsetDistance, simI2RatioPercent, simI2OffsetDistance, simStartExtensionM, simEndExtensionM, 
