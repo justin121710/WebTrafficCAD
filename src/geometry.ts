@@ -750,30 +750,42 @@ export function offsetBezierPath(
   if (n < 2) return { points, cpLeft, cpRight };
 
   // Per-anchor bisector normals (90° CCW from the average travel direction).
+  // For degenerate handles (coincident with anchor), fall back to adjacent anchors.
   const normals: Point2D[] = points.map((pt, i) => {
     let tangent: Point2D;
 
+    const isDegenerate = (cp: Point2D | undefined, ref: Point2D) =>
+      !cp || (Math.abs(cp.x - ref.x) < 1e-9 && Math.abs(cp.y - ref.y) < 1e-9);
+
     if (i === 0) {
-      // Outgoing: anchor → right control handle (or next anchor when degenerate)
-      const cp = cpRight[0];
-      const candidate = cp && (cp.x !== pt.x || cp.y !== pt.y) ? cp : points[1];
+      const cpR = cpRight[0];
+      const candidate = !isDegenerate(cpR, pt) ? cpR! : points[1];
       tangent = { x: candidate.x - pt.x, y: candidate.y - pt.y };
     } else if (i === n - 1) {
-      // Incoming: left control handle → anchor (or prev anchor when degenerate)
-      const cp = cpLeft[n - 1];
-      const candidate = cp && (cp.x !== pt.x || cp.y !== pt.y) ? cp : points[n - 2];
+      const cpL = cpLeft[n - 1];
+      const candidate = !isDegenerate(cpL, pt) ? cpL! : points[n - 2];
       tangent = { x: pt.x - candidate.x, y: pt.y - candidate.y };
     } else {
-      // Bisector of incoming (cpLeft[i] → anchor) and outgoing (anchor → cpRight[i])
-      const cpIn  = cpLeft[i]  ?? points[i - 1];
-      const cpOut = cpRight[i] ?? points[i + 1];
+      // Incoming: use cpLeft[i] if non-degenerate, else use previous anchor
+      const cpIn  = !isDegenerate(cpLeft[i], pt)  ? cpLeft[i]!  : points[i - 1];
+      // Outgoing: use cpRight[i] if non-degenerate, else use next anchor
+      const cpOut = !isDegenerate(cpRight[i], pt) ? cpRight[i]! : points[i + 1];
       const tIn  = normalize({ x: pt.x - cpIn.x,  y: pt.y - cpIn.y  });
       const tOut = normalize({ x: cpOut.x - pt.x, y: cpOut.y - pt.y });
       const avg  = { x: tIn.x + tOut.x, y: tIn.y + tOut.y };
+      // If tIn and tOut are anti-parallel (sharp 180° turn), use tOut
       tangent = Math.hypot(avg.x, avg.y) > 1e-6 ? avg : tOut;
     }
 
     const t = normalize(tangent);
+    // Guard: if tangent is still zero (collinear degenerate), try chord
+    if (Math.hypot(t.x, t.y) < 1e-9) {
+      const chord = i < n - 1
+        ? { x: points[i + 1].x - pt.x, y: points[i + 1].y - pt.y }
+        : { x: pt.x - points[i - 1].x, y: pt.y - points[i - 1].y };
+      const tc = normalize(chord);
+      return { x: -tc.y, y: tc.x };
+    }
     return { x: -t.y, y: t.x }; // 90° CCW normal
   });
 

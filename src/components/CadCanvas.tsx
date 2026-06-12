@@ -6617,6 +6617,50 @@ export default function CadCanvas({
           }
           ctx.restore();
         }
+
+        // F. 繪製已鎖定軌跡的前後軸中心軌跡 (Axle Tracks)
+        if (!isEditing && simShowAxleTracks && lp.trajectory && lp.trajectory.length > 1) {
+          ctx.save();
+          ctx.globalAlpha = simAxleTracksOpacity;
+          ctx.lineWidth = 1.2;
+          ctx.setLineDash([]);
+
+          // Rear axle — 紅色
+          ctx.strokeStyle = `rgba(${colorRgb}, 0.7)`;
+          ctx.beginPath();
+          lp.trajectory.forEach((state: any, idx: number) => {
+            if (!state.rearAxle) return;
+            const pt = simToScreen(state.rearAxle.x, state.rearAxle.y);
+            if (idx === 0) ctx.moveTo(pt.x, pt.y);
+            else ctx.lineTo(pt.x, pt.y);
+          });
+          ctx.stroke();
+
+          // Front axle — 略淺色
+          ctx.strokeStyle = `rgba(${colorRgb}, 0.45)`;
+          ctx.beginPath();
+          lp.trajectory.forEach((state: any, idx: number) => {
+            if (!state.frontAxle) return;
+            const pt = simToScreen(state.frontAxle.x, state.frontAxle.y);
+            if (idx === 0) ctx.moveTo(pt.x, pt.y);
+            else ctx.lineTo(pt.x, pt.y);
+          });
+          ctx.stroke();
+
+          // Trailer rear axle (if applicable)
+          if (lp.config?.enableTrailer) {
+            ctx.strokeStyle = `rgba(${colorRgb}, 0.35)`;
+            ctx.beginPath();
+            lp.trajectory.forEach((state: any, idx: number) => {
+              if (!state.trailerRearAxle) return;
+              const pt = simToScreen(state.trailerRearAxle.x, state.trailerRearAxle.y);
+              if (idx === 0) ctx.moveTo(pt.x, pt.y);
+              else ctx.lineTo(pt.x, pt.y);
+            });
+            ctx.stroke();
+          }
+          ctx.restore();
+        }
       });
     }
 
@@ -7083,7 +7127,9 @@ export default function CadCanvas({
         ctx.save();
         ctx.globalAlpha = simAxleTracksOpacity;
         ctx.lineWidth = 1.2;
-        const stepsToTrack = simTrajectory.slice(0, simCurrentStepIndex + 1);
+        // Show up to current step, but always show at least 2 points so the line is visible
+        const trackEnd = Math.max(simCurrentStepIndex + 1, 2);
+        const stepsToTrack = simTrajectory.slice(0, trackEnd);
 
         // Rear Axle (The standard followed curve path)
         ctx.strokeStyle = '#ef4444'; // 紅色後軸中心線

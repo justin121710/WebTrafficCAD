@@ -2827,7 +2827,17 @@ export default function App() {
           onDeselectAll={() => {
             setSelectedElement(null);
             if (appMode === 'simulation') {
+              // Save current editing state back to locked path before clearing,
+              // to prevent orphaned simRawPoints creating duplicate paths later.
+              if (editingPathId && simRawPoints.length > 0) {
+                setSimLockedPaths(prev => prev.map(path =>
+                  path.id === editingPathId
+                    ? { ...path, rawPoints: [...simRawPoints], trajectory: [...simTrajectory], config: { ...simConfig } }
+                    : path
+                ));
+              }
               setEditingPathId(null);
+              setSimRawPoints([]);
             }
           }}
 
