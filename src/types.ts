@@ -21,7 +21,10 @@ export type CadTool =
   | 'bicycle_lane'    // Custom pink bicycle lanes
   | 'reversible_lane' // Double white dashed lines with 10cm gap
   | 'parking_zone'    // Multi-slot parking generator along a path
-  | 'road_arrow';     // Road markings direction arrows
+  | 'road_arrow'      // Road markings direction arrows
+  | 'measurement'     // Distance measuring tool
+  | 'angular_dimension' // Angle dimensioning tool
+  | 'arc_3point';      // 3-point arc drawing tool
 
 export interface Point2D {
   x: number; // in meters (World coordinate)
@@ -36,7 +39,7 @@ export interface ViewportState {
 
 export interface BaseElement {
   id: string;
-  type: 'guideline' | 'yellow_double' | 'white_double' | 'white_dashed' | 'yellow_dashed' | 'white_solid' | 'three_center_curve' | 'island' | 'text' | 'smart_path' | 'sketch_circle' | 'crosswalk' | 'BuildingLine' | 'crossing_dashed' | 'stop_line' | 'yield_line' | 'Sidewalk' | 'parking_space' | 'bicycle_lane' | 'reversible_lane' | 'parking_zone' | 'road_arrow';
+  type: 'guideline' | 'yellow_double' | 'white_double' | 'white_dashed' | 'yellow_dashed' | 'white_solid' | 'three_center_curve' | 'island' | 'text' | 'smart_path' | 'sketch_circle' | 'crosswalk' | 'BuildingLine' | 'crossing_dashed' | 'stop_line' | 'yield_line' | 'Sidewalk' | 'parking_space' | 'bicycle_lane' | 'reversible_lane' | 'parking_zone' | 'road_arrow' | 'measurement' | 'angular_dimension';
   color?: string;
   lineWidth?: number; // in meters or pixels
 }
@@ -166,6 +169,24 @@ export interface RoadArrowElement extends BaseElement {
   angle: number; // in radians
 }
 
+export interface MeasurementElement extends BaseElement {
+  type: 'measurement';
+  points: Point2D[]; // Contains p1 and p2
+  cpLeft?: Point2D[];
+  cpRight?: Point2D[];
+}
+
+export interface AngularDimensionElement extends BaseElement {
+  type: 'angular_dimension';
+  center: Point2D;
+  pStart1: Point2D;
+  pStart2: Point2D;
+  angleDeg: number;
+  points?: Point2D[]; // To keep array structure compatible with BaseElement
+  cpLeft?: Point2D[];
+  cpRight?: Point2D[];
+}
+
 export type CadElement = 
   | LineElement 
   | ThreeCenterCurveElement 
@@ -178,7 +199,9 @@ export type CadElement =
   | ParkingSpaceElement
   | BicycleLaneElement
   | ParkingZoneElement
-  | RoadArrowElement;
+  | RoadArrowElement
+  | MeasurementElement
+  | AngularDimensionElement;
 
 export interface SnapTarget {
   point: Point2D;
@@ -227,6 +250,7 @@ export interface VehicleConfig {
   Oft?: number;      // Trailer front overhang (m) - distance from hitch point forward
   Ort?: number;      // Trailer rear overhang (m) - distance from trailer axle backward
   maxSteerLimit?: number; // Maximum steering angle limit in degrees
+  reverse?: boolean; // Whether the vehicle is reversing in active simulation
 }
 
 export interface CornerPoints {

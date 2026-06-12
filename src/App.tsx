@@ -35,7 +35,31 @@ import {
 import Toolbar from './components/Toolbar';
 import PropsPanel from './components/PropsPanel';
 import CadCanvas from './components/CadCanvas';
-import { Compass, Info, CheckCircle2, RotateCcw, RotateCw, Image as ImageIcon, Download, Upload, Trash2, Ruler, X, Grid, ChevronLeft, ChevronRight, Play, Pause, Sliders, Layers, Truck, Lock, Unlock, GitBranch, MapPin, Save, FolderOpen, ChevronDown, Sun, Moon, PenTool, Paintbrush } from 'lucide-react';
+import { Compass, Info, CheckCircle2, RotateCcw, RotateCw, Image as ImageIcon, Download, Upload, Trash2, Ruler, X, Grid, ChevronLeft, ChevronRight, Play, Pause, Sliders, Layers, Truck, Lock, Unlock, GitBranch, MapPin, Save, FolderOpen, ChevronDown, PenTool, Paintbrush } from 'lucide-react';
+
+const normalizeColor = (c: string): string => {
+  if (!c) return '#6366f1';
+  if (c.startsWith('#')) return c;
+  const mapping: Record<string, string> = {
+    indigo: '#6366f1',
+    emerald: '#10b981',
+    amber: '#f59e0b',
+    rose: '#f43f5e',
+    sky: '#0ea5e9'
+  };
+  return mapping[c] || '#6366f1';
+};
+
+const getDarkerColor = (hex: string): string => {
+  const normalized = normalizeColor(hex);
+  let r = parseInt(normalized.slice(1, 3), 16);
+  let g = parseInt(normalized.slice(3, 5), 16);
+  let b = parseInt(normalized.slice(5, 7), 16);
+  r = Math.round(r * 0.7);
+  g = Math.round(g * 0.7);
+  b = Math.round(b * 0.7);
+  return `rgb(${r}, ${g}, ${b})`;
+};
 
 export default function App() {
   // App Mode State: 'cad' | 'simulation' (預設為 'cad')
@@ -182,7 +206,7 @@ export default function App() {
   const [simShowCornerTracks, setSimShowCornerTracks] = useState<boolean>(true);
   const [simShowAxleTracks, setSimShowAxleTracks] = useState<boolean>(true);
   const [simShowBodyWireframe, setSimShowBodyWireframe] = useState<boolean>(true);
-  const [simSweptOpacity, setSimSweptOpacity] = useState<number>(0.2);
+  const [simSweptOpacity, setSimSweptOpacity] = useState<number>(0.1);
 
   // 繪製與拖曳狀態
   const [simDraggingWaypointIndex, setSimDraggingWaypointIndex] = useState<number | null>(null);
@@ -894,7 +918,6 @@ export default function App() {
   const [exportedImage, setExportedImage] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isExportDropdownOpen, setIsExportDropdownOpen] = useState<boolean>(false);
-  const [theme, setTheme] = useState<'dark' | 'light'>('dark');
 
 
 
@@ -913,11 +936,10 @@ export default function App() {
   const [isSnapSettingsOpen, setIsSnapSettingsOpen] = useState<boolean>(false);
 
   // SIM 面板彈出控制狀態
-  const [isSweptPathSettingsOpen, setIsSweptPathSettingsOpen] = useState<boolean>(false);
   const [activeColorPickerPathId, setActiveColorPickerPathId] = useState<string | null>(null);
 
   // 更新已鎖定軌跡的顏色
-  const handleUpdatePathColor = (pathId: string, color: "indigo" | "emerald" | "amber" | "rose" | "sky") => {
+  const handleUpdatePathColor = (pathId: string, color: string) => {
     if (pathId === editingPathId) {
       // 正在編輯的軌跡：更新當前主題色
       setSimThemeColor(color);
@@ -1013,19 +1035,6 @@ export default function App() {
     window.addEventListener('click', handleOutsideClick);
     return () => window.removeEventListener('click', handleOutsideClick);
   }, [isSimDrawModeDropdownOpen]);
-
-  // 點擊外部時關閉車流包絡線設定面板
-  useEffect(() => {
-    if (!isSweptPathSettingsOpen) return;
-    const handleOutsideClick = (e: MouseEvent) => {
-      const target = e.target as HTMLElement;
-      if (!target.closest('#swept-path-settings-container')) {
-        setIsSweptPathSettingsOpen(false);
-      }
-    };
-    window.addEventListener('click', handleOutsideClick);
-    return () => window.removeEventListener('click', handleOutsideClick);
-  }, [isSweptPathSettingsOpen]);
 
   // 點擊外部時關閉調色盤
   useEffect(() => {
@@ -2025,7 +2034,7 @@ export default function App() {
   };
 
   return (
-    <div id="webtrafficcad-app-root" className={`flex flex-col h-screen w-screen bg-[#0a0b0e] text-slate-300 overflow-hidden font-sans ${theme === 'light' ? 'theme-light' : ''}`}>
+    <div id="webtrafficcad-app-root" className="flex flex-col h-screen w-screen bg-[#0a0b0e] text-slate-300 overflow-hidden font-sans">
       
       {/* CAD App Elegant Top Header */}
       <header className="flex items-center justify-between px-6 py-3 bg-[#14161c] border-b border-[#2d3039] shrink-0 select-none h-12 z-20">
@@ -2197,6 +2206,7 @@ export default function App() {
 
             {isGridSettingsOpen && (
               <div 
+                id="grid-settings-popup"
                 className="absolute right-0 mt-2 w-64 bg-[#14161c] border border-[#2d3039] rounded-lg p-3.5 shadow-2xl z-50 text-left space-y-3"
                 style={{ top: '100%' }}
               >
@@ -2235,15 +2245,17 @@ export default function App() {
                     <div className="space-y-1">
                       <div className="flex justify-between text-[11px]">
                         <span className="text-slate-400">細網格間距 (Minor)</span>
-                        <span className="text-blue-400 font-bold font-mono">{minorGridInterval} m</span>
+                        <span className="text-blue-400 font-bold font-mono">
+                          {minorGridInterval === 0 ? "無" : `${minorGridInterval} m`}
+                        </span>
                       </div>
-                      <div className="grid grid-cols-4 gap-1">
-                        {[0.2, 0.5, 1, 2].map((val) => (
+                      <div className="grid grid-cols-5 gap-1">
+                        {[0, 0.2, 0.5, 1, 2].map((val) => (
                           <button
                             key={val}
                             onClick={() => {
                               setMinorGridInterval(val);
-                              if (val >= majorGridInterval) {
+                              if (val > 0 && val >= majorGridInterval) {
                                 setMajorGridInterval(val * 5);
                               }
                             }}
@@ -2253,7 +2265,7 @@ export default function App() {
                                 : 'bg-[#1f2229] hover:bg-slate-800 border-[#2d3039] text-slate-400'
                             }`}
                           >
-                            {val}m
+                            {val === 0 ? "無" : `${val}m`}
                           </button>
                         ))}
                       </div>
@@ -2263,23 +2275,25 @@ export default function App() {
                     <div className="space-y-1">
                       <div className="flex justify-between text-[11px]">
                         <span className="text-slate-400">粗網格間距 (Major)</span>
-                        <span className="text-blue-400 font-bold font-mono">{majorGridInterval} m</span>
+                        <span className="text-blue-400 font-bold font-mono">
+                          {majorGridInterval === 0 ? "無" : `${majorGridInterval} m`}
+                        </span>
                       </div>
-                      <div className="grid grid-cols-4 gap-1">
-                        {[2, 5, 10, 20].map((val) => (
+                      <div className="grid grid-cols-5 gap-1">
+                        {[0, 2, 5, 10, 20].map((val) => (
                           <button
                             key={val}
                             onClick={() => {
                               setMajorGridInterval(val);
                             }}
-                            disabled={val <= minorGridInterval}
+                            disabled={val !== 0 && minorGridInterval !== 0 && val <= minorGridInterval}
                             className={`py-1 text-[10px] rounded border font-mono transition-colors cursor-pointer disabled:opacity-25 disabled:cursor-not-allowed ${
                               majorGridInterval === val
                                 ? 'bg-blue-600 text-white border-blue-500'
                                 : 'bg-[#1f2229] hover:bg-slate-800 border-[#2d3039] text-slate-400'
                             }`}
                           >
-                            {val}m
+                            {val === 0 ? "無" : `${val}m`}
                           </button>
                         ))}
                       </div>
@@ -2486,16 +2500,6 @@ export default function App() {
             </div>
           )}
 
-          <div className="h-4 w-px bg-[#2d3039]" />
-
-          {/* Theme switcher */}
-          <button
-            onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-            className="flex items-center justify-center w-8 h-8 rounded bg-[#1f2229] border border-[#2d3039] hover:bg-slate-800 text-slate-350 cursor-pointer transition-all shrink-0 ml-1"
-            title={theme === 'dark' ? "切換至亮色主題" : "切換至暗色主題"}
-          >
-            {theme === 'dark' ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4 text-indigo-400" />}
-          </button>
         </div>
       </header>
 
@@ -2598,129 +2602,77 @@ export default function App() {
                   軌跡路徑
                 </div>
                 <div className="flex flex-col gap-1.5 items-center">
-                  {/* 點擊繪製按鈕與下拉選單 */}
-                  <div className="relative w-full" id="sim-draw-mode-dropdown-container">
-                    <button
-                      type="button"
-                      disabled={simRawPoints.length > 0 && simIsIntersectionMode}
-                      onClick={() => {
-                        if (simRawPoints.length > 0 && simIsIntersectionMode) return;
-                        setSimIsIntersectionMode(false);
-                        if (!simIsIntersectionMode && simDrawMode !== 'select') {
-                          setIsSimDrawModeDropdownOpen(!isSimDrawModeDropdownOpen);
-                        } else {
-                          if (editingPathId) {
-                            const targetPath = simLockedPaths.find(x => x.id === editingPathId);
-                            setSimDrawMode(targetPath?.drawMode || 'smartpath');
-                          } else {
-                            if (simDrawMode === 'select') {
-                              setSimDrawMode('smartpath');
-                            }
-                          }
-                          setIsSimDrawModeDropdownOpen(true);
-                        }
-                      }}
-                      className={`w-full py-2.5 rounded-lg flex flex-col items-center justify-center gap-1.5 transition-all border text-[11px] font-black ${
-                        simRawPoints.length > 0 && simIsIntersectionMode
-                          ? 'opacity-30 cursor-not-allowed text-slate-500 bg-[#0f1115]/20 border-transparent'
-                          : !simIsIntersectionMode && simDrawMode !== 'select'
-                          ? 'bg-indigo-950/60 text-[#00FFFF] border-[#00FFFF]/80 shadow-[0_0_8px_rgba(0,255,255,0.25)] cursor-pointer'
-                          : 'text-slate-400 bg-[#0f1115]/40 border-[#2d3039]/20 hover:border-[#3b4252] hover:bg-[#1f2229] hover:text-slate-200 cursor-pointer'
-                      }`}
-                      title="自由點擊/拖曳軌跡（可選擇點選、筆刷、鋼筆）"
-                    >
-                      {simDrawMode === 'click' && (
-                        <svg viewBox="0 0 24 24" className="w-[18px] h-[18px]" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <circle cx="6" cy="18" r="2.5" fill="currentColor" stroke="none" />
-                          <circle cx="18" cy="6" r="2.5" fill="currentColor" stroke="none" />
-                          <line x1="8" y1="16" x2="16" y2="8" strokeDasharray="3 3" />
-                        </svg>
-                      )}
-                      {simDrawMode === 'smartpath' && <PenTool className="w-[18px] h-[18px]" />}
-                      {simDrawMode === 'drag' && <Paintbrush className="w-[18px] h-[18px]" />}
-                      {(simDrawMode === 'select' || simIsIntersectionMode) && (
-                        <svg viewBox="0 0 24 24" className="w-[18px] h-[18px]" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <circle cx="6" cy="18" r="2.5" fill="currentColor" stroke="none" />
-                          <circle cx="18" cy="6" r="2.5" fill="currentColor" stroke="none" />
-                          <line x1="8" y1="16" x2="16" y2="8" strokeDasharray="3 3" />
-                        </svg>
-                      )}
-                      <span>
-                        {simDrawMode === 'click' ? '點選繪製' : simDrawMode === 'smartpath' ? '鋼筆繪製' : simDrawMode === 'drag' ? '筆刷繪製' : '點擊繪製'}
-                      </span>
-                    </button>
-
-                    {isSimDrawModeDropdownOpen && (
-                      <div className="absolute left-full top-0 ml-2 w-28 rounded bg-[#1f2229] border border-[#2d3039] shadow-xl py-1 z-30 flex flex-col gap-0.5">
-                        <button
-                          type="button"
-                          disabled={(simRawPoints.length > 0 && simDrawMode !== 'click') || (editingPathId !== null && simDrawMode !== 'click')}
-                          onClick={() => {
-                            setSimDrawMode('click');
-                            setSimIsIntersectionMode(false);
-                            setIsSimDrawModeDropdownOpen(false);
-                          }}
-                          className={`flex items-center gap-2 w-full px-3 py-2 text-xs text-left transition-all ${
-                            ((simRawPoints.length > 0 && simDrawMode !== 'click') || (editingPathId !== null && simDrawMode !== 'click'))
-                              ? 'opacity-20 cursor-not-allowed text-slate-500'
-                              : simDrawMode === 'click'
-                              ? 'bg-indigo-600 text-white font-bold cursor-pointer'
-                              : 'text-slate-350 hover:bg-slate-800 hover:text-white cursor-pointer'
-                          }`}
-                        >
-                          <svg viewBox="0 0 24 24" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <circle cx="6" cy="18" r="2.5" fill="currentColor" stroke="none" />
-                            <circle cx="18" cy="6" r="2.5" fill="currentColor" stroke="none" />
-                            <line x1="8" y1="16" x2="16" y2="8" strokeDasharray="3 3" />
-                          </svg>
-                          <span>點選</span>
-                        </button>
-
-                        <button
-                          type="button"
-                          disabled={(simRawPoints.length > 0 && simDrawMode !== 'smartpath') || (editingPathId !== null && simDrawMode !== 'smartpath')}
-                          onClick={() => {
-                            setSimDrawMode('smartpath');
-                            setSimIsIntersectionMode(false);
-                            setIsSimDrawModeDropdownOpen(false);
-                          }}
-                          className={`flex items-center gap-2 w-full px-3 py-2 text-xs text-left transition-all ${
-                            ((simRawPoints.length > 0 && simDrawMode !== 'smartpath') || (editingPathId !== null && simDrawMode !== 'smartpath'))
-                              ? 'opacity-20 cursor-not-allowed text-slate-500'
-                              : simDrawMode === 'smartpath'
-                              ? 'bg-indigo-600 text-white font-bold cursor-pointer'
-                              : 'text-slate-350 hover:bg-slate-800 hover:text-white cursor-pointer'
-                          }`}
-                        >
-                          <PenTool className="w-3.5 h-3.5" />
-                          <span>鋼筆</span>
-                        </button>
-
-                        <button
-                          type="button"
-                          disabled={(simRawPoints.length > 0 && simDrawMode !== 'drag') || (editingPathId !== null && simDrawMode !== 'drag')}
-                          onClick={() => {
-                            setSimDrawMode('drag');
-                            setSimIsIntersectionMode(false);
-                            setIsSimDrawModeDropdownOpen(false);
-                          }}
-                          className={`flex items-center gap-2 w-full px-3 py-2 text-xs text-left transition-all ${
-                            ((simRawPoints.length > 0 && simDrawMode !== 'drag') || (editingPathId !== null && simDrawMode !== 'drag'))
-                              ? 'opacity-20 cursor-not-allowed text-slate-500'
-                              : simDrawMode === 'drag'
-                              ? 'bg-indigo-600 text-white font-bold cursor-pointer'
-                              : 'text-slate-350 hover:bg-slate-800 hover:text-white cursor-pointer'
-                          }`}
-                        >
-                          <Paintbrush className="w-3.5 h-3.5" />
-                          <span>筆刷</span>
-                        </button>
-                      </div>
-                    )}
-                  </div>
+                  {/* 1. 鋼筆繪製 (SmartPath) */}
                   <button
                     type="button"
-                    disabled={simRawPoints.length > 0 && !simIsIntersectionMode}
+                    disabled={(simRawPoints.length > 0 && (simDrawMode !== 'smartpath' || simIsIntersectionMode)) || (editingPathId !== null && simDrawMode !== 'smartpath')}
+                    onClick={() => {
+                      setSimDrawMode('smartpath');
+                      setSimIsIntersectionMode(false);
+                    }}
+                    className={`w-full py-2.5 rounded-lg flex flex-col items-center justify-center gap-1.5 transition-all border text-[11px] font-black ${
+                      (simRawPoints.length > 0 && (simDrawMode !== 'smartpath' || simIsIntersectionMode)) || (editingPathId !== null && simDrawMode !== 'smartpath')
+                        ? 'opacity-30 cursor-not-allowed text-slate-500 bg-[#0f1115]/20 border-transparent'
+                        : !simIsIntersectionMode && simDrawMode === 'smartpath'
+                        ? 'bg-indigo-950/60 text-[#00FFFF] border-[#00FFFF]/80 shadow-[0_0_8px_rgba(0,255,255,0.25)] cursor-pointer'
+                        : 'text-slate-400 bg-[#0f1115]/40 border-[#2d3039]/20 hover:border-[#3b4252] hover:bg-[#1f2229] hover:text-slate-200 cursor-pointer'
+                    }`}
+                    title="使用鋼筆繪製貝茲曲線軌跡"
+                  >
+                    <PenTool className="w-[18px] h-[18px]" />
+                    <span>鋼筆繪製</span>
+                  </button>
+
+                  {/* 2. 點選繪製 (Click) */}
+                  <button
+                    type="button"
+                    disabled={(simRawPoints.length > 0 && (simDrawMode !== 'click' || simIsIntersectionMode)) || (editingPathId !== null && simDrawMode !== 'click')}
+                    onClick={() => {
+                      setSimDrawMode('click');
+                      setSimIsIntersectionMode(false);
+                    }}
+                    className={`w-full py-2.5 rounded-lg flex flex-col items-center justify-center gap-1.5 transition-all border text-[11px] font-black ${
+                      (simRawPoints.length > 0 && (simDrawMode !== 'click' || simIsIntersectionMode)) || (editingPathId !== null && simDrawMode !== 'click')
+                        ? 'opacity-30 cursor-not-allowed text-slate-500 bg-[#0f1115]/20 border-transparent'
+                        : !simIsIntersectionMode && simDrawMode === 'click'
+                        ? 'bg-indigo-950/60 text-[#00FFFF] border-[#00FFFF]/80 shadow-[0_0_8px_rgba(0,255,255,0.25)] cursor-pointer'
+                        : 'text-slate-400 bg-[#0f1115]/40 border-[#2d3039]/20 hover:border-[#3b4252] hover:bg-[#1f2229] hover:text-slate-200 cursor-pointer'
+                    }`}
+                    title="自由點擊繪製折線軌跡"
+                  >
+                    <svg viewBox="0 0 24 24" className="w-[18px] h-[18px]" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <circle cx="6" cy="18" r="2.5" fill="currentColor" stroke="none" />
+                      <circle cx="18" cy="6" r="2.5" fill="currentColor" stroke="none" />
+                      <line x1="8" y1="16" x2="16" y2="8" strokeDasharray="3 3" />
+                    </svg>
+                    <span>點選繪製</span>
+                  </button>
+
+                  {/* 3. 筆刷繪製 (Drag) */}
+                  <button
+                    type="button"
+                    disabled={(simRawPoints.length > 0 && (simDrawMode !== 'drag' || simIsIntersectionMode)) || (editingPathId !== null && simDrawMode !== 'drag')}
+                    onClick={() => {
+                      setSimDrawMode('drag');
+                      setSimIsIntersectionMode(false);
+                    }}
+                    className={`w-full py-2.5 rounded-lg flex flex-col items-center justify-center gap-1.5 transition-all border text-[11px] font-black ${
+                      (simRawPoints.length > 0 && (simDrawMode !== 'drag' || simIsIntersectionMode)) || (editingPathId !== null && simDrawMode !== 'drag')
+                        ? 'opacity-30 cursor-not-allowed text-slate-500 bg-[#0f1115]/20 border-transparent'
+                        : !simIsIntersectionMode && simDrawMode === 'drag'
+                        ? 'bg-indigo-950/60 text-[#00FFFF] border-[#00FFFF]/80 shadow-[0_0_8px_rgba(0,255,255,0.25)] cursor-pointer'
+                        : 'text-slate-400 bg-[#0f1115]/40 border-[#2d3039]/20 hover:border-[#3b4252] hover:bg-[#1f2229] hover:text-slate-200 cursor-pointer'
+                    }`}
+                    title="拖曳筆刷自由手繪軌跡"
+                  >
+                    <Paintbrush className="w-[18px] h-[18px]" />
+                    <span>筆刷繪製</span>
+                  </button>
+
+                  {/* 4. 路口轉彎軌跡 (Intersection) */}
+                  <button
+                    type="button"
+                    disabled={(simRawPoints.length > 0 && !simIsIntersectionMode) || (editingPathId !== null && !simIsIntersectionMode)}
                     onClick={() => {
                       setSimIsIntersectionMode(true);
                       setSimP0X(null);
@@ -2730,7 +2682,7 @@ export default function App() {
                       setSimIntersectionPickState("p0");
                     }}
                     className={`w-full py-2.5 rounded-lg flex flex-col items-center justify-center gap-1.5 transition-all border text-[11px] font-black ${
-                      simRawPoints.length > 0 && !simIsIntersectionMode
+                      (simRawPoints.length > 0 && !simIsIntersectionMode) || (editingPathId !== null && !simIsIntersectionMode)
                         ? 'opacity-30 cursor-not-allowed text-slate-500 bg-[#0f1115]/20 border-transparent'
                         : simIsIntersectionMode
                         ? 'bg-indigo-950/60 text-[#00FFFF] border-[#00FFFF]/80 shadow-[0_0_8px_rgba(0,255,255,0.25)] cursor-pointer'
@@ -2755,68 +2707,31 @@ export default function App() {
               <div className="text-[10px] font-black text-slate-500 uppercase tracking-wider text-center pb-0.5">
                 圖層顯示偏好
               </div>
-              <div className="grid grid-cols-2 gap-1.5 w-full">
+              <div className="flex flex-col gap-1.5 w-full">
                 {/* 1. 車流包絡線軌跡設定 */}
-                <div className="relative" id="swept-path-settings-container">
-                  <button
-                    type="button"
-                    onClick={() => setIsSweptPathSettingsOpen(!isSweptPathSettingsOpen)}
-                    className={`w-full aspect-square rounded-lg flex flex-col items-center justify-center transition-all border cursor-pointer ${
-                      simShowSweptPath
-                        ? 'bg-indigo-950/60 text-[#00FFFF] border-[#00FFFF]/80 shadow-[0_0_6px_rgba(0,255,255,0.2)]'
-                        : 'text-slate-400 bg-[#0f1115]/40 border-[#2d3039]/20 hover:border-[#3b4252] hover:bg-[#1f2229]'
-                    }`}
-                    title="車流包絡線設定"
-                  >
-                    <svg viewBox="0 0 24 24" className="w-5.5 h-5.5 shrink-0" fill="none" stroke="currentColor" strokeWidth="1.5">
-                      <path d="M4 10h16M4 14h16" strokeDasharray="2 2" />
-                      <path d="M8 6h8v12H8z" opacity="0.3" fill="currentColor" />
-                      <path d="M8 6v12M16 6v12" />
-                    </svg>
-                  </button>
-
-                  {isSweptPathSettingsOpen && (
-                    <div className="absolute left-full bottom-0 ml-2 w-48 p-2.5 bg-[#1f2229] border border-[#2d3039] rounded-lg shadow-xl z-30 animate-fade-in text-left">
-                      <div className="flex items-center justify-between pb-2 border-b border-[#2d3039]/50 mb-2">
-                        <span className="text-xs font-bold text-slate-300">顯示包絡線</span>
-                        <button
-                          type="button"
-                          onClick={() => setSimShowSweptPath(!simShowSweptPath)}
-                          className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-                            simShowSweptPath ? 'bg-indigo-600' : 'bg-slate-700'
-                          }`}
-                        >
-                          <span
-                            className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
-                              simShowSweptPath ? 'translate-x-4' : 'translate-x-0'
-                            }`}
-                          />
-                        </button>
-                      </div>
-                      <div className="space-y-1">
-                        <div className="flex justify-between text-[10px] text-slate-400 font-bold">
-                          <span>不透明度</span>
-                          <span className="font-mono text-indigo-400">{Math.round(simSweptOpacity * 100)}%</span>
-                        </div>
-                        <input
-                          type="range"
-                          min="0.1"
-                          max="1.0"
-                          step="0.1"
-                          value={simSweptOpacity}
-                          onChange={(e) => setSimSweptOpacity(parseFloat(e.target.value))}
-                          className="w-full h-1 accent-indigo-500 bg-zinc-800 rounded appearance-none cursor-pointer focus:outline-none focus:ring-0"
-                        />
-                      </div>
-                    </div>
-                  )}
-                </div>
+                <button
+                  type="button"
+                  onClick={() => setSimShowSweptPath(!simShowSweptPath)}
+                  className={`w-full h-10 rounded-lg flex items-center justify-center transition-all border cursor-pointer ${
+                    simShowSweptPath
+                      ? 'bg-indigo-950/60 text-[#00FFFF] border-[#00FFFF]/80 shadow-[0_0_6px_rgba(0,255,255,0.25)]'
+                      : 'text-slate-400 bg-[#0f1115]/40 border-[#2d3039]/20 hover:border-[#3b4252] hover:bg-[#1f2229]'
+                  }`}
+                  title="車流包絡線"
+                >
+                  <svg viewBox="0 0 24 24" className="w-[22px] h-[22px] shrink-0" fill="none" stroke="currentColor" strokeWidth="1.5">
+                    <path d="M10 4v16M14 4v16" strokeDasharray="2 2" />
+                    <rect x="8" y="6" width="8" height="12" opacity="0.3" fill="currentColor" />
+                    <line x1="8" y1="6" x2="8" y2="18" />
+                    <line x1="16" y1="6" x2="16" y2="18" />
+                  </svg>
+                </button>
 
                 {/* 2. 前後軸中心軌跡 */}
                 <button
                   type="button"
                   onClick={() => setSimShowAxleTracks(!simShowAxleTracks)}
-                  className={`w-full aspect-square rounded-lg flex flex-col items-center justify-center transition-all border cursor-pointer ${
+                  className={`w-full h-10 rounded-lg flex items-center justify-center transition-all border cursor-pointer ${
                     simShowAxleTracks
                       ? 'bg-indigo-950/60 text-[#00FFFF] border-[#00FFFF]/80 shadow-[0_0_6px_rgba(0,255,255,0.2)]'
                       : 'text-slate-400 bg-[#0f1115]/40 border-[#2d3039]/20 hover:border-[#3b4252] hover:bg-[#1f2229]'
@@ -2834,18 +2749,18 @@ export default function App() {
                 <button
                   type="button"
                   onClick={() => setSimShowBodyWireframe(!simShowBodyWireframe)}
-                  className={`w-full aspect-square rounded-lg flex flex-col items-center justify-center transition-all border cursor-pointer ${
+                  className={`w-full h-10 rounded-lg flex items-center justify-center transition-all border cursor-pointer ${
                     simShowBodyWireframe
                       ? 'bg-indigo-950/60 text-[#00FFFF] border-[#00FFFF]/80 shadow-[0_0_6px_rgba(0,255,255,0.25)]'
                       : 'text-slate-400 bg-[#0f1115]/40 border-[#2d3039]/20 hover:border-[#3b4252] hover:bg-[#1f2229]'
                   }`}
                   title="連續骨架投影"
                 >
-                  <svg viewBox="0 0 24 24" className="w-5.5 h-5.5 shrink-0" fill="none" stroke="currentColor" strokeWidth="1.5">
-                    <rect x="4" y="6" width="16" height="12" rx="1" />
-                    <line x1="4" y1="12" x2="20" y2="12" strokeDasharray="2 2" />
-                    <line x1="10" y1="6" x2="10" y2="18" />
-                    <line x1="14" y1="6" x2="14" y2="18" />
+                  <svg viewBox="0 0 24 24" className="w-[22px] h-[22px] shrink-0" fill="none" stroke="currentColor" strokeWidth="1.5">
+                    <rect x="6" y="4" width="12" height="16" rx="1" />
+                    <line x1="12" y1="4" x2="12" y2="20" strokeDasharray="2 2" />
+                    <line x1="6" y1="10" x2="18" y2="10" />
+                    <line x1="6" y1="14" x2="18" y2="14" />
                   </svg>
                 </button>
 
@@ -2854,7 +2769,7 @@ export default function App() {
                   <button
                     type="button"
                     onClick={() => setSimShowIntersectionHelpers(!simShowIntersectionHelpers)}
-                    className={`w-full aspect-square rounded-lg flex flex-col items-center justify-center transition-all border cursor-pointer ${
+                    className={`w-full h-10 rounded-lg flex items-center justify-center transition-all border cursor-pointer ${
                       simShowIntersectionHelpers
                         ? 'bg-indigo-950/60 text-[#00FFFF] border-[#00FFFF]/80 shadow-[0_0_6px_rgba(0,255,255,0.25)]'
                         : 'text-slate-400 bg-[#0f1115]/40 border-[#2d3039]/20 hover:border-[#3b4252] hover:bg-[#1f2229]'
@@ -2867,7 +2782,7 @@ export default function App() {
                     </svg>
                   </button>
                 ) : (
-                  <div className="w-full aspect-square rounded-lg border border-dashed border-[#2d3039]/20 bg-[#0f1115]/10" />
+                  <div className="w-full h-10 rounded-lg border border-dashed border-[#2d3039]/20 bg-[#0f1115]/10" />
                 )}
               </div>
             </div>
@@ -2877,7 +2792,6 @@ export default function App() {
         {/* Central CAD Infinite Canvas */}
         <div className="flex-1 h-full min-w-0 relative flex flex-col">
           <CadCanvas 
-            theme={theme}
             elements={elements}
             onAddElement={handleAddElement}
             onUpdateElement={handleUpdateElement}
@@ -2976,38 +2890,40 @@ export default function App() {
             simIsCalibrating={simIsCalibrating}
             setSimIsCalibrating={setSimIsCalibrating}
           />
-          {/* Telemetry HUD - 4 個 80x80px 圓角卡片，左側中心排列 */}
+           {/* Telemetry HUD - 4 個 80x80px 圓角卡片，左側中心排列 */}
           {appMode === 'simulation' && simTrajectory.length > 0 && (() => {
             const isSteerExceeded = Math.abs(currentDeltaDeg) > (simConfig.maxSteerLimit ?? 40);
             const cardBase = "w-[80px] h-[80px] rounded-xl flex flex-col items-center justify-center text-center p-1.5 border backdrop-blur-sm transition-all duration-300";
             const cardNormal = "bg-[#14161c]/80 border-[#2d3039]";
             const cardAlert = "bg-red-950/40 border-red-500 shadow-[0_0_10px_rgba(239,68,68,0.45)] animate-pulse";
             const cardCls = isSteerExceeded ? `${cardBase} ${cardAlert}` : `${cardBase} ${cardNormal}`;
+            const labelCls = "text-[8px] font-bold text-slate-400 leading-tight text-center mb-0.5";
+            const valueCls = "text-sm font-black text-slate-100 font-mono leading-none";
             return (
               <div className="absolute left-3 top-1/2 -translate-y-1/2 flex flex-col gap-2 z-20 pointer-events-none">
                 {/* 卡片1：總行駛長度 */}
                 <div className={cardCls}>
-                  <span className="text-[8px] font-bold text-slate-400 leading-tight text-center mb-0.5">總行駛<br/>長度 (m)</span>
-                  <span className="text-sm font-black text-slate-100 font-mono leading-none">{totalPathLengthM.toFixed(1)}</span>
+                  <span className={labelCls}>總行駛<br/>長度 (m)</span>
+                  <span className={valueCls}>{totalPathLengthM.toFixed(1)}</span>
                 </div>
                 {/* 卡片2：即時前輪轉角 */}
                 <div className={cardCls}>
-                  <span className="text-[8px] font-bold text-slate-400 leading-tight text-center mb-0.5">即時前輪<br/>轉角 (deg)</span>
-                  <span className={`text-sm font-black font-mono leading-none ${isSteerExceeded ? 'text-red-400' : 'text-slate-100'}`}>
+                  <span className={labelCls}>即時前輪<br/>轉角 (deg)</span>
+                  <span className={`text-sm font-black font-mono leading-none ${isSteerExceeded ? 'text-red-500' : 'text-slate-100'}`}>
                     {currentDeltaDeg.toFixed(1)}°
                   </span>
                 </div>
                 {/* 卡片3：即時轉彎半徑 */}
                 <div className={cardCls}>
-                  <span className="text-[8px] font-bold text-slate-400 leading-tight text-center mb-0.5">即時轉彎<br/>半徑 (m)</span>
-                  <span className="text-sm font-black text-slate-100 font-mono leading-none">
+                  <span className={labelCls}>即時轉彎<br/>半徑 (m)</span>
+                  <span className={valueCls}>
                     {currentTurnRadiusM === Infinity ? '∞' : currentTurnRadiusM.toFixed(1)}
                   </span>
                 </div>
                 {/* 卡片4：即時車身朝向角 */}
                 <div className={cardCls}>
-                  <span className="text-[8px] font-bold text-slate-400 leading-tight text-center mb-0.5">即時車身<br/>朝向角 (deg)</span>
-                  <span className="text-sm font-black text-slate-100 font-mono leading-none">
+                  <span className={labelCls}>即時車身<br/>朝向角 (deg)</span>
+                  <span className={valueCls}>
                     {((currentThetaDeg % 360 + 360) % 360).toFixed(0)}°
                   </span>
                 </div>
@@ -3691,13 +3607,14 @@ export default function App() {
                   <div className="space-y-1.5 max-h-64 overflow-y-auto pr-1">
                     {/* 當前全新編輯中軌跡（僅在未載入舊軌跡且有畫點時顯示） */}
                     {editingPathId === null && simRawPoints.length > 0 && (
-                      <div className={`flex items-center justify-between p-2 rounded-lg border text-[10px] ${
-                        simThemeColor === 'indigo' ? 'text-indigo-400 bg-indigo-500/5 border-indigo-500/20' :
-                        simThemeColor === 'emerald' ? 'text-emerald-400 bg-emerald-500/5 border-emerald-500/20' :
-                        simThemeColor === 'amber' ? 'text-amber-400 bg-amber-500/5 border-amber-500/20' :
-                        simThemeColor === 'rose' ? 'text-rose-400 bg-rose-500/5 border-rose-500/20' :
-                        'text-sky-400 bg-sky-500/5 border-sky-500/20'
-                      }`}>
+                      <div 
+                        className="sim-trajectory-card flex items-center justify-between p-2 rounded-lg text-[10px] transition-all"
+                        style={{
+                          '--card-border-color': '#ef4444',
+                          '--card-bg-color': `${normalizeColor(simThemeColor)}0d`,
+                          '--card-text-color': normalizeColor(simThemeColor)
+                        } as React.CSSProperties}
+                      >
                         <div className="flex flex-col gap-0.5 truncate">
                           <span className="font-bold truncate flex items-center gap-1.5">
                             <span className="inline-block w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse"></span>
@@ -3709,40 +3626,27 @@ export default function App() {
                         </div>
                         <div className="flex items-center gap-1.5">
                           {/* 新軌跡的調色盤 */}
-                          <div className="relative" id="color-picker-container-new-path">
+                          <div className="relative flex items-center" id="color-picker-container-new-path">
                             <button
                               type="button"
-                              onClick={() => setActiveColorPickerPathId(activeColorPickerPathId === 'new-path' ? null : 'new-path')}
-                              className={`w-3.5 h-3.5 rounded-full border border-white/20 transition-all cursor-pointer hover:scale-110 flex-shrink-0 ${
-                                simThemeColor === 'indigo' ? 'bg-indigo-500' :
-                                simThemeColor === 'emerald' ? 'bg-emerald-500' :
-                                simThemeColor === 'amber' ? 'bg-amber-500' :
-                                simThemeColor === 'rose' ? 'bg-rose-500' :
-                                'bg-sky-500'
-                              }`}
+                              onClick={() => {
+                                const inputEl = document.getElementById('color-input-new-path');
+                                if (inputEl) inputEl.click();
+                              }}
+                              className="sim-color-picker-btn w-4 h-4 rounded-full border transition-all cursor-pointer hover:scale-110 flex-shrink-0"
+                              style={{
+                                borderColor: '#3f3f46',
+                                boxShadow: 'none'
+                              }}
                               title="變更軌跡顏色"
                             />
-                            {activeColorPickerPathId === 'new-path' && (
-                              <div className="absolute right-0 bottom-full mb-1.5 p-1 bg-[#1f2229] border border-[#2d3039] rounded-lg shadow-xl flex gap-1 z-30 animate-fade-in">
-                                {(['indigo', 'emerald', 'amber', 'rose', 'sky'] as const).map((color) => (
-                                  <button
-                                    key={color}
-                                    type="button"
-                                    onClick={() => {
-                                      setSimThemeColor(color);
-                                      setActiveColorPickerPathId(null);
-                                    }}
-                                    className={`w-3.5 h-3.5 rounded-full cursor-pointer hover:scale-110 transition-transform ${
-                                      color === 'indigo' ? 'bg-indigo-500' :
-                                      color === 'emerald' ? 'bg-emerald-500' :
-                                      color === 'amber' ? 'bg-amber-500' :
-                                      color === 'rose' ? 'bg-rose-500' :
-                                      'bg-sky-500'
-                                    } ${simThemeColor === color ? 'ring-2 ring-white' : ''}`}
-                                  />
-                                ))}
-                              </div>
-                            )}
+                            <input
+                              id="color-input-new-path"
+                              type="color"
+                              value={normalizeColor(simThemeColor)}
+                              onChange={(e) => handleUpdatePathColor('new-path', e.target.value)}
+                              className="absolute inset-0 opacity-0 w-0 h-0 pointer-events-none"
+                            />
                           </div>
 
                           <button
@@ -3787,10 +3691,17 @@ export default function App() {
                       const borderClass = isEditingThis ? 'border-red-500' : (themeColors[activeThemeColor] ? themeColors[activeThemeColor].split(' ')[0] : 'border-indigo-500/20');
                       const bgTextClass = themeColors[activeThemeColor] ? themeColors[activeThemeColor].split(' ').slice(1).join(' ') : 'text-indigo-400 bg-indigo-500/5';
 
+                      const normColor = normalizeColor(activeThemeColor);
+
                       return (
                         <div 
                           key={lp.id} 
-                          className={`flex items-center justify-between p-2 rounded-lg border text-[10px] transition-all ${borderClass} ${bgTextClass}`}
+                          className="sim-trajectory-card flex items-center justify-between p-2 rounded-lg text-[10px] transition-all"
+                          style={{
+                            '--card-border-color': isEditingThis ? '#ef4444' : `${normColor}40`,
+                            '--card-bg-color': `${normColor}0d`,
+                            '--card-text-color': normColor
+                          } as React.CSSProperties}
                         >
                           <div className="flex flex-col gap-0.5 truncate">
                             <span className="font-bold truncate flex items-center gap-1.5">
@@ -3803,40 +3714,27 @@ export default function App() {
                           </div>
                           <div className="flex items-center gap-1.5">
                             {/* 調色盤圓圈 */}
-                            <div className="relative" id={`color-picker-container-${lp.id}`}>
+                            <div className="relative flex items-center" id={`color-picker-container-${lp.id}`}>
                               <button
                                 type="button"
-                                onClick={() => setActiveColorPickerPathId(activeColorPickerPathId === lp.id ? null : lp.id)}
-                                className={`w-3.5 h-3.5 rounded-full border border-white/20 transition-all cursor-pointer hover:scale-110 flex-shrink-0 ${
-                                  activeThemeColor === 'indigo' ? 'bg-indigo-500' :
-                                  activeThemeColor === 'emerald' ? 'bg-emerald-500' :
-                                  activeThemeColor === 'amber' ? 'bg-amber-500' :
-                                  activeThemeColor === 'rose' ? 'bg-rose-500' :
-                                  'bg-sky-500'
-                                }`}
+                                onClick={() => {
+                                  const inputEl = document.getElementById(`color-input-${lp.id}`);
+                                  if (inputEl) inputEl.click();
+                                }}
+                                className="sim-color-picker-btn w-4 h-4 rounded-full border transition-all cursor-pointer hover:scale-110 flex-shrink-0"
+                                style={{
+                                  borderColor: '#3f3f46',
+                                  boxShadow: 'none'
+                                }}
                                 title="變更軌跡顏色"
                               />
-                              {activeColorPickerPathId === lp.id && (
-                                <div className="absolute right-0 bottom-full mb-1.5 p-1 bg-[#1f2229] border border-[#2d3039] rounded-lg shadow-xl flex gap-1 z-30 animate-fade-in">
-                                  {(['indigo', 'emerald', 'amber', 'rose', 'sky'] as const).map((color) => (
-                                    <button
-                                      key={color}
-                                      type="button"
-                                      onClick={() => {
-                                        handleUpdatePathColor(lp.id, color);
-                                        setActiveColorPickerPathId(null);
-                                      }}
-                                      className={`w-3.5 h-3.5 rounded-full cursor-pointer hover:scale-110 transition-transform ${
-                                        color === 'indigo' ? 'bg-indigo-500' :
-                                        color === 'emerald' ? 'bg-emerald-500' :
-                                        color === 'amber' ? 'bg-amber-500' :
-                                        color === 'rose' ? 'bg-rose-500' :
-                                        'bg-sky-500'
-                                      } ${activeThemeColor === color ? 'ring-2 ring-white' : ''}`}
-                                    />
-                                  ))}
-                                </div>
-                              )}
+                              <input
+                                id={`color-input-${lp.id}`}
+                                type="color"
+                                value={normalizeColor(lp.themeColor)}
+                                onChange={(e) => handleUpdatePathColor(lp.id, e.target.value)}
+                                className="absolute inset-0 opacity-0 w-0 h-0 pointer-events-none"
+                              />
                             </div>
 
                             {isEditingThis ? (

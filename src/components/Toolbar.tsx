@@ -45,8 +45,7 @@ function renderToolIcon(id: CadTool) {
     case 'guideline':
       return (
         <svg viewBox="0 0 24 24" className="w-[24px] h-[24px]" fill="none" stroke="currentColor" strokeWidth="1.5">
-          <line x1="2" y1="12" x2="22" y2="12" strokeDasharray="4,2,1,2" />
-          <line x1="5" y1="4" x2="19" y2="20" stroke="currentColor" strokeDasharray="2,2" opacity="0.6" />
+          <line x1="4" y1="20" x2="20" y2="4" stroke="currentColor" strokeDasharray="3,3" />
         </svg>
       );
     case 'yellow_double':
@@ -233,6 +232,31 @@ function renderToolIcon(id: CadTool) {
         </svg>
       );
     }
+    case 'measurement':
+      return (
+        <svg viewBox="0 0 24 24" className="w-[24px] h-[24px]" fill="none" stroke="currentColor" strokeWidth="1.5">
+          <line x1="3" y1="12" x2="21" y2="12" />
+          <line x1="3" y1="7" x2="3" y2="17" strokeWidth="2" />
+          <line x1="21" y1="7" x2="21" y2="17" strokeWidth="2" />
+        </svg>
+      );
+    case 'angular_dimension':
+      return (
+        <svg viewBox="0 0 24 24" className="w-[24px] h-[24px]" fill="none" stroke="currentColor" strokeWidth="1.5">
+          <path d="M22 22L12 12L12 2" />
+          <path d="M12 7 A 5 5 0 0 1 19.07 19.07" strokeWidth="1.8" />
+        </svg>
+      );
+    case 'arc_3point':
+      return (
+        <svg viewBox="0 0 24 24" className="w-[24px] h-[24px]" fill="none" stroke="currentColor" strokeWidth="1.5">
+          <path d="M4 18 A 8.2 8.2 0 0 1 20 18" />
+          <circle cx="4" cy="18" r="1.8" fill="currentColor" />
+          <circle cx="12" cy="11.6" r="1.8" fill="currentColor" />
+          <circle cx="20" cy="18" r="1.8" fill="currentColor" />
+        </svg>
+      );
+
     default:
       return null;
   }
@@ -258,21 +282,14 @@ export default function Toolbar({
   
   const categories = [
     {
-      title: "輔助",
-      items: [
-        { id: 'sketch_circle' as CadTool, desc: '輔助圓：第一點決定圓心，第二點決定半徑' },
-        { id: 'guideline' as CadTool, desc: '輔助基準線：輔助對齊之切點基準線' }
-      ]
-    },
-    {
       title: "標線",
       items: [
-        { id: 'yellow_double' as CadTool, desc: '雙黃實線（世界座標 10cm 寬 + 10cm 間隔，分向限制線）' },
-        { id: 'white_double' as CadTool, desc: '雙白實線（15cm雙白實線，禁止變換車道線）' },
+        { id: 'yellow_double' as CadTool, desc: '雙黃實線（分向限制線）' },
+        { id: 'white_double' as CadTool, desc: '雙白實線（禁止變換車道線）' },
         { id: 'white_solid' as CadTool, desc: '車道邊線：15cm白色實線' },
-        { id: 'white_dashed' as CadTool, desc: '白虛線（4m實線、6m空隙，標準標線規則）' },
-        { id: 'yellow_dashed' as CadTool, desc: '車道黃虛線（4m實線、6m空隙，標準標線規則）' },
-        { id: 'crossing_dashed' as CadTool, desc: '附加車道虛線/穿越線：30cm寬，1m實線2m空隙' },
+        { id: 'white_dashed' as CadTool, desc: '白虛線（4m實線、6m空隙）' },
+        { id: 'yellow_dashed' as CadTool, desc: '車道黃虛線（4m實線、6m空隙）' },
+        { id: 'crossing_dashed' as CadTool, desc: '附加車道虛線/穿越線：30cm寬' },
         { id: 'stop_line' as CadTool, desc: '停止線：30-40cm白色實線' },
         { id: 'yield_line' as CadTool, desc: '讓路線：尖角朝下的倒白色三角形標線組' },
         { id: 'BuildingLine' as CadTool, desc: '建築線：地籍或人行道邊界建築參考線' },
@@ -287,8 +304,18 @@ export default function Toolbar({
         { id: 'crosswalk' as CadTool, desc: '行穿線 / 斑馬線：40cm線寬40cm間隙之枕木紋' },
         { id: 'bicycle_lane' as CadTool, desc: '腳踏車道：品紅色專用車道鋪面' },
         { id: 'parking_space' as CadTool, desc: '停車格：汽車、機車位印章繪製與屬性控制' },
-        { id: 'parking_zone' as CadTool, desc: '停車區：以鋼筆繪製彎曲或直行路徑，自動沿路向填滿車格，可調整角度、間隔與尺寸' },
-        { id: 'road_arrow' as CadTool, desc: '指向線箭頭：路面方向指示印章（直行、左右轉與混合）' }
+        { id: 'parking_zone' as CadTool, desc: '停車區：沿著鋼筆線自動平鋪車格' },
+        { id: 'road_arrow' as CadTool, desc: '指向線箭頭：路面方向指示印章' }
+      ]
+    },
+    {
+      title: "量測與工具",
+      items: [
+        { id: 'measurement' as CadTool, desc: '測距工具：測量兩點距離，支援對齊其他線段與垂線吸附' },
+        { id: 'angular_dimension' as CadTool, desc: '角度標註：點選夾角頂點與兩線端點，標示並測量夾角' },
+        { id: 'arc_3point' as CadTool, desc: '三點圓弧：依序點選起點、圓弧上一點及終點繪製圓弧標線' },
+        { id: 'guideline' as CadTool, desc: '對齊輔助線：3cm白色實線' },
+        { id: 'sketch_circle' as CadTool, desc: '輔助圓：畫圓輔助與圓角半徑標定' }
       ]
     }
   ];
@@ -304,7 +331,7 @@ export default function Toolbar({
           <div className="w-[42px] h-[42px] rounded-lg bg-gradient-to-br from-blue-500 to-cyan-500 flex items-center justify-center font-black text-white text-sm shadow-lg shadow-blue-500/20 mb-1.5 border border-blue-400/20">
             CAD
           </div>
-          <span className="text-[10px] font-bold text-slate-500 tracking-widest uppercase">Traffic</span>
+          <span className="text-xs font-black text-cyan-400 tracking-widest uppercase">標線繪製</span>
         </div>
 
         {/* Global Select Pointer Tool at Top */}
@@ -317,7 +344,7 @@ export default function Toolbar({
                 ? 'bg-blue-950/60 text-[#00FFFF] border-[#00FFFF]/80 shadow-[0_0_8px_rgba(0,255,255,0.25)]'
                 : 'text-slate-400 bg-[#0f1115]/30 border-[#2d3039]/20 hover:bg-[#1f2229] hover:text-slate-200 hover:border-[#2d3039]'
             }`}
-            title="選擇與修改幾何物件/拖移端點 (Select & Modify)"
+            title="選擇與修改幾何物件/拖移端點"
           >
             {renderToolIcon('select')}
           </button>
@@ -347,38 +374,6 @@ export default function Toolbar({
                       >
                         {renderToolIcon(tool.id)}
                       </button>
-
-                      {/* Smart Vehicle selectors inside the grid if smart_path is active */}
-                      {tool.id === 'smart_path' && isActive && (
-                        <div className="col-span-2 mt-1 p-1 bg-cyan-950/20 border border-cyan-800/30 rounded flex flex-col items-center gap-1 w-[100px] absolute left-1/2 -translate-x-1/2 top-[46px] z-10 shadow-xl shadow-black/80 animate-fade-in">
-                          <span className="text-[8px] font-bold text-cyan-400 leading-none">車種模擬</span>
-                          <div className="flex gap-1.5 justify-center w-full">
-                            <button 
-                              onClick={(e) => { e.stopPropagation(); setDesignVehicle('passenger'); }} 
-                              className={`w-6 h-6 rounded text-[9px] font-bold cursor-pointer transition-colors ${designVehicle === 'passenger' ? 'bg-cyan-500 text-black' : 'bg-transparent text-cyan-400 hover:bg-cyan-950/40'}`} 
-                              title="客車 (Passenger Carriage)"
-                            >
-                              P
-                            </button>
-                            <button 
-                              onClick={(e) => { e.stopPropagation(); setDesignVehicle('semi_trailer'); }} 
-                              className={`w-6 h-6 rounded text-[9px] font-bold cursor-pointer transition-colors ${designVehicle === 'semi_trailer' ? 'bg-cyan-500 text-black' : 'bg-transparent text-cyan-400 hover:bg-cyan-950/40'}`} 
-                              title="大客車 / 單體大貨車 (Coach / Rigid Truck)"
-                            >
-                              B
-                            </button>
-                            <button 
-                              onClick={(e) => { e.stopPropagation(); setDesignVehicle('articulated'); }} 
-                              className={`w-6 h-6 rounded text-[9px] font-bold cursor-pointer transition-colors ${designVehicle === 'articulated' ? 'bg-cyan-500 text-black' : 'bg-transparent text-cyan-400 hover:bg-cyan-950/40'}`} 
-                              title="聯結車 (Articulated Trailer)"
-                            >
-                              T
-                            </button>
-                          </div>
-                        </div>
-                      )}
-
-
                     </div>
                   );
                 })}

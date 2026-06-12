@@ -20,7 +20,9 @@ import {
   VehicleConfig,
   SimulationState,
   ControllerMode,
-  Point
+  Point,
+  MeasurementElement,
+  AngularDimensionElement
 } from '../types';
 import { 
   distance, 
@@ -43,12 +45,47 @@ import {
   calculateSteeringAngle,
   getWheelbaseForVehicle,
   getMaxSteeringAngleForPath,
-  getRoadArrowOutlinePoints
+  getRoadArrowOutlinePoints,
+  getArcFromThreePoints,
+  getLineIntersection,
+  solveThreeCenteredCurve
 } from '../geometry';
 import { arrowData } from '../arrowData';
 import { calculateIntersectionCurve } from '../utils/pathInterpolator';
 import { calculateCorners, calculateTrailerCorners } from '../utils/vehicleSimulator';
-import { Search } from 'lucide-react';
+import { Search, Ruler } from 'lucide-react';
+
+const parseColorToRgbStr = (color: string | undefined): string => {
+  if (!color) return '99, 102, 241';
+  if (color.startsWith('#')) {
+    const hex = color.replace('#', '');
+    if (hex.length === 3) {
+      const r = parseInt(hex[0] + hex[0], 16);
+      const g = parseInt(hex[1] + hex[1], 16);
+      const b = parseInt(hex[2] + hex[2], 16);
+      return `${r}, ${g}, ${b}`;
+    } else if (hex.length === 6) {
+      const r = parseInt(hex.substring(0, 2), 16);
+      const g = parseInt(hex.substring(2, 4), 16);
+      const b = parseInt(hex.substring(4, 6), 16);
+      return `${r}, ${g}, ${b}`;
+    }
+  }
+  const rgbMap: Record<string, string> = {
+    indigo: '99, 102, 241',
+    emerald: '16, 185, 129',
+    amber: '245, 158, 11',
+    rose: '244, 63, 94',
+    sky: '14, 165, 233'
+  };
+  return rgbMap[color] || '99, 102, 241';
+};
+
+const getDarkerRgbStr = (color: string | undefined): string => {
+  const rgb = parseColorToRgbStr(color);
+  return rgb.split(',').map(x => Math.round(parseInt(x.trim(), 10) * 0.5)).join(', ');
+};
+
 
 const ensureSmoothWaypoint = (idx: number, points: Waypoint[]): Waypoint[] => {
   if (idx < 0 || idx >= points.length) return points;
@@ -185,6 +222,14 @@ function getElementVertices(el: CadElement): Point2D[] {
     case 'road_arrow': {
       const arrow = el as any;
       return [arrow.p, ...getRoadArrowOutlinePoints(arrow)];
+    }
+    case 'measurement': {
+      const meas = el as MeasurementElement;
+      return (meas.points || []).filter(Boolean);
+    }
+    case 'angular_dimension': {
+      const ang = el as AngularDimensionElement;
+      return [ang.center, ang.pStart1, ang.pStart2].filter(Boolean);
     }
     default:
       return [];
@@ -906,7 +951,7 @@ interface CadCanvasProps {
   selectedElementIds?: string[];
   onSelectElementIdsChange?: (ids: string[]) => void;
   onUpdateElements?: (elements: CadElement[]) => void;
-  theme?: 'dark' | 'light';
+  simBodyOpacity?: number;
 
   // Simulation Mode Props
   appMode?: 'cad' | 'simulation';
@@ -925,7 +970,7 @@ interface CadCanvasProps {
   simInterpolatedPath?: any[]; // PathPoint[]
   simLockedPaths?: any[];
   setSimLockedPaths?: React.Dispatch<React.SetStateAction<any[]>>;
-  simThemeColor?: "indigo" | "emerald" | "amber" | "rose" | "sky";
+  simThemeColor?: string;
   simShowSweptPath?: boolean;
   simShowCornerTracks?: boolean;
   simShowAxleTracks?: boolean;
@@ -977,6 +1022,8 @@ interface CadCanvasProps {
   setSimIsDragging?: (dragging: boolean) => void;
   roadArrowConfig?: { arrowType: 'straight' | 'left' | 'right' | 'straight_left' | 'straight_right', length: number, angle: number };
   setRoadArrowConfig?: (cfg: any) => void;
+  simHasCollision?: boolean;
+  setSimHasCollision?: (b: boolean) => void;
 }
 
 export default function CadCanvas({
@@ -1077,7 +1124,9 @@ export default function CadCanvas({
   setSimIsCalibrating,
   editingPathId = null,
   setSimIsDragging,
-  theme = 'dark'
+  simBodyOpacity = 0.4,
+  simHasCollision = false,
+  setSimHasCollision
 }: CadCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -1087,6 +1136,8 @@ export default function CadCanvas({
   const [marqueeStartPos, setMarqueeStartPos] = useState<Point2D | null>(null);
   const [marqueeEndPos, setMarqueeEndPos] = useState<Point2D | null>(null);
   const [draggedElementsInitialStates, setDraggedElementsInitialStates] = useState<{ [id: string]: CadElement }>({});
+  const [isDraggingWholePath, setIsDraggingWholePath] = useState(false);
+  const [pathDragStartWorld, setPathDragStartWorld] = useState<Point2D | null>(null);
 
   // Viewport State: zoom is pixels per meter. Start with 12 pixels per meter.
   const [viewport, setViewport] = useState<ViewportState>({
@@ -1104,9 +1155,13 @@ export default function CadCanvas({
   const [isDraggingRoadA, setIsDraggingRoadA] = useState(false);
   const [isDraggingRoadB, setIsDraggingRoadB] = useState(false);
   const [activeDragPoint, setActiveDragPoint] = useState<'none' | 'p0' | 'p3'>('none');
-  const [isDraggingWholePath, setIsDraggingWholePath] = useState(false);
-  const [pathDragStartWorld, setPathDragStartWorld] = useState<Point2D | null>(null);
   const [pathDragStartPoints, setPathDragStartPoints] = useState<Waypoint[]>([]);
+
+  // Advanced Tools States and Refs
+
+
+  const isPerpSnappedRef = useRef<boolean>(false);
+  const perpSnapLineRef = useRef<{ p1: Point2D; p2: Point2D; targetA: Point2D; targetB: Point2D } | null>(null);
   const isSimDrawingDragRef = useRef(false);
 
   // Interactive drawings draft states (used by polygon channels & circles)
@@ -1185,17 +1240,13 @@ export default function CadCanvas({
   const prevActiveToolRef = useRef(activeTool);
   useEffect(() => {
     if (prevActiveToolRef.current !== activeTool) {
-      if (spPoints.length === 1) {
-        setSpPoints([]);
-        setSpCpLeft([]);
-        setSpCpRight([]);
-      }
-      if (draftPoints.length === 1) {
-        setDraftPoints([]);
-      }
+      setSpPoints([]);
+      setSpCpLeft([]);
+      setSpCpRight([]);
+      setDraftPoints([]);
       prevActiveToolRef.current = activeTool;
     }
-  }, [activeTool, spPoints, draftPoints]);
+  }, [activeTool]);
 
   // 清理軌跡模擬模式下單個節點的草稿
   const prevSimDrawModeRef = useRef(simDrawMode);
@@ -1301,7 +1352,8 @@ export default function CadCanvas({
            tool === 'bicycle_lane' || 
            tool === 'reversible_lane' ||
            tool === 'yield_line' ||
-           tool === 'parking_zone';
+           tool === 'parking_zone' ||
+           tool === 'measurement';
   };
 
   // Zoom to Fit and Center implementation
@@ -1438,22 +1490,19 @@ export default function CadCanvas({
         setSpacePressed(true);
       }
       if (e.code === 'Enter') {
-        e.preventDefault();
-        if (appMode === 'simulation') {
-          if (setSimDrawMode) setSimDrawMode('select');
-        } else if (isLineOrPathTool(activeTool) && spPoints.length >= 2) {
-          handleCompleteSmartPath(spPoints, spCpLeft, spCpRight);
+        if (appMode === 'cad') {
+          e.preventDefault();
+          if (isLineOrPathTool(activeTool) && spPoints.length >= 2) {
+            handleCompleteSmartPath(spPoints, spCpLeft, spCpRight);
+          }
         }
       }
       if (e.key === 'v' || e.key === 'V' || e.code === 'KeyV') {
-        e.preventDefault();
-        if (appMode === 'simulation') {
-          if (simRawPoints && simRawPoints.length === 1 && setSimRawPoints) {
-            setSimRawPoints([]);
-          }
-          if (setSimDrawMode) setSimDrawMode('select');
-        } else {
-          if (spPoints.length === 1) {
+        if (appMode === 'cad') {
+          e.preventDefault();
+          if (isLineOrPathTool(activeTool) && spPoints.length >= 2) {
+            handleCompleteSmartPath(spPoints, spCpLeft, spCpRight);
+          } else if (spPoints.length === 1) {
             setSpPoints([]);
             setSpCpLeft([]);
             setSpCpRight([]);
@@ -1496,6 +1545,82 @@ export default function CadCanvas({
     return len > 0.001 ? { x: v.x / len, y: v.y / len } : { x: 1, y: 0 };
   };
 
+  const findPerpendicularSnap = (p1: Point2D, mousePt: Point2D): { point: Point2D; targetA: Point2D; targetB: Point2D } | null => {
+    let bestSnapPt: Point2D | null = null;
+    let bestTargetA: Point2D | null = null;
+    let bestTargetB: Point2D | null = null;
+    let closestDistScreen = 20; // snapping radius threshold in pixels
+
+    elements.forEach(el => {
+      if (!el) return;
+
+      // Handle simple lines
+      if (
+        el.type === 'guideline' || 
+        el.type === 'yellow_double' || 
+        el.type === 'white_double' || 
+        el.type === 'white_dashed' || 
+        el.type === 'yellow_dashed' || 
+        el.type === 'white_solid' || 
+        el.type === 'reversible_lane' ||
+        el.type === 'stop_line' ||
+        el.type === 'yield_line'
+      ) {
+        const line = el as any;
+        if (line.p1 && line.p2) {
+          const a = line.p1;
+          const b = line.p2;
+          
+          // Calculate mouse projection on this segment to see if mouse is close
+          const mouseProj = projectPointOnSegment(mousePt, a, b);
+          const screenMouseProj = worldToScreen(mouseProj.point.x, mouseProj.point.y);
+          const screenMouse = worldToScreen(mousePt.x, mousePt.y);
+          const distToSegmentScreen = Math.hypot(screenMouse.x - screenMouseProj.x, screenMouse.y - screenMouseProj.y);
+
+          if (distToSegmentScreen < closestDistScreen) {
+            // Project initial point p1 onto this line segment
+            const p1Proj = projectPointOnSegment(p1, a, b);
+            
+            closestDistScreen = distToSegmentScreen;
+            bestSnapPt = p1Proj.point;
+            bestTargetA = a;
+            bestTargetB = b;
+          }
+        }
+      }
+      
+      // Handle paths or curves
+      if (el.type === 'smart_path' || el.type === 'bicycle_lane' || el.type === 'parking_zone') {
+        const pathEl = el as any;
+        const ref = getLineBezierRepresentation(pathEl);
+        if (ref && ref.points && ref.points.length >= 2) {
+          for (let i = 0; i < ref.points.length - 1; i++) {
+            const a = ref.points[i];
+            const b = ref.points[i + 1];
+
+            const mouseProj = projectPointOnSegment(mousePt, a, b);
+            const screenMouseProj = worldToScreen(mouseProj.point.x, mouseProj.point.y);
+            const screenMouse = worldToScreen(mousePt.x, mousePt.y);
+            const distToSegmentScreen = Math.hypot(screenMouse.x - screenMouseProj.x, screenMouse.y - screenMouseProj.y);
+
+            if (distToSegmentScreen < closestDistScreen) {
+              const p1Proj = projectPointOnSegment(p1, a, b);
+              closestDistScreen = distToSegmentScreen;
+              bestSnapPt = p1Proj.point;
+              bestTargetA = a;
+              bestTargetB = b;
+            }
+          }
+        }
+      }
+    });
+
+    if (bestSnapPt && bestTargetA && bestTargetB) {
+      return { point: bestSnapPt, targetA: bestTargetA, targetB: bestTargetB };
+    }
+    return null;
+  };
+
   // Object snappy captures logic
   const computeSnapPoint = (worldPos: Point2D, sx: number, sy: number, excludeElementId?: string): SnapTarget | null => {
     let bestSnap: SnapTarget | null = null;
@@ -1504,20 +1629,24 @@ export default function CadCanvas({
     // 優先吸附選取物件的所有幾何節點（即使 snapToEndpoint 未啟用）
     if (appMode === 'cad' && selectedElement && activeTool !== 'select') {
       const vertices = getElementVertices(selectedElement);
-      vertices.forEach((pt: Point2D) => {
-        const screenPt = worldToScreen(pt.x, pt.y);
-        const d = Math.hypot(sx - screenPt.x, sy - screenPt.y);
-        if (d < closestDistScreen) {
-          closestDistScreen = d;
-          bestSnap = { point: pt, type: 'endpoint', elementId: selectedElement.id };
-        }
-      });
+      if (vertices) {
+        vertices.forEach((pt: Point2D) => {
+          if (!pt || pt.x === undefined || pt.y === undefined) return;
+          const screenPt = worldToScreen(pt.x, pt.y);
+          const d = Math.hypot(sx - screenPt.x, sy - screenPt.y);
+          if (d < closestDistScreen) {
+            closestDistScreen = d;
+            bestSnap = { point: pt, type: 'endpoint', elementId: selectedElement.id };
+          }
+        });
+      }
       if (bestSnap) {
         return bestSnap;
       }
     }
 
     elements.forEach(el => {
+      if (!el) return;
       if (excludeElementId && el.id === excludeElementId) {
         return;
       }
@@ -1526,10 +1655,11 @@ export default function CadCanvas({
         const line = el as any;
         const ref = getLineBezierRepresentation(line);
 
-        if (ref) {
+        if (ref && ref.points) {
           // Snap to any intermediate anchor points
           if (snapToEndpoint) {
             ref.points.forEach((pt: Point2D) => {
+              if (!pt || pt.x === undefined || pt.y === undefined) return;
               const screenPt = worldToScreen(pt.x, pt.y);
               const d = Math.hypot(sx - screenPt.x, sy - screenPt.y);
               if (d < closestDistScreen) {
@@ -1543,17 +1673,20 @@ export default function CadCanvas({
           if (snapToMidpoint && !bestSnap && ref.points.length > 0) {
             const midIndex = Math.floor(ref.points.length / 2);
             const pt = ref.points[midIndex];
-            const screenPt = worldToScreen(pt.x, pt.y);
-            const d = Math.hypot(sx - screenPt.x, sy - screenPt.y);
-            if (d < closestDistScreen) {
-              closestDistScreen = d;
-              bestSnap = { point: pt, type: 'midpoint', elementId: el.id };
+            if (pt && pt.x !== undefined && pt.y !== undefined) {
+              const screenPt = worldToScreen(pt.x, pt.y);
+              const d = Math.hypot(sx - screenPt.x, sy - screenPt.y);
+              if (d < closestDistScreen) {
+                closestDistScreen = d;
+                bestSnap = { point: pt, type: 'midpoint', elementId: el.id };
+              }
             }
           }
-        } else if (line.p1 && line.p2) {
+        } else if (line && line.p1 && line.p2) {
           if (snapToEndpoint) {
             const pts = [line.p1, line.p2];
             pts.forEach(pt => {
+              if (!pt || pt.x === undefined || pt.y === undefined) return;
               const screenPt = worldToScreen(pt.x, pt.y);
               const d = Math.hypot(sx - screenPt.x, sy - screenPt.y);
               if (d < closestDistScreen) {
@@ -1562,7 +1695,7 @@ export default function CadCanvas({
               }
             });
           }
-          if (snapToMidpoint && !bestSnap) {
+          if (snapToMidpoint && !bestSnap && line.p1.x !== undefined && line.p2.x !== undefined && line.p1.y !== undefined && line.p2.y !== undefined) {
             const midPt = { x: (line.p1.x + line.p2.x) / 2, y: (line.p1.y + line.p2.y) / 2 };
             const screenPt = worldToScreen(midPt.x, midPt.y);
             const d = Math.hypot(sx - screenPt.x, sy - screenPt.y);
@@ -1574,79 +1707,93 @@ export default function CadCanvas({
         }
       } else if (el.type === 'sketch_circle') {
         const circ = el as any;
-        if (snapToEndpoint) {
-          // Snap directly to center point
-          const screenC = worldToScreen(circ.center.x, circ.center.y);
-          const dCenter = Math.hypot(sx - screenC.x, sy - screenC.y);
-          if (dCenter < closestDistScreen) {
-            closestDistScreen = dCenter;
-            bestSnap = { point: circ.center, type: 'endpoint', elementId: el.id };
+        if (circ && circ.center && circ.center.x !== undefined && circ.center.y !== undefined) {
+          if (snapToEndpoint) {
+            // Snap directly to center point
+            const screenC = worldToScreen(circ.center.x, circ.center.y);
+            const dCenter = Math.hypot(sx - screenC.x, sy - screenC.y);
+            if (dCenter < closestDistScreen) {
+              closestDistScreen = dCenter;
+              bestSnap = { point: circ.center, type: 'endpoint', elementId: el.id };
+            }
           }
         }
       } else if (el.type === 'three_center_curve') {
         const curve = el as ThreeCenterCurveElement;
-        const pointsToSnap = [
-          { pt: curve.pStart, label: 'pStart' },
-          { pt: curve.pEnd, label: 'pEnd' },
-          { pt: curve.T1, label: 'T1' },
-          { pt: curve.T2, label: 'T2' }
-        ];
-        
-        if (snapToEndpoint) {
-          pointsToSnap.forEach(item => {
-            const screenPt = worldToScreen(item.pt.x, item.pt.y);
-            const d = Math.hypot(sx - screenPt.x, sy - screenPt.y);
-            if (d < closestDistScreen) {
-              closestDistScreen = d;
-              bestSnap = { point: item.pt, type: 'endpoint', elementId: el.id };
-            }
-          });
+        if (curve) {
+          const pointsToSnap = [
+            { pt: curve.pStart, label: 'pStart' },
+            { pt: curve.pEnd, label: 'pEnd' },
+            { pt: curve.T1, label: 'T1' },
+            { pt: curve.T2, label: 'T2' }
+          ];
+          
+          if (snapToEndpoint) {
+            pointsToSnap.forEach(item => {
+              if (!item.pt || item.pt.x === undefined || item.pt.y === undefined) return;
+              const screenPt = worldToScreen(item.pt.x, item.pt.y);
+              const d = Math.hypot(sx - screenPt.x, sy - screenPt.y);
+              if (d < closestDistScreen) {
+                closestDistScreen = d;
+                bestSnap = { point: item.pt, type: 'endpoint', elementId: el.id };
+              }
+            });
+          }
         }
       } else if (el.type === 'island') {
         const island = el as IslandElement;
-        if (snapToEndpoint) {
-          island.points.forEach((pt: Point2D) => {
-            const screenPt = worldToScreen(pt.x, pt.y);
-            const d = Math.hypot(sx - screenPt.x, sy - screenPt.y);
-            if (d < closestDistScreen) {
-              closestDistScreen = d;
-              bestSnap = { point: pt, type: 'endpoint', elementId: el.id };
-            }
-          });
+        if (island && island.points) {
+          if (snapToEndpoint) {
+            island.points.forEach((pt: Point2D) => {
+              if (!pt || pt.x === undefined || pt.y === undefined) return;
+              const screenPt = worldToScreen(pt.x, pt.y);
+              const d = Math.hypot(sx - screenPt.x, sy - screenPt.y);
+              if (d < closestDistScreen) {
+                closestDistScreen = d;
+                bestSnap = { point: pt, type: 'endpoint', elementId: el.id };
+              }
+            });
+          }
         }
       } else if (el.type === 'crosswalk') {
         const cw = el as any;
-        if (snapToEndpoint) {
-          const pts = [cw.pA1, cw.pA2, cw.pB1, cw.pB2];
-          pts.forEach(pt => {
-            const screenPt = worldToScreen(pt.x, pt.y);
-            const d = Math.hypot(sx - screenPt.x, sy - screenPt.y);
-            if (d < closestDistScreen) {
-              closestDistScreen = d;
-              bestSnap = { point: pt, type: 'endpoint', elementId: el.id };
+        if (cw) {
+          if (snapToEndpoint) {
+            const pts = [cw.pA1, cw.pA2, cw.pB1, cw.pB2];
+            pts.forEach(pt => {
+              if (!pt || pt.x === undefined || pt.y === undefined) return;
+              const screenPt = worldToScreen(pt.x, pt.y);
+              const d = Math.hypot(sx - screenPt.x, sy - screenPt.y);
+              if (d < closestDistScreen) {
+                closestDistScreen = d;
+                bestSnap = { point: pt, type: 'endpoint', elementId: el.id };
+              }
+            });
+          }
+          if (snapToMidpoint && !bestSnap) {
+            if (cw.pA1 && cw.pA2 && cw.pB1 && cw.pB2 && cw.pA1.x !== undefined && cw.pA2.x !== undefined && cw.pB1.x !== undefined && cw.pB2.x !== undefined) {
+              const midA = { x: (cw.pA1.x + cw.pA2.x) / 2, y: (cw.pA1.y + cw.pA2.y) / 2 };
+              const midB = { x: (cw.pB1.x + cw.pB2.x) / 2, y: (cw.pB1.y + cw.pB2.y) / 2 };
+              const midPoints = [midA, midB];
+              midPoints.forEach(pt => {
+                if (!pt || pt.x === undefined || pt.y === undefined) return;
+                const screenPt = worldToScreen(pt.x, pt.y);
+                const d = Math.hypot(sx - screenPt.x, sy - screenPt.y);
+                if (d < closestDistScreen) {
+                  closestDistScreen = d;
+                  bestSnap = { point: pt, type: 'midpoint', elementId: el.id };
+                }
+              });
             }
-          });
-        }
-        if (snapToMidpoint && !bestSnap) {
-          const midA = { x: (cw.pA1.x + cw.pA2.x) / 2, y: (cw.pA1.y + cw.pA2.y) / 2 };
-          const midB = { x: (cw.pB1.x + cw.pB2.x) / 2, y: (cw.pB1.y + cw.pB2.y) / 2 };
-          const midPoints = [midA, midB];
-          midPoints.forEach(pt => {
-            const screenPt = worldToScreen(pt.x, pt.y);
-            const d = Math.hypot(sx - screenPt.x, sy - screenPt.y);
-            if (d < closestDistScreen) {
-              closestDistScreen = d;
-              bestSnap = { point: pt, type: 'midpoint', elementId: el.id };
-            }
-          });
+          }
         }
       }
     });
 
     // 2. Check grid snap
-    if (!bestSnap && snapToGrid) {
-      let snapInterval = minorGridInterval;
-      if (canvasRef.current) {
+    if (!bestSnap && snapToGrid && (minorGridInterval > 0 || majorGridInterval > 0)) {
+      let snapInterval = minorGridInterval || majorGridInterval || 1.0;
+      if (canvasRef.current && minorGridInterval > 0) {
         const visibleWidthMeters = canvasRef.current.width / viewport.zoom;
         if (visibleWidthMeters <= 30 && snapInterval >= 1) {
           snapInterval = 0.1;
@@ -1805,6 +1952,24 @@ export default function CadCanvas({
     );
     let activeWorldPos = snap ? snap.point : literalWorld;
 
+    if (activeTool === 'measurement' && spPoints.length === 1) {
+      const perpSnap = findPerpendicularSnap(spPoints[0], literalWorld);
+      if (perpSnap) {
+        activeWorldPos = perpSnap.point;
+        isPerpSnappedRef.current = true;
+        perpSnapLineRef.current = {
+          p1: spPoints[0],
+          p2: perpSnap.point,
+          targetA: perpSnap.targetA,
+          targetB: perpSnap.targetB
+        };
+      } else {
+        isPerpSnappedRef.current = false;
+      }
+    } else {
+      isPerpSnappedRef.current = false;
+    }
+
     if (e.shiftKey) {
       if (isLineOrPathTool(activeTool) && spPoints.length > 0) {
         const p0 = spPoints[spPoints.length - 1];
@@ -1959,8 +2124,8 @@ export default function CadCanvas({
       if (sp) {
         const i = draggedSmartPathItem.nodeIndex;
         const newPts = [...sp.points];
-        const newCpLeft = [...sp.cpLeft];
-        const newCpRight = [...sp.cpRight];
+        const newCpLeft = sp.cpLeft ? [...sp.cpLeft] : [...sp.points];
+        const newCpRight = sp.cpRight ? [...sp.cpRight] : [...sp.points];
 
         if (draggedSmartPathItem.type === 'anchor') {
           let currentPos = activeWorldPos;
@@ -2484,14 +2649,43 @@ export default function CadCanvas({
             const lp = simLockedPaths[lpIdx];
             const lpScale = lp.config.scale;
             let hitLp = false;
-            for (let i = 0; i < lp.rawPoints.length; i++) {
-              const wp = lp.rawPoints[i];
-              const screenAnchor = worldToScreen(wp.x / lpScale, wp.y / lpScale);
-              if (Math.hypot(sx - screenAnchor.x, sy - screenAnchor.y) < hitRadiusPx) {
-                hitLp = true;
-                break;
+            
+            // 優先檢測點擊點是否落在貝茲曲線軌跡線段的任何一處
+            if (lp.rawPoints && lp.rawPoints.length >= 2) {
+              for (let i = 0; i < lp.rawPoints.length - 1; i++) {
+                const wp0 = lp.rawPoints[i];
+                const wp1 = lp.rawPoints[i + 1];
+                const p0 = { x: wp0.x, y: wp0.y };
+                const cp0 = { x: wp0.x + (wp0.handleOut?.x || 0), y: wp0.y + (wp0.handleOut?.y || 0) };
+                const cp1 = { x: wp1.x + (wp1.handleIn?.x || 0), y: wp1.y + (wp1.handleIn?.y || 0) };
+                const p1 = { x: wp1.x, y: wp1.y };
+
+                const samples = sampleCubicBezier(p0, cp0, cp1, p1, 15);
+                for (let j = 0; j < samples.length - 1; j++) {
+                  const sPt1 = worldToScreen(samples[j].x / lpScale, samples[j].y / lpScale);
+                  const sPt2 = worldToScreen(samples[j + 1].x / lpScale, samples[j + 1].y / lpScale);
+                  const res = projectPointOnSegment({ x: sx, y: sy }, sPt1, sPt2);
+                  if (res.dist < 12) {
+                    hitLp = true;
+                    break;
+                  }
+                }
+                if (hitLp) break;
               }
             }
+
+            // Fallback: 如果沒點到線段，檢測是否點擊在各節點 (Anchor) 上
+            if (!hitLp && lp.rawPoints) {
+              for (let i = 0; i < lp.rawPoints.length; i++) {
+                const wp = lp.rawPoints[i];
+                const screenAnchor = worldToScreen(wp.x / lpScale, wp.y / lpScale);
+                if (Math.hypot(sx - screenAnchor.x, sy - screenAnchor.y) < hitRadiusPx) {
+                  hitLp = true;
+                  break;
+                }
+              }
+            }
+
             if (hitLp) {
               if (onSelectLockedPath) {
                 onSelectLockedPath(lp.id);
@@ -3036,7 +3230,8 @@ export default function CadCanvas({
           el.type === 'yield_line' ||
           el.type === 'Sidewalk' ||
           el.type === 'reversible_lane' ||
-          el.type === 'bicycle_lane'
+          el.type === 'bicycle_lane' ||
+          el.type === 'measurement'
         ) {
           const line = el as any;
           const ref = getLineBezierRepresentation(line);
@@ -3305,6 +3500,29 @@ export default function CadCanvas({
               }
             }
           }
+        } else if (el.type === 'angular_dimension') {
+          const ang = el as AngularDimensionElement;
+          const sCenter = worldToScreen(ang.center.x, ang.center.y);
+          const dCenter = Math.hypot(sx - sCenter.x, sy - sCenter.y);
+          
+          let minD = dCenter;
+          
+          // edge 1: center to pStart1
+          const proj1 = projectPointOnSegment(clickPt, ang.center, ang.pStart1);
+          const sProj1 = worldToScreen(proj1.point.x, proj1.point.y);
+          const dProj1 = Math.hypot(sx - sProj1.x, sy - sProj1.y);
+          if (dProj1 < minD) minD = dProj1;
+          
+          // edge 2: center to pStart2
+          const proj2 = projectPointOnSegment(clickPt, ang.center, ang.pStart2);
+          const sProj2 = worldToScreen(proj2.point.x, proj2.point.y);
+          const dProj2 = Math.hypot(sx - sProj2.x, sy - sProj2.y);
+          if (dProj2 < minD) minD = dProj2;
+          
+          if (minD < minDistanceScreen) {
+            minDistanceScreen = minD;
+            selected = el;
+          }
         }
       });
 
@@ -3340,7 +3558,7 @@ export default function CadCanvas({
     }
 
     // 3. Curved Line tools or smart path - ALL constructed via our Bezier Pen!
-    if (isLineOrPathTool(activeTool)) {
+    if (isLineOrPathTool(activeTool) && !(activeTool === 'measurement' && spPoints.length === 1)) {
       if (spPoints.length === 0 && selectedElement) {
         const ref = getLineBezierRepresentation(selectedElement);
         if (ref && ref.points.length > 0) {
@@ -3365,17 +3583,7 @@ export default function CadCanvas({
         setConnectionStartInfo(null);
       }
 
-      // 3.0 Close path if clicking near first anchor point
-      if (spPoints.length >= 2) {
-        const firstPt = spPoints[0];
-        const screenFirstPt = worldToScreen(firstPt.x, firstPt.y);
-        const distScreen = Math.hypot(sx - screenFirstPt.x, sy - screenFirstPt.y);
-        if (distScreen < 15) {
-          handleCompleteSmartPath(spPoints, spCpLeft, spCpRight);
-          setIsClosingPathDrag(false);
-          return;
-        }
-      }
+      // 3.0 Close path if clicking near first anchor point - DELETED, Enter/V key only
       // 3.1 Cancel curve if clicking the same point again, converting to a straight segment
       if (spPoints.length >= 1) {
         const lastPt = spPoints[spPoints.length - 1];
@@ -3685,6 +3893,71 @@ export default function CadCanvas({
       return;
     }
 
+    // 8. Angular Dimension Tool (3-point style)
+    if (activeTool === 'angular_dimension') {
+      const nextPoints = [...spPoints, clickPt];
+      if (nextPoints.length < 3) {
+        setSpPoints(nextPoints);
+      } else {
+        const center = nextPoints[0];
+        const pStart1 = nextPoints[1];
+        const pStart2 = nextPoints[2];
+
+        const v1 = { x: pStart1.x - center.x, y: pStart1.y - center.y };
+        const v2 = { x: pStart2.x - center.x, y: pStart2.y - center.y };
+        const d1 = Math.hypot(v1.x, v1.y);
+        const d2 = Math.hypot(v2.x, v2.y);
+
+        let angleDeg = 0;
+        if (d1 > 0.0001 && d2 > 0.0001) {
+          const cosTheta = Math.max(-1, Math.min(1, (v1.x * v2.x + v1.y * v2.y) / (d1 * d2)));
+          const angleRad = Math.acos(cosTheta);
+          angleDeg = parseFloat((angleRad * 180 / Math.PI).toFixed(1));
+        }
+
+        const newId = `angle-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+        const angleEl: CadElement = {
+          id: newId,
+          type: 'angular_dimension',
+          center,
+          pStart1,
+          pStart2,
+          angleDeg
+        };
+        onAddElement(angleEl);
+        onSelectElement(angleEl);
+        setSpPoints([]);
+      }
+      return;
+    }
+
+    // 9. 3-point Arc Tool (with control points initialized to prevent white screen crash)
+    if (activeTool === 'arc_3point') {
+      const nextPoints = [...spPoints, clickPt];
+      if (nextPoints.length < 3) {
+        setSpPoints(nextPoints);
+      } else {
+        const p1 = nextPoints[0];
+        const p2 = nextPoints[1];
+        const p3 = nextPoints[2];
+        const arcPts = getArcFromThreePoints(p1, p2, p3, 30);
+        
+        const newId = `arc-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+        const arcEl: CadElement = {
+          id: newId,
+          type: 'white_solid',
+          points: arcPts,
+          cpLeft: arcPts,
+          cpRight: arcPts,
+          lineWidth: 0.15
+        } as any;
+        onAddElement(arcEl);
+        onSelectElement(arcEl);
+        setSpPoints([]);
+      }
+      return;
+    }
+
     // 6. Text Label Annotation tool: Delay prompt slightly to let pointerDown event cycle release first.
     if (activeTool === 'text_label') {
       e.stopPropagation();
@@ -3704,6 +3977,27 @@ export default function CadCanvas({
           onSelectElement(txtEl);
         }
       }, 50);
+      return;
+    }
+
+    // 7. Measurement Tool
+    if (activeTool === 'measurement') {
+      if (spPoints.length === 0) {
+        setSpPoints([clickPt]);
+      } else {
+        const p1 = spPoints[0];
+        // 如果有垂線吸附，使用吸附點，否則使用 clickPt
+        const p2 = isPerpSnappedRef.current && perpSnapLineRef.current ? perpSnapLineRef.current.p2 : clickPt;
+        const newId = `meas-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+        const measEl: CadElement = {
+          id: newId,
+          type: 'measurement',
+          points: [p1, p2],
+        };
+        onAddElement(measEl);
+        onSelectElement(measEl);
+        setSpPoints([]);
+      }
       return;
     }
   };
@@ -3901,18 +4195,81 @@ export default function CadCanvas({
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    const isLight = theme === 'light';
-    const whiteColor = isLight ? '#1e293b' : '#ffffff';
-    const yellowColor = isLight ? '#b45309' : '#f59e0b';
-    const yellowDashedColor = isLight ? '#b45309' : '#eab308';
-    const primaryLineColor = isLight ? '#1e293b' : '#ffffff';
-    const textDrawColor = isLight ? '#0f172a' : '#e2e8f0';
+
+    const whiteColor = '#ffffff';
+    const yellowColor = '#f59e0b';
+    const yellowDashedColor = '#eab308';
+    const primaryLineColor = '#ffffff';
+    const textDrawColor = '#e2e8f0';
 
     // Clear Screen
-    ctx.fillStyle = isLight ? '#f8fafc' : '#101216';
+    ctx.fillStyle = '#101216';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
     const { zoom, panX, panY } = viewport;
+
+    let isCurrentlyColliding = false;
+    if (appMode === 'simulation' && simTrajectory && simTrajectory.length > 0) {
+      const stepsToTest = simTrajectory.slice(0, simCurrentStepIndex + 1);
+      const scale = simConfig.scale;
+      const buildingLines = elements.filter(el => el.type === 'BuildingLine');
+      
+      let hitRed = false;
+      for (const stepState of stepsToTest) {
+        if (!stepState.corners) continue;
+        const tVerts = [
+          { x: stepState.corners.fl.x / scale, y: stepState.corners.fl.y / scale },
+          { x: stepState.corners.fr.x / scale, y: stepState.corners.fr.y / scale },
+          { x: stepState.corners.rr.x / scale, y: stepState.corners.rr.y / scale },
+          { x: stepState.corners.rl.x / scale, y: stepState.corners.rl.y / scale }
+        ];
+        const tEdges = [
+          { p1: tVerts[0], p2: tVerts[1] },
+          { p1: tVerts[1], p2: tVerts[2] },
+          { p1: tVerts[2], p2: tVerts[3] },
+          { p1: tVerts[3], p2: tVerts[0] }
+        ];
+
+        const trVerts = stepState.trailerCorners ? [
+          { x: stepState.trailerCorners.fl.x / scale, y: stepState.trailerCorners.fl.y / scale },
+          { x: stepState.trailerCorners.fr.x / scale, y: stepState.trailerCorners.fr.y / scale },
+          { x: stepState.trailerCorners.rr.x / scale, y: stepState.trailerCorners.rr.y / scale },
+          { x: stepState.trailerCorners.rl.x / scale, y: stepState.trailerCorners.rl.y / scale }
+        ] : [];
+        const trEdges = stepState.trailerCorners ? [
+          { p1: trVerts[0], p2: trVerts[1] },
+          { p1: trVerts[1], p2: trVerts[2] },
+          { p1: trVerts[2], p2: trVerts[3] },
+          { p1: trVerts[3], p2: trVerts[0] }
+        ] : [];
+
+        const allVehicleEdges = [...tEdges, ...trEdges];
+
+        for (const bl of buildingLines) {
+          const blEdges = getElementEdges(bl);
+          for (const ve of allVehicleEdges) {
+            for (const ble of blEdges) {
+              if (lineSegmentsIntersect(ve.p1, ve.p2, ble.p1, ble.p2)) {
+                hitRed = true;
+                break;
+              }
+            }
+            if (hitRed) break;
+          }
+          if (hitRed) break;
+        }
+        if (hitRed) {
+          isCurrentlyColliding = true;
+          break;
+        }
+      }
+    }
+
+    if (setSimHasCollision) {
+      setTimeout(() => {
+        setSimHasCollision(isCurrentlyColliding);
+      }, 0);
+    }
 
     // RENDER BACKGROUND IMAGE (IF LOADED)
     if (bgImage && bgImgRef.current) {
@@ -3942,64 +4299,68 @@ export default function CadCanvas({
 
       ctx.lineWidth = 1;
       
-      const startX = Math.floor(minXWorld / minorGridInterval) * minorGridInterval;
-      const endX = Math.ceil(maxXWorld / minorGridInterval) * minorGridInterval;
-      const startY = Math.floor(minYWorld / minorGridInterval) * minorGridInterval;
-      const endY = Math.ceil(maxYWorld / minorGridInterval) * minorGridInterval;
-
       // Minor Grid (dotted slate)
-      ctx.strokeStyle = isLight ? 'rgba(148, 163, 184, 0.15)' : '#1a1d24';
-      ctx.setLineDash([2, 5]);
-      for (let x = startX; x <= endX; x += minorGridInterval) {
-        if (x === 0) continue;
-        const screenPt = worldToScreen(x, 0);
-        ctx.beginPath();
-        ctx.moveTo(screenPt.x, 0);
-        ctx.lineTo(screenPt.x, canvas.height);
-        ctx.stroke();
-      }
-      for (let y = startY; y <= endY; y += minorGridInterval) {
-        if (y === 0) continue;
-        const screenPt = worldToScreen(0, y);
-        ctx.beginPath();
-        ctx.moveTo(0, screenPt.y);
-        ctx.lineTo(canvas.width, screenPt.y);
-        ctx.stroke();
+      if (minorGridInterval > 0) {
+        const startX = Math.floor(minXWorld / minorGridInterval) * minorGridInterval;
+        const endX = Math.ceil(maxXWorld / minorGridInterval) * minorGridInterval;
+        const startY = Math.floor(minYWorld / minorGridInterval) * minorGridInterval;
+        const endY = Math.ceil(maxYWorld / minorGridInterval) * minorGridInterval;
+
+        ctx.strokeStyle = '#1a1d24';
+        ctx.setLineDash([2, 5]);
+        for (let x = startX; x <= endX; x += minorGridInterval) {
+          if (x === 0) continue;
+          const screenPt = worldToScreen(x, 0);
+          ctx.beginPath();
+          ctx.moveTo(screenPt.x, 0);
+          ctx.lineTo(screenPt.x, canvas.height);
+          ctx.stroke();
+        }
+        for (let y = startY; y <= endY; y += minorGridInterval) {
+          if (y === 0) continue;
+          const screenPt = worldToScreen(0, y);
+          ctx.beginPath();
+          ctx.moveTo(0, screenPt.y);
+          ctx.lineTo(canvas.width, screenPt.y);
+          ctx.stroke();
+        }
       }
 
       // Major Grid & Axes
-      ctx.strokeStyle = isLight ? 'rgba(148, 163, 184, 0.35)' : '#292d38';
-      ctx.setLineDash([]);
-      for (let x = Math.floor(minXWorld / majorGridInterval) * majorGridInterval; x <= maxXWorld; x += majorGridInterval) {
-        const screenPt = worldToScreen(x, 0);
-        ctx.beginPath();
-        ctx.moveTo(screenPt.x, 0);
-        ctx.lineTo(screenPt.x, canvas.height);
-        ctx.stroke();
+      if (majorGridInterval > 0) {
+        ctx.strokeStyle = '#292d38';
+        ctx.setLineDash([]);
+        for (let x = Math.floor(minXWorld / majorGridInterval) * majorGridInterval; x <= maxXWorld; x += majorGridInterval) {
+          const screenPt = worldToScreen(x, 0);
+          ctx.beginPath();
+          ctx.moveTo(screenPt.x, 0);
+          ctx.lineTo(screenPt.x, canvas.height);
+          ctx.stroke();
 
-        if (zoom > 4) {
-          ctx.fillStyle = isLight ? '#64748b' : '#525a6c';
-          ctx.font = '8px monospace';
-          ctx.fillText(`${x}m`, screenPt.x + 3, canvas.height - 8);
+          if (zoom > 4) {
+            ctx.fillStyle = '#525a6c';
+            ctx.font = '8px monospace';
+            ctx.fillText(`${x}m`, screenPt.x + 3, canvas.height - 8);
+          }
         }
-      }
-      for (let y = Math.floor(minYWorld / majorGridInterval) * majorGridInterval; y <= maxYWorld; y += majorGridInterval) {
-        const screenPt = worldToScreen(0, y);
-        ctx.beginPath();
-        ctx.moveTo(0, screenPt.y);
-        ctx.lineTo(canvas.width, screenPt.y);
-        ctx.stroke();
+        for (let y = Math.floor(minYWorld / majorGridInterval) * majorGridInterval; y <= maxYWorld; y += majorGridInterval) {
+          const screenPt = worldToScreen(0, y);
+          ctx.beginPath();
+          ctx.moveTo(0, screenPt.y);
+          ctx.lineTo(canvas.width, screenPt.y);
+          ctx.stroke();
 
-        if (zoom > 4) {
-          ctx.fillStyle = isLight ? '#64748b' : '#525a6c';
-          ctx.font = '8px monospace';
-          ctx.fillText(`${y}m`, 8, screenPt.y - 3);
+          if (zoom > 4) {
+            ctx.fillStyle = '#525a6c';
+            ctx.font = '8px monospace';
+            ctx.fillText(`${y}m`, 8, screenPt.y - 3);
+          }
         }
       }
 
       // Primary central axes coordinate crosses
       const origin = worldToScreen(0, 0);
-      ctx.strokeStyle = isLight ? 'rgba(59, 130, 246, 0.45)' : 'rgba(59, 130, 246, 0.28)';
+      ctx.strokeStyle = 'rgba(59, 130, 246, 0.28)';
       ctx.lineWidth = 1.5;
       ctx.beginPath();
       ctx.moveTo(0, origin.y); ctx.lineTo(canvas.width, origin.y);
@@ -4031,7 +4392,8 @@ export default function CadCanvas({
 
         if (ref) {
           ctx.lineCap = 'butt';
-          ctx.lineJoin = 'miter';
+          ctx.lineJoin = 'round';
+          ctx.miterLimit = 10;
           ctx.setLineDash([]);
 
           if (el.type === 'guideline') {
@@ -4256,8 +4618,8 @@ export default function CadCanvas({
             const segPts = getPathOffsetCurves(ref.points, ref.cpLeft, ref.cpRight, 0, 30);
             if (segPts.length >= 2) {
               ctx.save();
-              ctx.fillStyle = isLight ? '#cbd5e1' : '#A9A9A9'; // Engineering gray pavement fill
-              ctx.strokeStyle = isLight ? '#475569' : '#1e293b'; // 10cm dark gray border
+              ctx.fillStyle = '#A9A9A9'; // Engineering gray pavement fill
+              ctx.strokeStyle = '#1e293b'; // 10cm dark gray border
               ctx.lineWidth = Math.max(1.5, zoom * 0.1); // 10cm border
 
               ctx.beginPath();
@@ -4280,7 +4642,7 @@ export default function CadCanvas({
               ctx.restore();
             }
           } else if (el.type === 'BuildingLine') {
-            ctx.strokeStyle = isLight ? '#0891b2' : '#00ffff';
+            ctx.strokeStyle = '#00ffff';
             ctx.lineWidth = 2.5;
 
             const segPts = getPathOffsetCurves(ref.points, ref.cpLeft, ref.cpRight, 0, 25);
@@ -4430,7 +4792,7 @@ export default function CadCanvas({
         });
         ctx.closePath();
         
-        ctx.fillStyle = isLight ? 'rgba(30, 41, 59, 0.12)' : 'rgba(15, 23, 42, 0.55)';
+        ctx.fillStyle = 'rgba(15, 23, 42, 0.55)';
         ctx.fill();
 
         ctx.strokeStyle = (island.color || whiteColor);
@@ -4440,7 +4802,7 @@ export default function CadCanvas({
         if (island.hasHatching && boundaryPoints.length >= 3) {
           const hatching = generateHatchingLines(boundaryPoints, 0.45, 45);
           
-          ctx.strokeStyle = island.color || (isLight ? 'rgba(30, 41, 59, 0.75)' : 'rgba(255, 255, 255, 0.75)');
+          ctx.strokeStyle = island.color || 'rgba(255, 255, 255, 0.75)';
           ctx.lineWidth = Math.max(1.5, zoom * 0.12);
           ctx.beginPath();
           hatching.forEach((line) => {
@@ -4675,7 +5037,7 @@ export default function CadCanvas({
         const stripes = generateCrosswalkStripes(cw.pA1, cw.pA2, cw.pB1, cw.pB2, stripeWidth, stripeGap);
 
         // Render crosswalk white pillow stripes
-        ctx.fillStyle = isLight ? 'rgba(30, 41, 59, 0.95)' : 'rgba(255, 255, 255, 0.95)';
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.95)';
         
         stripes.forEach((stripe) => {
           ctx.beginPath();
@@ -4728,7 +5090,7 @@ export default function CadCanvas({
         ctx.lineJoin = 'round';
         ctx.strokeStyle = whiteColor;
         ctx.lineWidth = Math.max(1.5, zoom * 0.1); // 10cm standard paint lines
-        ctx.fillStyle = isSelected ? 'rgba(56, 189, 248, 0.22)' : (isLight ? 'rgba(30, 41, 59, 0.05)' : 'rgba(255, 255, 255, 0.05)');
+        ctx.fillStyle = isSelected ? 'rgba(56, 189, 248, 0.22)' : 'rgba(255, 255, 255, 0.05)';
 
         ctx.beginPath();
         ctx.moveTo(0, 0);
@@ -4740,11 +5102,16 @@ export default function CadCanvas({
         ctx.stroke();
 
         if (pk.showSizeLabel !== false && zoom > 7) {
-          ctx.fillStyle = isSelected ? '#38bdf8' : (isLight ? 'rgba(30, 41, 59, 0.65)' : 'rgba(255, 255, 255, 0.55)');
+          ctx.fillStyle = isSelected ? '#38bdf8' : 'rgba(255, 255, 255, 0.55)';
           ctx.font = '9px JetBrains Mono, monospace, sans-serif';
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
-          ctx.fillText(`${pk.slotType === 'car' ? '汽車' : '機車'} ${W}x${L}m`, (L / 2) * zoom, -(W / 2) * zoom);
+          const labelText = pk.slotType === 'car' ? '汽車' : '機車';
+          const sizeText = `${W.toFixed(1)}x${L.toFixed(1)}m`;
+          const cx = (L / 2) * zoom;
+          const cy = -(W / 2) * zoom;
+          ctx.fillText(labelText, cx, cy - 6);
+          ctx.fillText(sizeText, cx, cy + 6);
         }
         ctx.restore();
 
@@ -4800,7 +5167,7 @@ export default function CadCanvas({
         const ref = getLineBezierRepresentation(zone);
         if (ref) {
           ctx.save();
-          ctx.strokeStyle = isSelected ? 'rgba(56, 189, 248, 0.4)' : (isLight ? 'rgba(30, 41, 59, 0.15)' : 'rgba(255, 255, 255, 0.15)');
+          ctx.strokeStyle = isSelected ? 'rgba(56, 189, 248, 0.4)' : 'rgba(255, 255, 255, 0.15)';
           ctx.lineWidth = 1.0;
           ctx.setLineDash([4, 6]);
           ctx.beginPath();
@@ -4821,7 +5188,7 @@ export default function CadCanvas({
           ctx.lineJoin = 'round';
           ctx.strokeStyle = whiteColor;
           ctx.lineWidth = Math.max(1.5, zoom * 0.1);
-          ctx.fillStyle = isSelected ? 'rgba(56, 189, 248, 0.22)' : (isLight ? 'rgba(30, 41, 59, 0.05)' : 'rgba(255, 255, 255, 0.05)');
+          ctx.fillStyle = isSelected ? 'rgba(56, 189, 248, 0.22)' : 'rgba(255, 255, 255, 0.05)';
 
           const s1 = worldToScreen(slot.corners[0].x, slot.corners[0].y);
           const s2 = worldToScreen(slot.corners[1].x, slot.corners[1].y);
@@ -4838,16 +5205,117 @@ export default function CadCanvas({
           ctx.stroke();
 
           if ((el as any).showSizeLabel !== false && zoom > 7) {
-            ctx.fillStyle = isSelected ? '#38bdf8' : (isLight ? 'rgba(30, 41, 59, 0.65)' : 'rgba(255, 255, 255, 0.55)');
+            ctx.fillStyle = isSelected ? '#38bdf8' : 'rgba(255, 255, 255, 0.55)';
             ctx.font = '9px JetBrains Mono, monospace, sans-serif';
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
             const cx = (s1.x + s2.x + s3.x + s4.x) / 4;
             const cy = (s1.y + s2.y + s3.y + s4.y) / 4;
-            ctx.fillText(`${slot.slotType === 'car' ? '汽車' : '機車'} ${slot.width}x${slot.length}m`, cx, cy);
+            const labelText = slot.slotType === 'car' ? '汽車' : '機車';
+            const sizeText = `${slot.width}x${slot.length}m`;
+            ctx.fillText(labelText, cx, cy - 6);
+            ctx.fillText(sizeText, cx, cy + 6);
           }
           ctx.restore();
         });
+      } else if (el.type === 'measurement') {
+        const meas = el as MeasurementElement;
+        if (meas.points && meas.points.length === 2) {
+          const p1 = meas.points[0];
+          const p2 = meas.points[1];
+          const s1 = worldToScreen(p1.x, p1.y);
+          const s2 = worldToScreen(p2.x, p2.y);
+          
+          ctx.save();
+          ctx.strokeStyle = isSelected ? '#f59e0b' : '#fb923c';
+          ctx.lineWidth = isSelected ? 2.5 : 1.5;
+          ctx.setLineDash([5, 5]);
+          ctx.beginPath();
+          ctx.moveTo(s1.x, s1.y);
+          ctx.lineTo(s2.x, s2.y);
+          ctx.stroke();
+          ctx.setLineDash([]);
+
+          const angle = Math.atan2(s2.y - s1.y, s2.x - s1.x);
+          const drawTick = (sx: number, sy: number) => {
+            ctx.save();
+            ctx.translate(sx, sy);
+            ctx.rotate(angle + Math.PI / 4);
+            ctx.strokeStyle = isSelected ? '#f59e0b' : '#fb923c';
+            ctx.lineWidth = 2.0;
+            ctx.beginPath();
+            ctx.moveTo(0, -6);
+            ctx.lineTo(0, 6);
+            ctx.stroke();
+            ctx.restore();
+          };
+          drawTick(s1.x, s1.y);
+          drawTick(s2.x, s2.y);
+
+          const midX = (s1.x + s2.x) / 2;
+          const midY = (s1.y + s2.y) / 2;
+          const distWorld = distance(p1, p2);
+          const text = `${distWorld.toFixed(2)} m`;
+          
+          ctx.font = '10px JetBrains Mono, monospace, sans-serif';
+          const textWidth = ctx.measureText(text).width;
+          // ctx.fillRect(midX - textWidth / 2 - 4, midY - 7, textWidth + 8, 14);
+          
+          ctx.fillStyle = '#f8fafc';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(text, midX, midY);
+          ctx.restore();
+        }
+      } else if (el.type === 'angular_dimension') {
+        const angEl = el as AngularDimensionElement;
+        const sCenter = worldToScreen(angEl.center.x, angEl.center.y);
+        const sStart1 = worldToScreen(angEl.pStart1.x, angEl.pStart1.y);
+        const sStart2 = worldToScreen(angEl.pStart2.x, angEl.pStart2.y);
+
+        const a1 = Math.atan2(sStart1.y - sCenter.y, sStart1.x - sCenter.x);
+        const a2 = Math.atan2(sStart2.y - sCenter.y, sStart2.x - sCenter.x);
+
+        ctx.save();
+        ctx.strokeStyle = isSelected ? '#a855f7' : '#ec4899';
+        ctx.lineWidth = isSelected ? 1.5 : 1.0;
+        ctx.setLineDash([3, 3]);
+        ctx.beginPath();
+        ctx.moveTo(sCenter.x, sCenter.y);
+        ctx.lineTo(sStart1.x, sStart1.y);
+        ctx.moveTo(sCenter.x, sCenter.y);
+        ctx.lineTo(sStart2.x, sStart2.y);
+        ctx.stroke();
+        ctx.restore();
+
+        ctx.save();
+        ctx.strokeStyle = isSelected ? '#a855f7' : '#ec4899';
+        ctx.lineWidth = isSelected ? 2.5 : 1.5;
+        
+        const radius = 30;
+        ctx.beginPath();
+        let diff = a2 - a1;
+        while (diff > Math.PI) diff -= 2 * Math.PI;
+        while (diff < -Math.PI) diff += 2 * Math.PI;
+
+        ctx.arc(sCenter.x, sCenter.y, radius, a1, a1 + diff, diff < 0);
+        ctx.stroke();
+
+        const midAngle = a1 + diff / 2;
+        const textRadius = radius + 14;
+        const tx = sCenter.x + Math.cos(midAngle) * textRadius;
+        const ty = sCenter.y + Math.sin(midAngle) * textRadius;
+
+        const text = `${angEl.angleDeg.toFixed(1)}°`;
+        ctx.font = '10px JetBrains Mono, monospace, sans-serif';
+        const textWidth = ctx.measureText(text).width;
+        // ctx.fillRect(tx - textWidth / 2 - 3, ty - 7, textWidth + 6, 14);
+
+        ctx.fillStyle = '#f8fafc';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(text, tx, ty);
+        ctx.restore();
       }
     });
 
@@ -4916,6 +5384,187 @@ export default function CadCanvas({
         ctx.stroke();
         ctx.restore();
       }
+    }
+    // 7. Measurement Tool Preview
+    if (activeTool === 'measurement' && spPoints.length === 1) {
+      const p1 = spPoints[0];
+      const p2 = isPerpSnappedRef.current && perpSnapLineRef.current ? perpSnapLineRef.current.p2 : mouseWorld;
+      
+      const s1 = worldToScreen(p1.x, p1.y);
+      const s2 = worldToScreen(p2.x, p2.y);
+      
+      ctx.save();
+      ctx.strokeStyle = '#f59e0b';
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([5, 5]);
+      ctx.beginPath();
+      ctx.moveTo(s1.x, s1.y);
+      ctx.lineTo(s2.x, s2.y);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      const angle = Math.atan2(s2.y - s1.y, s2.x - s1.x);
+      const drawTick = (sx: number, sy: number) => {
+        ctx.save();
+        ctx.translate(sx, sy);
+        ctx.rotate(angle + Math.PI / 4);
+        ctx.strokeStyle = '#f59e0b';
+        ctx.lineWidth = 2.0;
+        ctx.beginPath();
+        ctx.moveTo(0, -6);
+        ctx.lineTo(0, 6);
+        ctx.stroke();
+        ctx.restore();
+      };
+      drawTick(s1.x, s1.y);
+      drawTick(s2.x, s2.y);
+
+      const midX = (s1.x + s2.x) / 2;
+      const midY = (s1.y + s2.y) / 2;
+      const distWorld = distance(p1, p2);
+      const text = `${distWorld.toFixed(2)} m`;
+      ctx.font = '10px JetBrains Mono, monospace, sans-serif';
+      const textWidth = ctx.measureText(text).width;
+      // ctx.fillRect(midX - textWidth / 2 - 4, midY - 7, textWidth + 8, 14);
+      
+      ctx.fillStyle = '#f8fafc';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(text, midX, midY);
+
+      if (isPerpSnappedRef.current && perpSnapLineRef.current) {
+        const targetA_S = worldToScreen(perpSnapLineRef.current.targetA.x, perpSnapLineRef.current.targetA.y);
+        const targetB_S = worldToScreen(perpSnapLineRef.current.targetB.x, perpSnapLineRef.current.targetB.y);
+        const lineDir = normalize({ x: targetB_S.x - targetA_S.x, y: targetB_S.y - targetA_S.y });
+        const perpDir = normalize({ x: s1.x - s2.x, y: s1.y - s2.y });
+        const size = 8;
+        const corner1 = { x: s2.x + perpDir.x * size, y: s2.y + perpDir.y * size };
+        const corner2 = { x: s2.x + lineDir.x * size, y: s2.y + lineDir.y * size };
+        const corner3 = { x: corner2.x + perpDir.x * size, y: corner2.y + perpDir.y * size };
+        
+        ctx.strokeStyle = '#f59e0b';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(corner1.x, corner1.y);
+        ctx.lineTo(corner3.x, corner3.y);
+        ctx.lineTo(corner2.x, corner2.y);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+
+    // 8. Angular Dimension Preview (3-point collection style)
+    if (activeTool === 'angular_dimension' && spPoints.length > 0) {
+      ctx.save();
+      const center = spPoints[0];
+      const sCenter = worldToScreen(center.x, center.y);
+      const sMouse = worldToScreen(mouseWorld.x, mouseWorld.y);
+
+      if (spPoints.length === 1) {
+        // Draw helper dashed line from center to mouse
+        ctx.strokeStyle = 'rgba(236, 72, 153, 0.75)';
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([4, 4]);
+        ctx.beginPath();
+        ctx.moveTo(sCenter.x, sCenter.y);
+        ctx.lineTo(sMouse.x, sMouse.y);
+        ctx.stroke();
+      } else if (spPoints.length === 2) {
+        const pStart1 = spPoints[1];
+        const sStart1 = worldToScreen(pStart1.x, pStart1.y);
+
+        // Draw solid line from center to pStart1
+        ctx.strokeStyle = '#ec4899';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(sCenter.x, sCenter.y);
+        ctx.lineTo(sStart1.x, sStart1.y);
+        ctx.stroke();
+
+        // Draw helper dashed line from center to mouse
+        ctx.strokeStyle = 'rgba(236, 72, 153, 0.75)';
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([4, 4]);
+        ctx.beginPath();
+        ctx.moveTo(sCenter.x, sCenter.y);
+        ctx.lineTo(sMouse.x, sMouse.y);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // Calculate and draw real-time arc & angle preview text
+        const a1 = Math.atan2(sStart1.y - sCenter.y, sStart1.x - sCenter.x);
+        const a2 = Math.atan2(sMouse.y - sCenter.y, sMouse.x - sCenter.x);
+
+        let diff = a2 - a1;
+        while (diff > Math.PI) diff -= 2 * Math.PI;
+        while (diff < -Math.PI) diff += 2 * Math.PI;
+
+        const radius = 24; // 24px
+        ctx.strokeStyle = '#ec4899';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.arc(sCenter.x, sCenter.y, radius, a1, a1 + diff, diff < 0);
+        ctx.stroke();
+
+        // Calculate degree
+        const v1 = { x: pStart1.x - center.x, y: pStart1.y - center.y };
+        const v2 = { x: mouseWorld.x - center.x, y: mouseWorld.y - center.y };
+        const d1 = Math.hypot(v1.x, v1.y);
+        const d2 = Math.hypot(v2.x, v2.y);
+        let angleDeg = 0;
+        if (d1 > 0.0001 && d2 > 0.0001) {
+          const cosTheta = Math.max(-1, Math.min(1, (v1.x * v2.x + v1.y * v2.y) / (d1 * d2)));
+          const angleRad = Math.acos(cosTheta);
+          angleDeg = parseFloat((angleRad * 180 / Math.PI).toFixed(1));
+        }
+
+        const midAngle = a1 + diff / 2;
+        const textRadius = radius + 14;
+        const tx = sCenter.x + Math.cos(midAngle) * textRadius;
+        const ty = sCenter.y + Math.sin(midAngle) * textRadius;
+
+        const text = `${angleDeg.toFixed(1)}°`;
+        ctx.font = '10px JetBrains Mono, monospace, sans-serif';
+        const textWidth = ctx.measureText(text).width;
+        // ctx.fillRect(tx - textWidth / 2 - 3, ty - 7, textWidth + 6, 14);
+
+        ctx.fillStyle = '#f8fafc';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(text, tx, ty);
+      }
+      ctx.restore();
+    }
+
+    // 9. 3-point Arc Preview
+    if (activeTool === 'arc_3point' && spPoints.length > 0) {
+      ctx.save();
+      ctx.strokeStyle = 'rgba(56, 189, 248, 0.75)';
+      ctx.lineWidth = Math.max(1.5, zoom * 0.1);
+      ctx.setLineDash([4, 4]);
+
+      if (spPoints.length === 1) {
+        const s1 = worldToScreen(spPoints[0].x, spPoints[0].y);
+        const sMouse = worldToScreen(mouseWorld.x, mouseWorld.y);
+        ctx.beginPath();
+        ctx.moveTo(s1.x, s1.y);
+        ctx.lineTo(sMouse.x, sMouse.y);
+        ctx.stroke();
+      } else if (spPoints.length === 2) {
+        const p1 = spPoints[0];
+        const p2 = spPoints[1];
+        const p3 = mouseWorld;
+        const arcPts = getArcFromThreePoints(p1, p2, p3, 30);
+        
+        ctx.beginPath();
+        arcPts.forEach((pt, idx) => {
+          const s = worldToScreen(pt.x, pt.y);
+          if (idx === 0) ctx.moveTo(s.x, s.y);
+          else ctx.lineTo(s.x, s.y);
+        });
+        ctx.stroke();
+      }
+      ctx.restore();
     }
 
     // DRAW INTERACTIVE DRAFT TEMPORARY GRAPHICS
@@ -5393,8 +6042,8 @@ export default function CadCanvas({
             ctx.stroke();
           } else if (activeTool === 'parking_zone') {
             ctx.save();
-            ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
-            ctx.lineWidth = 1.0;
+            ctx.strokeStyle = 'rgba(56, 189, 248, 0.85)';
+            ctx.lineWidth = 1.5;
             ctx.setLineDash([4, 6]);
             ctx.beginPath();
             const segPts = getPathOffsetCurves(previewPoints, previewCpLeft, previewCpRight, 0, 25);
@@ -5405,6 +6054,47 @@ export default function CadCanvas({
             });
             ctx.stroke();
             ctx.restore();
+
+            if (previewPoints.length >= 2) {
+              const tempZone = {
+                points: previewPoints,
+                cpLeft: previewCpLeft,
+                cpRight: previewCpRight,
+                slotType: parkingZoneConfig?.slotType || 'car',
+                width: parkingZoneConfig?.width || 2.0,
+                length: parkingZoneConfig?.length || 5.0,
+                angle: parkingZoneConfig?.angle !== undefined ? parkingZoneConfig.angle : 90,
+                gap: parkingZoneConfig?.gap !== undefined ? parkingZoneConfig.gap : 0.2,
+                side: parkingZoneConfig?.side || 'right'
+              };
+              try {
+                const slots = generateParkingZoneSlots(tempZone);
+                slots.forEach((slot) => {
+                  ctx.save();
+                  ctx.lineCap = 'round';
+                  ctx.lineJoin = 'round';
+                  ctx.strokeStyle = 'rgba(255, 255, 255, 0.45)';
+                  ctx.lineWidth = Math.max(1.0, zoom * 0.05);
+                  ctx.fillStyle = 'rgba(255, 255, 255, 0.04)';
+                  const s1 = worldToScreen(slot.corners[0].x, slot.corners[0].y);
+                  const s2 = worldToScreen(slot.corners[1].x, slot.corners[1].y);
+                  const s3 = worldToScreen(slot.corners[2].x, slot.corners[2].y);
+                  const s4 = worldToScreen(slot.corners[3].x, slot.corners[3].y);
+
+                  ctx.beginPath();
+                  ctx.moveTo(s1.x, s1.y);
+                  ctx.lineTo(s2.x, s2.y);
+                  ctx.lineTo(s3.x, s3.y);
+                  ctx.lineTo(s4.x, s4.y);
+                  ctx.closePath();
+                  ctx.fill();
+                  ctx.stroke();
+                  ctx.restore();
+                });
+              } catch (err) {
+                console.error("Error generating preview parking slots:", err);
+              }
+            }
           }
         }
       }
@@ -5657,7 +6347,7 @@ export default function CadCanvas({
       };
 
       const getSteerColor = (
-        themeColor: "indigo" | "emerald" | "amber" | "rose" | "sky" | undefined,
+        themeColor: string | undefined,
         steerAngleDeg: number,
         maxSteerLimit: number
       ) => {
@@ -5665,39 +6355,33 @@ export default function CadCanvas({
         if (Math.abs(steerAngleDeg) > limit) {
           return '#ef4444'; // 超限顯示紅色
         }
-        const rgbMap: Record<string, string> = {
-          indigo: '99, 102, 241',
-          emerald: '16, 185, 129',
-          amber: '245, 158, 11',
-          rose: '244, 63, 94',
-          sky: '14, 165, 233'
-        };
-        const rgb = rgbMap[themeColor || 'indigo'] || '99, 102, 241';
+        // Deleted local parseColorToRgbStr, using global one instead
+        const rgb = parseColorToRgbStr(themeColor);
         const ratio = Math.min(1, Math.abs(steerAngleDeg) / limit);
         const alpha = 0.25 + 0.75 * ratio;
         return `rgba(${rgb}, ${alpha})`;
       };
 
       // 1. 繪製所有已儲存/鎖定的軌跡 (Locked Paths)
-      simLockedPaths.forEach((lp) => {
-        if (editingPathId && lp.id === editingPathId) return;
-        const lpColor = lp.themeColor;
-        const colorHex: Record<string, string> = {
-          indigo: '#6366f1',
-          emerald: '#10b981',
-          amber: '#f59e0b',
-          rose: '#f43f5e',
-          sky: '#0ea5e9'
-        };
-        const activeColor = colorHex[lpColor] || '#6366f1';
-        const rgbMap: Record<string, string> = {
-          indigo: '99, 102, 241',
-          emerald: '16, 185, 129',
-          amber: '245, 158, 11',
-          rose: '244, 63, 94',
-          sky: '14, 165, 233'
-        };
-        const colorRgb = rgbMap[lpColor] || '99, 102, 241';
+      if (editingPathId === null) {
+        simLockedPaths.forEach((lp) => {
+          const lpColor = lp.themeColor;
+          
+          const parseColorToHex = (color: string | undefined): string => {
+            if (!color) return '#6366f1';
+            if (color.startsWith('#')) return color;
+            const colorHex: Record<string, string> = {
+              indigo: '#6366f1',
+              emerald: '#10b981',
+              amber: '#f59e0b',
+              rose: '#f43f5e',
+              sky: '#0ea5e9'
+            };
+            return colorHex[color] || '#6366f1';
+          };
+
+          const activeColor = parseColorToHex(lpColor);
+          const colorRgb = parseColorToRgbStr(lpColor);
 
         // A. 繪製已鎖定軌跡的包絡線 (Swept Path)
         if (!isEditing && simShowSweptPath && lp.trajectory && lp.trajectory.length > 0) {
@@ -5869,52 +6553,11 @@ export default function CadCanvas({
           ctx.restore();
         }
 
-        // E. 繪製已鎖定軌跡的前後軸中心軌跡 (Axle Tracks)
-        if (!isEditing && simShowAxleTracks && lp.trajectory && lp.trajectory.length > 1) {
+        // E. 繪製已鎖定軌跡的連續骨架投影 (Body Wireframe)
+        if (simShowBodyWireframe && lp.trajectory && lp.trajectory.length > 0) {
           ctx.save();
-          ctx.lineWidth = 1.2;
-
-          // Rear Axle (RED for rear center)
-          ctx.strokeStyle = 'rgba(239, 68, 68, 0.7)';
-          ctx.beginPath();
-          lp.trajectory.forEach((state: any, idx: number) => {
-            const pt = simToScreen(state.rearAxle.x, state.rearAxle.y);
-            if (idx === 0) ctx.moveTo(pt.x, pt.y);
-            else ctx.lineTo(pt.x, pt.y);
-          });
-          ctx.stroke();
-
-          // Front Axle (BLUE for front center)
-          ctx.strokeStyle = 'rgba(59, 130, 246, 0.7)';
-          ctx.beginPath();
-          lp.trajectory.forEach((state: any, idx: number) => {
-            const pt = simToScreen(state.frontAxle.x, state.frontAxle.y);
-            if (idx === 0) ctx.moveTo(pt.x, pt.y);
-            else ctx.lineTo(pt.x, pt.y);
-          });
-          ctx.stroke();
-
-          // Trailer Rear Axle
-          if (lp.config?.enableTrailer) {
-            ctx.strokeStyle = 'rgba(245, 158, 11, 0.7)';
-            ctx.beginPath();
-            lp.trajectory.forEach((state: any, idx: number) => {
-              if (state.trailerRearAxle) {
-                const pt = simToScreen(state.trailerRearAxle.x, state.trailerRearAxle.y);
-                if (idx === 0) ctx.moveTo(pt.x, pt.y);
-                else ctx.lineTo(pt.x, pt.y);
-              }
-            });
-            ctx.stroke();
-          }
-          ctx.restore();
-        }
-
-        // F. 繪製已鎖定軌跡的連續骨架投影 (Body Wireframes)
-        if (!isEditing && simShowBodyWireframe && lp.trajectory && lp.trajectory.length > 0) {
-          ctx.save();
-          ctx.strokeStyle = `rgba(${colorRgb}, 0.25)`;
-          ctx.lineWidth = 0.8;
+          ctx.strokeStyle = '#ffffff';
+          ctx.lineWidth = 1.0;
 
           const interval = 18;
           for (let i = 0; i < lp.trajectory.length; i += interval) {
@@ -5954,6 +6597,7 @@ export default function CadCanvas({
           ctx.restore();
         }
       });
+    }
 
       // 2. 繪製目前編輯/播放的引導路徑
       if ((simDrawMode !== 'select' || simIsIntersectionMode || isEditing) && simInterpolatedPath && simInterpolatedPath.length > 1) {
@@ -6299,16 +6943,9 @@ export default function CadCanvas({
       }
 
     // 4. 繪製目前播放中軌跡的包絡線 (Swept Path)
-      if (!isEditing && simShowSweptPath && simTrajectory && simTrajectory.length > 0) {
+      if (simShowSweptPath && simTrajectory && simTrajectory.length > 0) {
         ctx.save();
-        const rgbMap: Record<string, string> = {
-          indigo: '99, 102, 241',
-          emerald: '16, 185, 129',
-          amber: '245, 158, 11',
-          rose: '244, 63, 94',
-          sky: '14, 165, 233'
-        };
-        const currentRgb = rgbMap[simThemeColor || 'indigo'] || '99, 102, 241';
+        const currentRgb = isCurrentlyColliding ? '239, 68, 68' : parseColorToRgbStr(simThemeColor);
         const stepsToRender = simTrajectory.slice(0, simCurrentStepIndex + 1);
 
         stepsToRender.forEach((state: any) => {
@@ -6348,7 +6985,7 @@ export default function CadCanvas({
       }
 
       // 5. 繪製 Corner 輪胎/角點軌跡線 (Corner Tracks)
-      if (!isEditing && simShowCornerTracks && simTrajectory && simTrajectory.length > 1) {
+      if (simShowCornerTracks && simTrajectory && simTrajectory.length > 1) {
         ctx.save();
         ctx.lineWidth = 1;
         ctx.setLineDash([2, 3]);
@@ -6356,7 +6993,7 @@ export default function CadCanvas({
         const stepsToTrack = simTrajectory.slice(0, simCurrentStepIndex + 1);
 
         // fl
-        ctx.strokeStyle = 'rgba(99, 102, 241, 0.4)';
+        ctx.strokeStyle = isCurrentlyColliding ? 'rgba(239, 68, 68, 0.5)' : 'rgba(99, 102, 241, 0.4)';
         ctx.beginPath();
         stepsToTrack.forEach((state: any, idx: number) => {
           const pt = simToScreen(state.corners.fl.x, state.corners.fl.y);
@@ -6366,7 +7003,7 @@ export default function CadCanvas({
         ctx.stroke();
 
         // fr
-        ctx.strokeStyle = 'rgba(99, 102, 241, 0.4)';
+        ctx.strokeStyle = isCurrentlyColliding ? 'rgba(239, 68, 68, 0.5)' : 'rgba(99, 102, 241, 0.4)';
         ctx.beginPath();
         stepsToTrack.forEach((state: any, idx: number) => {
           const pt = simToScreen(state.corners.fr.x, state.corners.fr.y);
@@ -6376,7 +7013,7 @@ export default function CadCanvas({
         ctx.stroke();
 
         // rl / rr
-        ctx.strokeStyle = 'rgba(99, 102, 241, 0.3)';
+        ctx.strokeStyle = isCurrentlyColliding ? 'rgba(239, 68, 68, 0.4)' : 'rgba(99, 102, 241, 0.3)';
         ctx.beginPath();
         stepsToTrack.forEach((state: any, idx: number) => {
           const pt = simToScreen(state.corners.rl.x, state.corners.rl.y);
@@ -6395,7 +7032,7 @@ export default function CadCanvas({
 
         // Trailer corner tracks
         if (simConfig.enableTrailer) {
-          ctx.strokeStyle = 'rgba(245, 158, 11, 0.3)';
+          ctx.strokeStyle = isCurrentlyColliding ? 'rgba(239, 68, 68, 0.4)' : 'rgba(245, 158, 11, 0.3)';
           ctx.beginPath();
           stepsToTrack.forEach((state: any, idx: number) => {
             if (state.trailerCorners) {
@@ -6420,7 +7057,7 @@ export default function CadCanvas({
       }
 
       // 6. 繪製前後軸中心軌跡 (Axle Tracks)
-      if (!isEditing && simShowAxleTracks && simTrajectory && simTrajectory.length > 1) {
+      if (simShowAxleTracks && simTrajectory && simTrajectory.length > 1) {
         ctx.save();
         ctx.lineWidth = 1.2;
         const stepsToTrack = simTrajectory.slice(0, simCurrentStepIndex + 1);
@@ -6436,7 +7073,7 @@ export default function CadCanvas({
         ctx.stroke();
 
         // Front Axle
-        ctx.strokeStyle = '#3b82f6'; // 藍色前軸中心線
+        ctx.strokeStyle = isCurrentlyColliding ? '#ef4444' : '#3b82f6'; // 藍色前軸中心線
         ctx.beginPath();
         stepsToTrack.forEach((state: any, idx: number) => {
           const pt = simToScreen(state.frontAxle.x, state.frontAxle.y);
@@ -6447,7 +7084,7 @@ export default function CadCanvas({
 
         // Trailer Rear Axle
         if (simConfig.enableTrailer) {
-          ctx.strokeStyle = '#f59e0b'; // 橘色拖車後軸線
+          ctx.strokeStyle = isCurrentlyColliding ? '#ef4444' : '#f59e0b'; // 橘色拖車後軸線
           ctx.beginPath();
           stepsToTrack.forEach((state: any, idx: number) => {
             if (state.trailerRearAxle) {
@@ -6462,10 +7099,12 @@ export default function CadCanvas({
       }
 
       // 6.5 繪製連續骨架投影 (Body Wireframes)
-      if (!isEditing && simShowBodyWireframe && simTrajectory && simTrajectory.length > 0) {
+      if (simShowBodyWireframe && simTrajectory && simTrajectory.length > 0) {
         ctx.save();
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
-        ctx.lineWidth = 1;
+        ctx.strokeStyle = isCurrentlyColliding 
+          ? '#ef4444' 
+          : '#ffffff';
+        ctx.lineWidth = 1.0;
         
         const interval = 18;
         // 繪製從第 0 步到當前播放步驟之間的線框
@@ -6613,7 +7252,7 @@ export default function CadCanvas({
 
         // A. Draw Tractor Body
         ctx.fillStyle = 'rgba(30, 41, 59, 0.9)'; // Slate fill
-        ctx.strokeStyle = whiteColor; // Dynamic outline (主車車身邊框白色/暗色化)
+        ctx.strokeStyle = isCurrentlyColliding ? '#ef4444' : whiteColor; // Dynamic outline (主車車身邊框白色/暗色化)
         ctx.lineWidth = 2;
         ctx.beginPath();
         ctx.moveTo(sFl.x, sFl.y);
@@ -6667,7 +7306,7 @@ export default function CadCanvas({
           const stRl = simToScreen(state.trailerCorners.rl.x, state.trailerCorners.rl.y);
 
           ctx.fillStyle = 'rgba(71, 85, 105, 0.9)'; // Slate-600 fill
-          ctx.strokeStyle = yellowColor; // Amber outline
+          ctx.strokeStyle = isCurrentlyColliding ? '#ef4444' : yellowColor; // Amber outline
           ctx.lineWidth = 2;
           ctx.beginPath();
           ctx.moveTo(stFl.x, stFl.y);
@@ -6683,7 +7322,7 @@ export default function CadCanvas({
             x: (stFl.x + stFr.x) / 2,
             y: (stFl.y + stFr.y) / 2
           };
-          ctx.strokeStyle = yellowColor;
+          ctx.strokeStyle = isCurrentlyColliding ? '#ef4444' : yellowColor;
           ctx.lineWidth = 1.5;
           ctx.beginPath();
           const sRearAxle = simToScreen(state.rearAxle.x, state.rearAxle.y);
@@ -6720,10 +7359,8 @@ export default function CadCanvas({
         }
         ctx.restore();
       }
-    }
 
-    // DRAW INFINITE COORDINATE CROSSHAIR CURSOR ON SCREEN
-    if (viewport.zoom > 1.5) {
+      if (zoom > 1.5) {
       const mouseS = worldToScreen(mouseWorld.x, mouseWorld.y);
       ctx.strokeStyle = 'rgba(255, 255, 255, 0.12)';
       
@@ -6736,6 +7373,7 @@ export default function CadCanvas({
       ctx.font = '9px monospace';
       ctx.fillText(`X: ${mouseWorld.x.toFixed(2)}m  Y: ${mouseWorld.y.toFixed(2)}m`, mouseS.x + 12, mouseS.y - 12);
     }
+  }
 
     // DRAW ACTIVE CAD GEOMETRIC SNAP DECORATION INDICATOR
     if (snapTarget) {
@@ -6892,12 +7530,11 @@ export default function CadCanvas({
     // Simulation Modes dependencies to drive fluid rendering
     appMode, simConfig, simControllerMode, simRawPoints, simDrawMode, simIsPlaying, simCurrentStepIndex, simTrajectory, 
     simInterpolatedPath, simLockedPaths, simThemeColor, simShowSweptPath, simShowCornerTracks, simShowAxleTracks, 
-    simShowBodyWireframe, simSweptOpacity, simDraggingWaypointIndex, simDraggingHandleType, simIsDraggingFirstVec, 
+    simShowBodyWireframe, simSweptOpacity, simBodyOpacity, simDraggingWaypointIndex, simDraggingHandleType, simIsDraggingFirstVec, 
     simFirstVecStart, simFirstVecEnd, simIsIntersectionMode, simP0X, simP0Y, simP0Angle, simP3X, simP3Y, simP3Angle, 
     simP1RatioPercent, simP2RatioPercent, simIntersectionPickState, simShowIntersectionHelpers, simEnableOutswing, 
     simI1RatioPercent, simI1OffsetDistance, simI2RatioPercent, simI2OffsetDistance, simStartExtensionM, simEndExtensionM, 
     simIsCalibrating,
-    theme
   ]);
 
   // Curvature check for floating top error warnings
@@ -7243,7 +7880,7 @@ export default function CadCanvas({
           id="hard-collision-warning-hud"
           className="absolute top-4 left-1/2 transform -translate-x-1/2 z-33 flex items-center gap-3 px-5 py-3 bg-red-950 border border-red-500 rounded-xl shadow-2xl backdrop-blur-md text-red-200 animate-pulse max-w-xl"
         >
-          <span className="text-base text-red-400">🚨</span>
+          <svg className="w-5 h-5 text-red-500 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M12 9v4M12 17h.01M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/></svg>
           <div className="text-xs font-bold leading-snug">
             轉彎半徑不足，大車內輪差侵犯建築線！
           </div>
@@ -7255,7 +7892,7 @@ export default function CadCanvas({
           id="soft-collision-warning-hud"
           className="absolute top-4 left-1/2 transform -translate-x-1/2 z-33 flex items-center gap-3 px-5 py-3 bg-yellow-950 border border-yellow-500/80 rounded-xl shadow-2xl backdrop-blur-md text-yellow-100 max-w-xl"
         >
-          <span className="text-base text-yellow-400">⚠️</span>
+          <svg className="w-5 h-5 text-yellow-500 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M12 9v4M12 17h.01M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/></svg>
           <div className="text-xs font-bold leading-snug">
             此線形大車轉彎會發生侵線/借道行為，建議優化槽化島。
           </div>
@@ -7268,7 +7905,7 @@ export default function CadCanvas({
         <button
           id="btn-zoom-to-fit"
           onClick={handleZoomToFit}
-          title="Zoom to Fit & Center (🔍 視窗導正 / 回歸全圖中心)"
+          title="Zoom to Fit & Center (視窗導正 / 回歸全圖中心)"
           className="flex items-center justify-center w-10 h-10 rounded-lg bg-zinc-900/90 hover:bg-zinc-800 border border-zinc-800/85 text-zinc-300 hover:text-white shadow-2xl backdrop-blur-md transition-all cursor-pointer"
         >
           <Search className="w-5 h-5 text-zinc-300" />
@@ -7277,7 +7914,9 @@ export default function CadCanvas({
 
       {/* Floating SmartPath Draw Actions Box */}
       {isLineOrPathTool(activeTool) && spPoints.length >= 1 && (
-        <div id="smartpath-floating-draw-bar" className="absolute bottom-16 left-1/2 transform -translate-x-1/2 z-25 flex gap-2 p-2 bg-zinc-900/95 border border-zinc-800/80 rounded-xl shadow-2xl backdrop-blur-md">
+        <div id="smartpath-floating-draw-bar" className={`absolute bottom-16 left-1/2 transform -translate-x-1/2 z-25 flex gap-2 p-2 rounded-xl shadow-2xl backdrop-blur-md ${
+          'bg-zinc-900/95 border border-zinc-800/80'
+        }`}>
           <button
             id="btn-complete-smartpath"
             onClick={() => handleCompleteSmartPath(spPoints, spCpLeft, spCpRight)}
@@ -7288,7 +7927,7 @@ export default function CadCanvas({
                 : 'bg-zinc-800 text-zinc-600 cursor-not-allowed'
             }`}
           >
-            完成路徑 (Enter/雙擊起點)
+            完成路徑 (雙擊起點)
           </button>
           <button
             onClick={() => {
@@ -7297,7 +7936,9 @@ export default function CadCanvas({
               setSpCpRight([]);
               setActiveTool('select');
             }}
-            className="px-3 py-1.5 text-xs font-bold rounded-lg bg-zinc-850 hover:bg-zinc-800 text-zinc-300 transition-all cursor-pointer"
+            className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer ${
+              'bg-zinc-850 hover:bg-zinc-800 text-zinc-300'
+            }`}
           >
             取消
           </button>
@@ -7305,37 +7946,180 @@ export default function CadCanvas({
       )}
 
       {/* Floating Instructions Banner */}
-      {activeTool !== 'select' && (
-      <div className="absolute top-4 left-4 pointer-events-none bg-zinc-900/90 border border-zinc-800/80 px-4 py-3 rounded-lg shadow-2xl backdrop-blur-md max-w-sm flex flex-col gap-1 transition-all z-10">
-        <h4 className="text-xs font-bold text-zinc-300 tracking-wider">
-          {activeTool === 'guideline' && '✦ 繪製道路切基準線 (鋼筆模式)'}
-          {activeTool === 'yellow_double' && '✦ 繪製黃雙線分向線 (鋼筆模式)'}
-          {activeTool === 'white_double' && '✦ 繪製白雙線分向線 (鋼筆模式)'}
-          {activeTool === 'white_dashed' && '✦ 繪製車道白虛線 (鋼筆模式)'}
-          {activeTool === 'yellow_dashed' && '✦ 繪製車道黃虛線 (鋼筆模式)'}
-          {activeTool === 'white_solid' && '✦ 繪製車道實線 (鋼筆模式)'}
-          {activeTool === 'sketch_circle' && '✦ 繪製 Sketch 草稿圓 (圓心 -> 半徑)'}
-          {activeTool === 'channelization' && '✦ 繪製自定義導流區 (點頂點，近起點閉合)'}
-          {activeTool === 'text_label' && '✦ 標註工程說明文字 (點擊選位)'}
-          {activeTool === 'smart_path' && '✦ 繪製自由貝茲標線 (點擊描端，壓拖拉把)'}
-        </h4>
-        <p className="text-[10px] text-zinc-500 leading-snug">
-          {activeTool === 'sketch_circle' && `目前步驟: ${draftPoints.length === 0 ? '第一點點擊決定「圓心軸」' : '第二點壓拖決定「草稿半徑」'}`}
-          {activeTool === 'channelization' && `已點擊 ${draftPoints.length} 個控制點。鄰近第一個點點擊可閉合生成島嶼。`}
-          {isLineOrPathTool(activeTool) && `已選定 ${spPoints.length} 個錨點。左鍵點擊增加節點，按住拖拽調整切線。雙擊起點閉合完成。`}
-          {activeTool === 'text_label' && '在想要擺設說明的實體位置點擊滑鼠左鍵即可。'}
-        </p>
-      </div>
-      )}
+      {((appMode === 'cad' && activeTool !== 'select') || (appMode === 'simulation' && (simDrawMode !== 'select' || simIsIntersectionMode))) && (() => {
+        const getToolInstruction = (tool: string, spCount: number, draftCount: number) => {
+          if (appMode === 'simulation') {
+            if (simIsIntersectionMode) {
+              return {
+                name: '軌跡模擬 - 路口模式',
+                desc: '點擊兩個不同的車道線以產生路口連接軌跡。'
+              };
+            }
+            switch (simDrawMode) {
+              case 'smartpath':
+                return {
+                  name: '軌跡模擬 - 鋼筆模式',
+                  desc: '左鍵點擊畫布以增加節點，按住拖曳調整切線。按 Enter 或鍵盤 v 鍵完成繪製。'
+                };
+              case 'click':
+                return {
+                  name: '軌跡模擬 - 點選模式',
+                  desc: '在畫布上依序點擊以生成軌跡節點。按 Enter 或鍵盤 v 鍵完成繪製。'
+                };
+              case 'drag':
+                return {
+                  name: '軌跡模擬 - 筆刷模式',
+                  desc: '按住滑鼠左鍵並在畫布上拖曳以直接繪製軌跡。放開滑鼠左鍵即完成繪製。'
+                };
+              default:
+                return {
+                  name: '軌跡模擬 - 軌跡繪製',
+                  desc: '在畫布上點擊或拖曳以繪製模擬軌跡。'
+                };
+            }
+          }
+          switch (tool) {
+            case 'guideline':
+              return {
+                name: '繪製道路切基準線 (鋼筆模式)',
+                desc: `已點擊 ${spCount} 個錨點。左鍵點擊增加節點，按住拖拽調整切線。按 Enter 或鍵盤 v 鍵完成繪製。`
+              };
+            case 'yellow_double':
+              return {
+                name: '繪製黃雙線分向線 (鋼筆模式)',
+                desc: `已點擊 ${spCount} 個錨點。左鍵點擊增加節點，按住拖拽調整切線。按 Enter 或鍵盤 v 鍵完成繪製。`
+              };
+            case 'white_double':
+              return {
+                name: '繪製白雙線分向線 (鋼筆模式)',
+                desc: `已點擊 ${spCount} 個錨點。左鍵點擊增加節點，按住拖拽調整切線。按 Enter 或鍵盤 v 鍵完成繪製。`
+              };
+            case 'white_dashed':
+              return {
+                name: '繪製車道白虛線 (鋼筆模式)',
+                desc: `已點擊 ${spCount} 個錨點。左鍵點擊增加節點，按住拖拽調整切線。按 Enter 或鍵盤 v 鍵完成繪製。`
+              };
+            case 'yellow_dashed':
+              return {
+                name: '繪製車道黃虛線 (鋼筆模式)',
+                desc: `已點擊 ${spCount} 個錨點。左鍵點擊增加節點，按住拖拽調整切線。按 Enter 或鍵盤 v 鍵完成繪製。`
+              };
+            case 'white_solid':
+              return {
+                name: '繪製車道實線 (鋼筆模式)',
+                desc: `已點擊 ${spCount} 個錨點。左鍵點擊增加節點，按住拖拽調整切線。按 Enter 或鍵盤 v 鍵完成繪製。`
+              };
+            case 'crossing_dashed':
+              return {
+                name: '繪製穿越虛線 (鋼筆模式)',
+                desc: `已點擊 ${spCount} 個錨點。左鍵點擊增加節點，按住拖拽調整切線。按 Enter 或鍵盤 v 鍵完成繪製。`
+              };
+            case 'stop_line':
+              return {
+                name: '繪製停止線 (鋼筆模式)',
+                desc: `已點擊 ${spCount} 個錨點。左鍵點擊增加節點，按住拖拽調整切線。按 Enter 或鍵盤 v 鍵完成繪製。`
+              };
+            case 'yield_line':
+              return {
+                name: '繪製讓路標線 (鋼筆模式)',
+                desc: `已點擊 ${spCount} 個錨點。左鍵點擊增加節點，按住拖拽調整切線。按 Enter 或鍵盤 v 鍵完成繪製。`
+              };
+            case 'reversible_lane':
+              return {
+                name: '繪製調撥車道線 (鋼筆模式)',
+                desc: `已點擊 ${spCount} 個錨點。左鍵點擊增加節點，按住拖拽調整切線。按 Enter 或鍵盤 v 鍵完成繪製。`
+              };
+            case 'bicycle_lane':
+              return {
+                name: '繪製自行車道線 (鋼筆模式)',
+                desc: `已點擊 ${spCount} 個錨點。左鍵點擊增加節點，按住拖拽調整切線。按 Enter 或鍵盤 v 鍵完成繪製。`
+              };
+            case 'BuildingLine':
+              return {
+                name: '繪製地界建築線 (鋼筆模式)',
+                desc: `已點擊 ${spCount} 個錨點。左鍵點擊增加節點，按住拖拽調整切線。按 Enter 或鍵盤 v 鍵完成繪製。`
+              };
+            case 'smart_path':
+              return {
+                name: '繪製自由貝茲標線 (鋼筆模式)',
+                desc: `已點擊 ${spCount} 個錨點。左鍵點擊增加節點，按住拖拽調整切線。按 Enter 或鍵盤 v 鍵完成繪製。`
+              };
+            case 'sketch_circle':
+              return {
+                name: '繪製 Sketch 草稿圓 (圓心 -> 半徑)',
+                desc: draftCount === 0 ? '第一點點擊決定「圓心軸」' : '第二點壓拖決定「草稿半徑」'
+              };
+            case 'channelization':
+              return {
+                name: '繪製自定義導流區 (多邊形模式)',
+                desc: `已繪製 ${draftCount} 個頂點。點擊畫布以標註區域邊界，點擊起點或雙擊即可閉合島嶼生成。`
+              };
+            case 'Sidewalk':
+              return {
+                name: '繪製人行道 (多邊形模式)',
+                desc: `已繪製 ${draftCount} 個頂點。點擊畫布以標註區域邊界，點擊起點或雙擊即可閉合人行道生成。`
+              };
+            case 'text_label':
+              return {
+                name: '標註工程說明文字 (點擊選位)',
+                desc: '在想要擺設說明的實體位置點擊滑鼠左鍵即可。'
+              };
+            case 'parking_space':
+              return {
+                name: '繪製單個停車格 (滑鼠點擊)',
+                desc: '在畫布上想放置車格的位置，點擊滑鼠左鍵生成（可在右側面板調整參數與朝向）。'
+              };
+            case 'parking_zone':
+              return {
+                name: '繪製停車收費區 (多邊形模式)',
+                desc: `已繪製 ${draftCount} 個頂點。點擊畫布以標註區域邊界，點擊起點或雙擊即可閉合區域生成（內部車格將自動排滿）。`
+              };
+            case 'road_arrow':
+              return {
+                name: '繪製路面指向箭頭 (滑鼠點擊)',
+                desc: '在車道中心線適當位置，點擊滑鼠左鍵即可生成箭頭標線（可在右側面板或畫布微調樣式與旋轉角）。'
+              };
+            case 'crosswalk':
+              return {
+                name: '繪製斑馬人行橫道 (滑鼠兩點)',
+                desc: draftCount === 0 ? '第一點點擊決定斑馬線一端。' : '移動滑鼠決定長度與方向，再次點擊即可生成。'
+              };
+            case 'map_scale':
+              return {
+                name: '底圖比例尺校正 (滑鼠拖曳)',
+                desc: '按住滑鼠左鍵並在底圖的已知比例標線（如10公尺標記）上拖曳一條紅色校正線，放開後輸入實地距離。'
+              };
+            default:
+              return {
+                name: '繪圖工具',
+                desc: '在畫布上點擊或拖曳即可繪製。'
+              };
+          }
+        };
+
+        const instr = getToolInstruction(activeTool, spPoints.length, draftPoints.length);
+        return (
+          <div className={`absolute top-4 left-4 pointer-events-none px-4 py-3 rounded-lg shadow-2xl backdrop-blur-md max-w-sm flex flex-col gap-1 transition-all z-10 ${
+            'bg-zinc-900/90 border border-zinc-800/80'
+          }`}>
+            <h4 className="text-xs font-bold tracking-wider text-zinc-300">
+              ✦ {instr.name}
+            </h4>
+            <p className="text-[10px] text-zinc-500 leading-snug">
+              {instr.desc}
+            </p>
+          </div>
+        );
+      })()}
 
       {/* Touch Navigation Helpers on Right Bottom corner */}
-      <div className="absolute bottom-4 left-4 flex gap-4 text-[10px] font-mono text-zinc-500 bg-zinc-900/60 border border-zinc-800/20 px-3 py-1.5 rounded-md pointer-events-none backdrop-blur-sm z-10">
+      <div className="absolute bottom-4 left-4 flex gap-4 text-[10px] font-mono px-3 py-1.5 rounded-md pointer-events-none backdrop-blur-sm z-10 bg-zinc-900/60 border border-zinc-800/20 text-zinc-500">
         <span>縮放: {Math.round(viewport.zoom * 10)}%</span>
         <span>Space拖移/滑鼠中鍵: 平移圖面</span>
       </div>
 
       {/* Dynamic Scale Bar on Right Bottom corner */}
-      <div className="absolute bottom-4 right-4 flex flex-col items-center select-none pointer-events-none z-10 text-slate-200 font-mono text-[10px] gap-1 transition-all drop-shadow-[0_2px_2px_rgba(0,0,0,0.8)]">
+      <div className="absolute bottom-4 right-4 flex flex-col items-center select-none pointer-events-none z-10 font-mono text-[10px] gap-1 transition-all text-white drop-shadow-[0_1.5px_1.5px_rgba(0,0,0,0.8)]">
         <span className="font-bold tracking-wider">{scaleLabel}</span>
         <div className="relative h-1 border-b border-white" style={{ width: `${scalePixelWidth}px` }}>
           <div className="absolute left-0 bottom-0 w-[1px] h-1.5 bg-white"></div>
@@ -7348,7 +8132,7 @@ export default function CadCanvas({
         <div className="absolute inset-0 z-[100] bg-black/75 flex items-center justify-center p-4 backdrop-blur-sm">
           <div className="bg-[#14161c] border border-zinc-800 p-5 rounded-2xl max-w-sm w-full shadow-2xl flex flex-col gap-4">
             <div className="flex items-center gap-2 text-red-400 border-b border-zinc-800 pb-2.5">
-              <span className="text-lg">📐</span>
+              <Ruler className="w-4 h-4 text-indigo-400 shrink-0" />
               <h3 className="text-xs font-bold text-white tracking-wider">校正背景底圖比例尺</h3>
             </div>
             
@@ -7386,7 +8170,7 @@ export default function CadCanvas({
 
             {calibrationError && (
               <div className="text-[11px] text-red-400 bg-red-950/25 border border-red-900/30 rounded-xl px-3 py-2 leading-tight">
-                ⚠️ {calibrationError}
+                {calibrationError}
               </div>
             )}
 

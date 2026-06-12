@@ -25,120 +25,71 @@
   scrollbar-color: #2d3039 transparent;
 }
 
-/* 淺色主題 (Light Theme) 覆寫樣式 */
-.theme-light {
-  background-color: #f8fafc !important;
-  color: #1e293b !important;
 
-  /* Header 與側邊欄面板背景 */
-  header,
-  #left-toolbar,
-  #props-panel-root,
-  #right-sim-panel,
-  .bg-\[\#14161c\],
-  .bg-\[\#0a0b0e\],
-  .bg-\[\#0f1115\] {
-    background-color: #ffffff !important;
-  }
-
-  /* 邊框覆寫 */
-  .border-\[\#2d3039\],
-  .border-\[\#2d3039\]\/40,
-  .border-\[\#2d3039\]\/20,
-  .border-b,
-  .border-r,
-  .border-l {
-    border-color: #e2e8f0 !important;
-  }
-
-  /* 常規文字顏色 */
-  .text-slate-300,
-  .text-slate-350,
-  .text-slate-400 {
-    color: #334155 !important;
-  }
-
-  /* 次要/提示文字 */
-  .text-slate-500,
-  .text-zinc-500 {
-    color: #64748b !important;
-  }
-
-  /* 高亮或主要文字 */
-  .text-slate-200,
-  .text-zinc-400 {
-    color: #0f172a !important;
-  }
-
-  /* 各類按鈕背景 (暗色改亮色) */
-  button,
-  .bg-\[\#1f2229\] {
-    background-color: #f1f5f9 !important;
-    border-color: #cbd5e1 !important;
-    color: #334155 !important;
-  }
-
-  /* 懸停狀態 */
-  button:hover:not(:disabled),
-  .hover\:bg-slate-800:hover:not(:disabled) {
-    background-color: #e2e8f0 !important;
-    color: #0f172a !important;
-  }
-
-  /* App 模式切換按鈕 */
-  .bg-\[\#0a0b0e\] {
-    background-color: #f1f5f9 !important;
-  }
-
-  /* 未選中的切換按鈕文字 */
-  .text-slate-400 {
-    color: #475569 !important;
-  }
-
-  /* 網格背景/鎖點設定彈出框 */
-  #grid-settings-toggle-btn + div,
-  #snap-settings-toggle-btn + div,
-  #snap-checkboxes-header-popup,
-  #export-dropdown-container > div {
-    background-color: #ffffff !important;
-    border-color: #cbd5e1 !important;
-    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05) !important;
-  }
-
-  /* 輸入欄位與下拉選單 */
-  input[type="number"],
-  input[type="text"],
-  select {
-    background-color: #f8fafc !important;
-    border-color: #cbd5e1 !important;
-    color: #0f172a !important;
-  }
-
-  /* 分隔線 */
-  .h-4.w-px {
-    background-color: #cbd5e1 !important;
-  }
-
-  /* 區塊內部的微弱卡片背景 */
-  .bg-\[\#1f2229\]\/40 {
-    background-color: rgba(241, 245, 249, 0.8) !important;
-  }
-
-  /* 停車格類型選擇按鈕的未選中狀態 */
-  .bg-\[\#1f2229\].text-slate-400 {
-    background-color: #f8fafc !important;
-    color: #64748b !important;
-  }
-
-  /* 自定義滾動條在亮色主題下的配色 */
-  ::-webkit-scrollbar-thumb {
-    background: #cbd5e1 !important;
-  }
-  ::-webkit-scrollbar-thumb:hover {
-    background: #94a3b8 !important;
-  }
-  * {
-    scrollbar-color: #cbd5e1 transparent !important;
-  }
+/* 軌跡顏色圈圈按鈕：使用 CSS 變數並強制 background-color 生效，防止亮色模式 !important 覆寫 */
+button.sim-color-btn {
+  background-color: var(--theme-color) !important;
 }
+
+/* 全域拉桿樣式客製化：統一寬度與尺寸，不論是否為 appearance-none */
+input[type="range"] {
+  width: 100%;
+  height: 6px !important; /* 強制所有拉桿軌道高度為 6px */
+  -webkit-appearance: none;
+  appearance: none;
+  border-radius: 9999px;
+  outline: none;
+  cursor: pointer;
+  background-color: #2d3039;
+}
+
+/* Webkit (Chrome/Edge/Safari) 滑動按鈕：統一為 14px 藍色圓鈕，白色邊框，垂直置中 */
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px !important;
+  height: 14px !important;
+  border-radius: 50% !important;
+  background-color: #3b82f6 !important; /* 統一為經典藍色 */
+  border: 2px solid #ffffff !important;
+  box-shadow: 0 1.5px 3px rgba(0, 0, 0, 0.35) !important;
+  cursor: pointer;
+  margin-top: -4px !important; /* (6px/2 - 14px/2 = -4px) 完美居中 */
+  transition: transform 0.1s ease;
+}
+
+input[type="range"]::-webkit-slider-thumb:hover {
+  transform: scale(1.15);
+}
+
+/* Firefox 滑動按鈕：統一為 14px 藍色圓鈕，白色邊框 */
+input[type="range"]::-moz-range-thumb {
+  width: 14px !important;
+  height: 14px !important;
+  border-radius: 50% !important;
+  background-color: #3b82f6 !important;
+  border: 2px solid #ffffff !important;
+  box-shadow: 0 1.5px 3px rgba(0, 0, 0, 0.35) !important;
+  cursor: pointer;
+  transition: transform 0.1s ease;
+}
+
+input[type="range"]::-moz-range-thumb:hover {
+  transform: scale(1.15);
+}
+
+/* 軌跡顏色彩虹按鈕：防止被亮色模式 button 樣式覆蓋 */
+button.sim-color-picker-btn {
+  background: conic-gradient(from 0deg, #ff0000, #ffff00, #00ff00, #00ffff, #0000ff, #ff00ff, #ff0000) !important;
+}
+
+/* 軌跡卡片樣式：配合 CSS 變數，防亮色模式全域 !important 覆寫 */
+.sim-trajectory-card {
+  border: 1px solid var(--card-border-color) !important;
+  background-color: var(--card-bg-color) !important;
+  color: var(--card-text-color) !important;
+}
+
+
+
 

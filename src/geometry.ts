@@ -382,7 +382,8 @@ export function sampleClosedBezierLoop(
 }
 
 /**
- * Computes normal offsets for a single cubic Bezier segment
+ * Computes normal offsets for a single cubic Bezier segment.
+ * Returns (subdivisions + 1) evenly-parameterised offset points.
  */
 export function computeBezierNormalOffsets(
   pStart: Point2D,
@@ -412,7 +413,6 @@ export function computeBezierNormalOffsets(
     }
 
     const normTangent = normalize(tangent);
-    // Normal vector pointing 90 deg CCW
     const normal = { x: -normTangent.y, y: normTangent.x };
 
     offsetPoints.push({
@@ -425,7 +425,80 @@ export function computeBezierNormalOffsets(
 }
 
 /**
- * Multi-segment Bezier path Normal offset computation (doesn't warp on corners)
+ * Intersection of two infinite lines defined by two point-pairs each.
+ * Returns null when lines are parallel (|cross| < ε).
+ */
+function lineLineIntersect(
+  a0: Point2D, a1: Point2D,
+  b0: Point2D, b1: Point2D
+): Point2D | null {
+  const dax = a1.x - a0.x, day = a1.y - a0.y;
+  const dbx = b1.x - b0.x, dby = b1.y - b0.y;
+  const denom = dax * dby - day * dbx;
+  if (Math.abs(denom) < 1e-12) return null;
+  const dx = b0.x - a0.x, dy = b0.y - a0.y;
+  const t = (dx * dby - dy * dbx) / denom;
+  return { x: a0.x + t * dax, y: a0.y + t * day };
+}
+
+/**
+ * Maximum ratio of miter-spike-length to |offsetDist| before falling back to bevel.
+ * Mirrors the CSS / SVG miter-limit convention (default 10).
+ */
+const OFFSET_MITER_LIMIT = 10;
+
+/**
+ * Resolve the topologically-correct junction point where segment A's offset
+ * tail meets segment B's offset head.
+ *
+ * Inner corner (offset lines cross before the anchor):
+ *   → intersection I trims the overlap to a clean point.
+ * Outer corner (offset lines diverge past the anchor):
+ *   → intersection I fills the gap with a miter apex.
+ * Very sharp corners (spike > OFFSET_MITER_LIMIT × |offsetDist|):
+ *   → fall back to bevel (arithmetic mean of the two natural endpoints).
+ * Parallel segments:
+ *   → fall back to midpoint.
+ */
+function resolveOffsetJunction(
+  segA: Point2D[],
+  segB: Point2D[],
+  offsetDist: number
+): Point2D {
+  if (segA.length < 2 || segB.length < 2) return segA[segA.length - 1];
+
+  // Use the last two points of A and the first two of B to define the
+  // tangent lines of the offset curve at the junction.
+  const a0 = segA[segA.length - 2];
+  const a1 = segA[segA.length - 1];
+  const b0 = segB[0];
+  const b1 = segB[1];
+
+  const I = lineLineIntersect(a0, a1, b0, b1);
+
+  if (!I) {
+    // Parallel → simple midpoint bevel
+    return { x: (a1.x + b0.x) * 0.5, y: (a1.y + b0.y) * 0.5 };
+  }
+
+  // Guard against degenerate spikes on extremely sharp turns.
+  const base = Math.max(Math.abs(offsetDist), 1e-4);
+  const spike = Math.hypot(I.x - a1.x, I.y - a1.y);
+  if (spike > OFFSET_MITER_LIMIT * base) {
+    return { x: (a1.x + b0.x) * 0.5, y: (a1.y + b0.y) * 0.5 };
+  }
+
+  return I;
+}
+
+/**
+ * Multi-segment Bezier path normal-offset computation with topologically
+ * correct miter/bevel corner joins.
+ *
+ * For each inter-segment junction the function computes the line-line
+ * intersection of the two adjacent offset tangents and uses that point as
+ * the shared corner vertex, eliminating both inner-edge braid overlap and
+ * outer-edge gap artefacts.
  */
 export function getPathOffsetCurves(
   points: Point2D[],
@@ -434,23 +507,44 @@ export function getPathOffsetCurves(
   offsetDist: number,
   subdivisions: number = 30
 ): Point2D[] {
-  const result: Point2D[] = [];
   if (points.length < 2) return [];
 
+  // 1. Sample each Bezier segment independently so their endpoints are not
+  //    artificially merged before we can inspect their tangent directions.
+  const segments: Point2D[][] = [];
   for (let j = 0; j < points.length - 1; j++) {
-    const pStart = points[j];
-    const cpStart = cpRight[j];
-    const cpEnd = cpLeft[j + 1];
-    const pEnd = points[j + 1];
+    segments.push(
+      computeBezierNormalOffsets(
+        points[j], cpRight[j], cpLeft[j + 1], points[j + 1],
+        offsetDist, subdivisions
+      )
+    );
+  }
 
-    const segmentOffset = computeBezierNormalOffsets(pStart, cpStart, cpEnd, pEnd, offsetDist, subdivisions);
-    if (j === 0) {
-      result.push(...segmentOffset);
-    } else {
-      // skip duplicate junction points
-      result.push(...segmentOffset.slice(1));
+  if (segments.length === 1) return segments[0];
+
+  // 2. Assemble result: for each segment exclude the first point (replaced by
+  //    the preceding junction) and the last point (replaced by the following
+  //    junction), then insert the resolved junction vertex between segments.
+  const result: Point2D[] = [];
+
+  for (let j = 0; j < segments.length; j++) {
+    const seg = segments[j];
+    const isFirst = j === 0;
+    const isLast  = j === segments.length - 1;
+
+    // Slice bounds: skip first if the preceding junction already contributed
+    // that vertex; skip last if the following junction will replace it.
+    const from = isFirst ? 0           : 1;
+    const to   = isLast  ? seg.length  : seg.length - 1;
+
+    result.push(...seg.slice(from, to));
+
+    if (!isLast) {
+      result.push(resolveOffsetJunction(seg, segments[j + 1], offsetDist));
     }
   }
+
   return result;
 }
 
@@ -837,8 +931,8 @@ export function getLineBezierRepresentation(el: any): { points: Point2D[], cpLef
   if (el.points && el.points.length > 0) {
     return {
       points: el.points,
-      cpLeft: el.cpLeft,
-      cpRight: el.cpRight
+      cpLeft: el.cpLeft || el.points,
+      cpRight: el.cpRight || el.points
     };
   } else if (el.p1 && el.p2) {
     return {
@@ -1694,5 +1788,58 @@ export function getMaxSteeringAngleForPath(
     if (angle > maxAngle) maxAngle = angle;
   }
   return maxAngle;
+}
+
+export function getArcFromThreePoints(p1: Point2D, p2: Point2D, p3: Point2D, numPoints: number = 30): Point2D[] {
+  // 計算經過 p1, p2, p3 的圓心 O 和半徑 R
+  // 線段 p1-p2 的中垂線和 p2-p3 的中垂線交點即為圓心
+  const d = 2 * (p1.x * (p2.y - p3.y) + p2.x * (p3.y - p1.y) + p3.x * (p1.y - p2.y));
+  if (Math.abs(d) < 1e-6) {
+    // 三點共線，退化成折線
+    const pts: Point2D[] = [];
+    for (let i = 0; i <= numPoints; i++) {
+      const t = i / numPoints;
+      if (t < 0.5) {
+        const t2 = t * 2;
+        pts.push({ x: p1.x + t2 * (p2.x - p1.x), y: p1.y + t2 * (p2.y - p1.y) });
+      } else {
+        const t2 = (t - 0.5) * 2;
+        pts.push({ x: p2.x + t2 * (p3.x - p2.x), y: p2.y + t2 * (p3.y - p2.y) });
+      }
+    }
+    return pts;
+  }
+
+  const ux = ((p1.x * p1.x + p1.y * p1.y) * (p2.y - p3.y) + (p2.x * p2.x + p2.y * p2.y) * (p3.y - p1.y) + (p3.x * p3.x + p3.y * p3.y) * (p1.y - p2.y)) / d;
+  const uy = ((p1.x * p1.x + p1.y * p1.y) * (p3.x - p2.x) + (p2.x * p2.x + p2.y * p2.y) * (p1.x - p3.x) + (p3.x * p3.x + p3.y * p3.y) * (p2.x - p1.x)) / d;
+  const center = { x: ux, y: uy };
+  const R = Math.hypot(p1.x - center.x, p1.y - center.y);
+
+  // 計算起點、中點、終點相對於圓心的極角
+  const a1 = Math.atan2(p1.y - center.y, p1.x - center.x);
+  const a2 = Math.atan2(p2.y - center.y, p2.x - center.x);
+  const a3 = Math.atan2(p3.y - center.y, p3.x - center.x);
+
+  // 確定圓弧插值方向：順時針還是逆時針？
+  // 我們需要讓角度從 a1 漸變到 a3，且路徑一定要經過 a2！
+  let diff12 = a2 - a1;
+  while (diff12 > Math.PI) diff12 -= 2 * Math.PI;
+  while (diff12 < -Math.PI) diff12 += 2 * Math.PI;
+
+  let diff23 = a3 - a2;
+  while (diff23 > Math.PI) diff23 -= 2 * Math.PI;
+  while (diff23 < -Math.PI) diff23 += 2 * Math.PI;
+
+  const totalSweep = diff12 + diff23;
+  const pts: Point2D[] = [];
+  for (let i = 0; i <= numPoints; i++) {
+    const t = i / numPoints;
+    const angle = a1 + t * totalSweep;
+    pts.push({
+      x: center.x + R * Math.cos(angle),
+      y: center.y + R * Math.sin(angle)
+    });
+  }
+  return pts;
 }
 

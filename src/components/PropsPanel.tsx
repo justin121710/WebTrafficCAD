@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { CadElement, ThreeCenterCurveElement, IslandElement, TextElement, Point2D } from '../types';
-import { calculateWidening, distance, sampleCubicBezier, getMaxSteeringAngleForPath, generateParkingZoneSlots } from '../geometry';
+import { calculateWidening, distance, sampleCubicBezier, getMaxSteeringAngleForPath, generateParkingZoneSlots, offsetSegment, getPathOffsetCurves } from '../geometry';
 import { 
   Compass, 
   HelpCircle, 
@@ -219,6 +219,7 @@ interface PropsPanelProps {
   onUpdateElement: (el: CadElement) => void;
   onDeleteElement: (id: string) => void;
   onGenerateIslandFromCurve: (curve: any) => void;
+  onAddElement?: (el: CadElement) => void;
   
   // Undo helper
   onSaveHistory?: () => void;
@@ -247,6 +248,7 @@ export default function PropsPanel({
   onUpdateElement,
   onDeleteElement,
   onGenerateIslandFromCurve,
+  onAddElement,
   onSaveHistory,
   selectedAnchorIndices = [],
   onTranslateSelectedAnchors,
@@ -257,9 +259,44 @@ export default function PropsPanel({
   parkingZoneConfig,
   setParkingZoneConfig,
   roadArrowConfig,
-  setRoadArrowConfig
+  setRoadArrowConfig,
 }: PropsPanelProps) {
   const [nudgeStep, setNudgeStep] = useState<number>(0.1);
+  const [offsetDistance, setOffsetDistance] = useState<number>(3.5);
+
+  const handleOffsetCopy = (el: CadElement, distM: number) => {
+    if (!onAddElement) return;
+    onSaveHistory?.();
+    const newId = `${el.type}-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+    
+    const line = el as any;
+    if (line.p1 && line.p2 && (!line.points || line.points.length === 0)) {
+      const offset = offsetSegment(line.p1, line.p2, distM);
+      const newEl = {
+        ...line,
+        id: newId,
+        p1: offset.p1,
+        p2: offset.p2
+      };
+      onAddElement(newEl);
+      return;
+    }
+
+    if (line.points && line.points.length >= 2) {
+      const cpL = line.cpLeft || line.points;
+      const cpR = line.cpRight || line.points;
+      const offsetPts = getPathOffsetCurves(line.points, cpL, cpR, distM, 25);
+      
+      const newEl = {
+        ...line,
+        id: newId,
+        points: offsetPts,
+        cpLeft: offsetPts,
+        cpRight: offsetPts
+      };
+      onAddElement(newEl);
+    }
+  };
   
   // Calculate general widening for current global R2 setting
   const suggestedWidth = calculateWidening(R2, designVehicle);
@@ -270,8 +307,8 @@ export default function PropsPanel({
       let len = 0;
       for (let i = 0; i < line.points.length - 1; i++) {
         const pStart = line.points[i];
-        const cpStart = line.cpRight[i] || pStart;
-        const cpEnd = line.cpLeft[i + 1] || line.points[i + 1];
+        const cpStart = (line.cpRight && line.cpRight[i]) || pStart;
+        const cpEnd = (line.cpLeft && line.cpLeft[i + 1]) || line.points[i + 1];
         const pEnd = line.points[i + 1];
         const samples = sampleCubicBezier(pStart, cpStart, cpEnd, pEnd, 15);
         for (let j = 0; j < samples.length - 1; j++) {
@@ -545,7 +582,7 @@ export default function PropsPanel({
                       length: parseFloat(e.target.value)
                     });
                   }}
-                  className="flex-1 accent-cyan-500 cursor-pointer"
+                  className="flex-1 accent-blue-500 cursor-pointer"
                 />
                 <input
                   type="number"
@@ -587,7 +624,7 @@ export default function PropsPanel({
                       width: parseFloat(e.target.value)
                     });
                   }}
-                  className="flex-1 accent-cyan-500 cursor-pointer"
+                  className="flex-1 accent-blue-500 cursor-pointer"
                 />
                 <input
                   type="number"
@@ -629,7 +666,7 @@ export default function PropsPanel({
                       angle: parseInt(e.target.value)
                     });
                   }}
-                  className="flex-1 accent-cyan-500 cursor-pointer"
+                  className="flex-1 accent-blue-500 cursor-pointer"
                 />
                 <input
                   type="number"
@@ -671,7 +708,7 @@ export default function PropsPanel({
                       gap: parseFloat(e.target.value)
                     });
                   }}
-                  className="flex-1 accent-cyan-500 cursor-pointer"
+                  className="flex-1 accent-blue-500 cursor-pointer"
                 />
                 <input
                   type="number"
@@ -707,7 +744,7 @@ export default function PropsPanel({
                     });
                   }}
                   className={`w-10 h-5 rounded-full p-0.5 transition-colors cursor-pointer ${
-                    side === 'left' ? 'bg-cyan-600' : 'bg-[#1f2229] border border-[#2d3039]'
+                    side === 'left' ? 'bg-cyan-500' : 'bg-zinc-700'
                   }`}
                 >
                   <div className={`bg-white w-4 h-4 rounded-full transition-transform ${
@@ -846,27 +883,27 @@ export default function PropsPanel({
       }
 
       return (
-        <div className="text-slate-500 text-xs text-center py-8 border border-dashed border-[#2d3039] rounded-lg bg-[#0f1115]/40">
+        <div className="text-slate-500 text-xs text-center py-8 border border-dashed border-[#2d3039] rounded-lg bg-[#1f2229]">
           在畫布上選擇任何物件以調整其參數
         </div>
       );
     }
 
     const selectedAnchorsUI = (selectedAnchorIndices && selectedAnchorIndices.length > 0) ? (
-      <div className="p-3 mb-4 bg-emerald-950/20 border border-emerald-500/40 rounded-lg space-y-3">
+      <div className="p-3 mb-4 rounded-lg space-y-3 border bg-emerald-950/20 border-emerald-500/40 text-slate-350">
         <div className="flex items-center justify-between">
-          <span className="text-xs font-semibold text-emerald-400">已選取特徵點</span>
+          <span className={`text-xs font-semibold text-emerald-400`}>已選取特徵點</span>
           <button 
             type="button"
             onClick={() => onClearSelectedAnchors && onClearSelectedAnchors()}
-            className="text-[10px] text-slate-400 hover:text-white underline cursor-pointer"
+            className={`text-[10px] underline cursor-pointer text-slate-400 hover:text-white`}
           >
             清除選取
           </button>
         </div>
         
         <div className="space-y-2">
-          <span className="text-[11px] text-slate-400 block font-medium">特徵點平移微調 (公尺/m)</span>
+          <span className={`text-[11px] block font-medium text-slate-400`}>特徵點平移微調 (公尺)</span>
           
           <div className="grid grid-cols-3 gap-1.5 max-w-[150px] mx-auto py-1">
             <div></div>
@@ -875,7 +912,7 @@ export default function PropsPanel({
               type="button"
               title="往北平移"
               onClick={() => onTranslateSelectedAnchors && onTranslateSelectedAnchors(0, nudgeStep)}
-              className="p-1 px-2 text-center bg-[#1f2229] border border-[#2d3039] rounded text-slate-300 hover:text-white hover:bg-[#2d3039] cursor-pointer text-xs font-bold"
+              className={"p-1 px-2 text-center rounded text-xs font-bold cursor-pointer transition-all bg-[#1f2229] border border-[#2d3039] text-slate-300 hover:text-white hover:bg-[#2d3039]"}
             >
               <span className="flex items-center justify-center gap-1">
                 <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="m18 15-6-6-6 6"/></svg>
@@ -888,7 +925,7 @@ export default function PropsPanel({
               type="button"
               title="往西平移"
               onClick={() => onTranslateSelectedAnchors && onTranslateSelectedAnchors(-nudgeStep, 0)}
-              className="p-1 px-2 text-center bg-[#1f2229] border border-[#2d3039] rounded text-slate-300 hover:text-white hover:bg-[#2d3039] cursor-pointer text-xs font-bold"
+              className={"p-1 px-2 text-center rounded text-xs font-bold cursor-pointer transition-all bg-[#1f2229] border border-[#2d3039] text-slate-300 hover:text-white hover:bg-[#2d3039]"}
             >
               <span className="flex items-center justify-center gap-1">
                 <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6"/></svg>
@@ -900,11 +937,13 @@ export default function PropsPanel({
                 id="nudge-step-select"
                 value={String(nudgeStep)}
                 onChange={(e) => setNudgeStep(parseFloat(e.target.value))}
-                className="bg-transparent text-[10px] text-emerald-400 font-bold focus:outline-none cursor-pointer"
+                className={`bg-transparent text-[10px] font-bold focus:outline-none cursor-pointer ${
+                  'text-emerald-400'
+                }`}
               >
-                <option value="0.1" className="bg-[#14161c] text-slate-200">0.1</option>
-                <option value="0.5" className="bg-[#14161c] text-slate-200">0.5</option>
-                <option value="1.0" className="bg-[#14161c] text-slate-200">1.0</option>
+                <option value="0.1" className={'bg-[#14161c] text-slate-200'}>0.1</option>
+                <option value="0.5" className={'bg-[#14161c] text-slate-200'}>0.5</option>
+                <option value="1.0" className={'bg-[#14161c] text-slate-200'}>1.0</option>
               </select>
             </div>
             <button
@@ -912,7 +951,7 @@ export default function PropsPanel({
               type="button"
               title="往東平移"
               onClick={() => onTranslateSelectedAnchors && onTranslateSelectedAnchors(nudgeStep, 0)}
-              className="p-1 px-2 text-center bg-[#1f2229] border border-[#2d3039] rounded text-slate-300 hover:text-white hover:bg-[#2d3039] cursor-pointer text-xs font-bold"
+              className={"p-1 px-2 text-center rounded text-xs font-bold cursor-pointer transition-all bg-[#1f2229] border border-[#2d3039] text-slate-300 hover:text-white hover:bg-[#2d3039]"}
             >
               <span className="flex items-center justify-center gap-1">
                 東
@@ -925,7 +964,7 @@ export default function PropsPanel({
               type="button"
               title="往南平移"
               onClick={() => onTranslateSelectedAnchors && onTranslateSelectedAnchors(0, -nudgeStep)}
-              className="p-1 px-2 text-center bg-[#1f2229] border border-[#2d3039] rounded text-slate-300 hover:text-white hover:bg-[#2d3039] cursor-pointer text-xs font-bold"
+              className={"p-1 px-2 text-center rounded text-xs font-bold cursor-pointer transition-all bg-[#1f2229] border border-[#2d3039] text-slate-300 hover:text-white hover:bg-[#2d3039]"}
             >
               <span className="flex items-center justify-center gap-1">
                 南
@@ -937,13 +976,13 @@ export default function PropsPanel({
           
           <div className="flex gap-2 pt-1 font-mono text-[10px]">
             <div className="flex-1">
-              <span className="text-slate-500 block">dX (公尺)</span>
+              <span className={`block text-[9px] text-slate-500`}>水平平移 (公尺)</span>
               <input 
                 id="translate-custom-dx"
                 type="number" 
                 step="0.05" 
                 placeholder="0.0"
-                className="w-full bg-[#15171c] border border-[#2d3039] rounded px-1.5 py-0.5 text-xs text-slate-200 font-mono focus:outline-none"
+                className={"w-full border rounded px-1.5 py-0.5 text-xs font-mono focus:outline-none bg-[#15171c] border-[#2d3039] text-slate-200"}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') {
                     const val = parseFloat((e.target as HTMLInputElement).value);
@@ -956,13 +995,13 @@ export default function PropsPanel({
               />
             </div>
             <div className="flex-1">
-              <span className="text-slate-500 block">dY (公尺)</span>
+              <span className={`block text-[9px] text-slate-500`}>垂直平移 (公尺)</span>
               <input 
                 id="translate-custom-dy"
                 type="number" 
                 step="0.05" 
                 placeholder="0.0"
-                className="w-full bg-[#15171c] border border-[#2d3039] rounded px-1.5 py-0.5 text-xs text-slate-200 font-mono focus:outline-none"
+                className={"w-full border rounded px-1.5 py-0.5 text-xs font-mono focus:outline-none bg-[#15171c] border-[#2d3039] text-slate-200"}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') {
                     const val = parseFloat((e.target as HTMLInputElement).value);
@@ -990,6 +1029,9 @@ export default function PropsPanel({
       case 'white_solid':
       case 'reversible_lane':
       case 'yield_line':
+      case 'stop_line':
+      case 'crossing_dashed':
+      case 'Sidewalk':
       case 'BuildingLine': {
         const line = selectedElement as any;
         const lineLen = getLineElementLength(line);
@@ -1003,6 +1045,9 @@ export default function PropsPanel({
           white_double: '白色雙實線',
           reversible_lane: '調撥車道線 (雙白虛線)',
           yield_line: '讓路標線組 (台灣法規式)',
+          stop_line: '停止線 (白色實線：30-40cm寬)',
+          crossing_dashed: '附加車道虛線/穿越線：30cm寬',
+          Sidewalk: '人行道/紅磚步道鋪面',
           BuildingLine: '建築線 / 地界紅線'
         };
 
@@ -1049,7 +1094,7 @@ export default function PropsPanel({
                       });
                     }}
                     className={`w-10 h-5 rounded-full p-0.5 transition-colors cursor-pointer ${
-                      selectedElement.isLeftTurnGuide ? 'bg-blue-600' : 'bg-[#1f2229] border border-[#2d3039]'
+                      selectedElement.isLeftTurnGuide ? 'bg-cyan-500' : 'bg-zinc-700'
                     }`}
                   >
                     <div className={`bg-white w-4 h-4 rounded-full transition-transform ${
@@ -1063,7 +1108,7 @@ export default function PropsPanel({
             <div className="space-y-2">
               <label className="text-xs text-slate-400 block">轉換標線類型</label>
               <div className="grid grid-cols-2 gap-1.5">
-                {['guideline', 'yellow_double', 'white_double', 'white_dashed', 'yellow_dashed', 'white_solid', 'reversible_lane', 'BuildingLine', 'yield_line'].map((t) => (
+                {['guideline', 'yellow_double', 'white_double', 'white_dashed', 'yellow_dashed', 'white_solid', 'reversible_lane', 'BuildingLine', 'yield_line', 'stop_line', 'crossing_dashed', 'Sidewalk'].map((t) => (
                   <button
                     key={t}
                     id={`type-convert-${t}`}
@@ -1083,6 +1128,45 @@ export default function PropsPanel({
                     {typeLabels[t] ? typeLabels[t].split(' ')[0] : t}
                   </button>
                 ))}
+              </div>
+            </div>
+
+            {/* 偏移複製控制面板 */}
+            <div className="space-y-2 p-3 bg-[#1f2229]/40 border border-[#2d3039] rounded-lg">
+              <label className="text-[10.5px] font-bold text-slate-400 block">平行偏移複製標線 (Offset Tool)</label>
+              <div className="flex items-center gap-2 pt-1">
+                <span className="text-xs text-slate-400">間距:</span>
+                <input
+                  type="number"
+                  step="0.1"
+                  min="0.1"
+                  max="10.0"
+                  value={offsetDistance}
+                  onChange={(e) => {
+                    const val = parseFloat(e.target.value);
+                    if (!isNaN(val)) setOffsetDistance(val);
+                  }}
+                  className="w-16 bg-[#1f2229] border border-[#2d3039] px-1.5 py-0.5 rounded text-white text-right font-mono text-xs focus:outline-none focus:border-blue-500"
+                />
+                <span className="text-xs text-slate-500">m</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    handleOffsetCopy(selectedElement, -offsetDistance);
+                  }}
+                  className="px-2.5 py-1 text-[10px] bg-blue-950/40 border border-blue-500/30 text-blue-400 rounded cursor-pointer hover:bg-blue-900/40"
+                >
+                  向左偏移
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    handleOffsetCopy(selectedElement, offsetDistance);
+                  }}
+                  className="px-2.5 py-1 text-[10px] bg-blue-950/40 border border-blue-500/30 text-blue-400 rounded cursor-pointer hover:bg-blue-900/40"
+                >
+                  向右偏移
+                </button>
               </div>
             </div>
 
@@ -1136,7 +1220,7 @@ export default function PropsPanel({
                       width: parseFloat(e.target.value)
                     });
                   }}
-                  className="flex-1 accent-pink-500 cursor-pointer"
+                  className="flex-1 accent-blue-500 cursor-pointer"
                 />
                 <input
                   type="number"
@@ -1157,6 +1241,45 @@ export default function PropsPanel({
                   }}
                   className="w-16 bg-[#1f2229] border border-[#2d3039] px-1 py-0.5 rounded text-white text-right focus:outline-none focus:border-blue-500 font-mono text-xs"
                 />
+              </div>
+            </div>
+
+            {/* 偏移複製控制面板 */}
+            <div className="space-y-2 p-3 bg-[#1f2229]/40 border border-[#2d3039] rounded-lg">
+              <label className="text-[10.5px] font-bold text-slate-400 block">平行偏移複製標線 (Offset Tool)</label>
+              <div className="flex items-center gap-2 pt-1">
+                <span className="text-xs text-slate-400">間距:</span>
+                <input
+                  type="number"
+                  step="0.1"
+                  min="0.1"
+                  max="10.0"
+                  value={offsetDistance}
+                  onChange={(e) => {
+                    const val = parseFloat(e.target.value);
+                    if (!isNaN(val)) setOffsetDistance(val);
+                  }}
+                  className="w-16 bg-[#1f2229] border border-[#2d3039] px-1.5 py-0.5 rounded text-white text-right font-mono text-xs focus:outline-none focus:border-blue-500"
+                />
+                <span className="text-xs text-slate-500">m</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    handleOffsetCopy(selectedElement, -offsetDistance);
+                  }}
+                  className="px-2.5 py-1 text-[10px] bg-blue-950/40 border border-blue-500/30 text-blue-400 rounded cursor-pointer hover:bg-blue-900/40"
+                >
+                  向左偏移
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    handleOffsetCopy(selectedElement, offsetDistance);
+                  }}
+                  className="px-2.5 py-1 text-[10px] bg-blue-950/40 border border-blue-500/30 text-blue-400 rounded cursor-pointer hover:bg-blue-900/40"
+                >
+                  向右偏移
+                </button>
               </div>
             </div>
 
@@ -1422,7 +1545,7 @@ export default function PropsPanel({
                     });
                   }}
                   className={`w-10 h-5 rounded-full p-0.5 transition-colors cursor-pointer ${
-                    pk.showSizeLabel !== false ? 'bg-blue-600' : 'bg-[#1f2229] border border-[#2d3039]'
+                    pk.showSizeLabel !== false ? 'bg-cyan-500' : 'bg-zinc-700'
                   }`}
                 >
                   <div className={`bg-white w-4 h-4 rounded-full transition-transform ${
@@ -1541,7 +1664,7 @@ export default function PropsPanel({
                       length: parseFloat(e.target.value)
                     });
                   }}
-                  className="w-full accent-cyan-500 cursor-pointer flex-1"
+                  className="w-full accent-blue-500 cursor-pointer flex-1"
                 />
                 <input
                   type="number"
@@ -1583,7 +1706,7 @@ export default function PropsPanel({
                       width: parseFloat(e.target.value)
                     });
                   }}
-                  className="w-full accent-cyan-500 cursor-pointer flex-1"
+                  className="w-full accent-blue-500 cursor-pointer flex-1"
                 />
                 <input
                   type="number"
@@ -1625,7 +1748,7 @@ export default function PropsPanel({
                       angle: parseInt(e.target.value)
                     });
                   }}
-                  className="w-full accent-cyan-500 cursor-pointer flex-1"
+                  className="w-full accent-blue-500 cursor-pointer flex-1"
                 />
                 <input
                   type="number"
@@ -1667,7 +1790,7 @@ export default function PropsPanel({
                       gap: parseFloat(e.target.value)
                     });
                   }}
-                  className="w-full accent-cyan-500 cursor-pointer flex-1"
+                  className="w-full accent-blue-500 cursor-pointer flex-1"
                 />
                 <input
                   type="number"
@@ -1704,7 +1827,7 @@ export default function PropsPanel({
                     });
                   }}
                   className={`w-10 h-5 rounded-full p-0.5 transition-colors cursor-pointer ${
-                    side === 'left' ? 'bg-cyan-600' : 'bg-[#1f2229] border border-[#2d3039]'
+                    side === 'left' ? 'bg-cyan-500' : 'bg-zinc-700'
                   }`}
                 >
                   <div className={`bg-white w-4 h-4 rounded-full transition-transform ${
@@ -1726,7 +1849,7 @@ export default function PropsPanel({
                     });
                   }}
                   className={`w-10 h-5 rounded-full p-0.5 transition-colors cursor-pointer ${
-                    zone.showSizeLabel !== false ? 'bg-cyan-600' : 'bg-[#1f2229] border border-[#2d3039]'
+                    zone.showSizeLabel !== false ? 'bg-cyan-500' : 'bg-zinc-700'
                   }`}
                 >
                   <div className={`bg-white w-4 h-4 rounded-full transition-transform ${
@@ -1761,7 +1884,7 @@ export default function PropsPanel({
                 <span>圓形草稿輔助線</span>
               </h4>
               <div className="grid grid-cols-2 gap-x-2 gap-y-1 font-mono text-[10px] text-slate-400">
-                <span>類型:</span> <span className="text-slate-200">Sketch 圓形輔助</span>
+                <span>類型:</span> <span className="text-slate-200">圓形輔助</span>
                 <span>圓心 X:</span> <span className="text-slate-300">{circ.center.x.toFixed(2)} m</span>
                 <span>圓心 Y:</span> <span className="text-slate-300">{circ.center.y.toFixed(2)} m</span>
                 <span>圓直徑 D:</span> <span className="text-slate-350">{(circ.radius * 2).toFixed(2)} m</span>
@@ -1936,7 +2059,7 @@ export default function PropsPanel({
 
             <div className="p-3 bg-[#1f2229]/40 rounded-lg border border-[#2d3039] space-y-3">
               <div className="flex items-center justify-between">
-                <label className="text-xs text-slate-400">槽化線填充 (Hatching)</label>
+                <label className="text-xs text-slate-400">槽化線填充</label>
                 <button
                   id="toggle-hatching-btn"
                   onClick={() => {
@@ -1947,7 +2070,7 @@ export default function PropsPanel({
                     });
                   }}
                   className={`w-10 h-5 rounded-full p-0.5 transition-colors cursor-pointer ${
-                    island.hasHatching ? 'bg-blue-600' : 'bg-[#1f2229] border border-[#2d3039]'
+                    island.hasHatching ? 'bg-cyan-500' : 'bg-zinc-700'
                   }`}
                 >
                   <div className={`bg-white w-4 h-4 rounded-full transition-transform ${
@@ -1987,7 +2110,7 @@ export default function PropsPanel({
                 <span>文字標記內容設定</span>
               </h4>
               <div className="grid grid-cols-2 gap-x-2 gap-y-1 font-mono text-[10px] text-slate-400">
-                <span>類型:</span> <span className="text-slate-200">文字標記 (Text)</span>
+                <span>類型:</span> <span className="text-slate-200">文字標記</span>
                 <span>內容:</span> <span className="text-blue-400 font-bold truncate max-w-[120px]">{txt.text || "(未命名)"}</span>
               </div>
             </div>
@@ -2154,6 +2277,45 @@ export default function PropsPanel({
               </p>
             </div>
 
+            {/* 偏移複製控制面板 */}
+            <div className="space-y-2 p-3 bg-[#1f2229]/40 border border-[#2d3039] rounded-lg">
+              <label className="text-[10.5px] font-bold text-slate-400 block">平行偏移複製標線 (Offset Tool)</label>
+              <div className="flex items-center gap-2 pt-1">
+                <span className="text-xs text-slate-400">間距:</span>
+                <input
+                  type="number"
+                  step="0.1"
+                  min="0.1"
+                  max="10.0"
+                  value={offsetDistance}
+                  onChange={(e) => {
+                    const val = parseFloat(e.target.value);
+                    if (!isNaN(val)) setOffsetDistance(val);
+                  }}
+                  className="w-16 bg-[#1f2229] border border-[#2d3039] px-1.5 py-0.5 rounded text-white text-right font-mono text-xs focus:outline-none focus:border-blue-500"
+                />
+                <span className="text-xs text-slate-500">m</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    handleOffsetCopy(selectedElement, -offsetDistance);
+                  }}
+                  className="px-2.5 py-1 text-[10px] bg-blue-950/40 border border-blue-500/30 text-blue-400 rounded cursor-pointer hover:bg-blue-900/40"
+                >
+                  向左偏移
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    handleOffsetCopy(selectedElement, offsetDistance);
+                  }}
+                  className="px-2.5 py-1 text-[10px] bg-blue-950/40 border border-blue-500/30 text-blue-400 rounded cursor-pointer hover:bg-blue-900/40"
+                >
+                  向右偏移
+                </button>
+              </div>
+            </div>
+
             <button
               id="delete-smartpath-btn"
               onClick={() => {
@@ -2175,25 +2337,35 @@ export default function PropsPanel({
 
         return (
           <div className="space-y-4">
-            <div className="p-3 bg-[#1f2229]/40 rounded-lg border border-[#2d3039] space-y-2">
-              <h4 className="text-xs font-semibold text-slate-350 flex items-center gap-1.5">
+            <div className={`p-3 rounded-lg border space-y-2 ${
+              'bg-[#181a20] border-[#2d3039] text-slate-350'
+            }`}>
+              <h4 className={`text-xs font-semibold flex items-center gap-1.5 ${
+                'text-slate-350'
+              }`}>
                 {renderPropsIcon(selectedElement.type)}
-                <span>行穿線 (Crosswalk)</span>
+                <span>行穿線</span>
               </h4>
-              <p className="text-[10px] text-slate-450 leading-normal">
+              <p className={`text-[10px] leading-normal ${
+                'text-slate-450'
+              }`}>
                 枕木紋行人穿越道線：線寬及間隔符合公路標線《設置規則》第185條 **40cm (0.4m)** 規範。
               </p>
-              <div className="grid grid-cols-2 gap-x-2 gap-y-1 font-mono text-[10px] text-slate-400 pt-1">
-                <span>起點線長 (Line A):</span> <span className="text-slate-200">{lenA.toFixed(2)} m</span>
-                <span>終點線長 (Line B):</span> <span className="text-slate-200">{lenB.toFixed(2)} m</span>
+              <div className={`grid grid-cols-2 gap-x-2 gap-y-1 font-mono text-[10px] pt-1 ${
+                'text-slate-400'
+              }`}>
+                <span>起點線長:</span> <span className={'text-slate-200'}>{lenA.toFixed(2)} m</span>
+                <span>終點線長:</span> <span className={'text-slate-200'}>{lenB.toFixed(2)} m</span>
               </div>
             </div>
 
-            <div className="space-y-3 p-3 bg-[#1f2229]/40 border border-[#2d3039] rounded-lg">
+            <div className={`space-y-3 p-3 border rounded-lg ${
+              'bg-[#181a20] border-[#2d3039]'
+            }`}>
               <div className="space-y-1.5">
                 <div className="flex justify-between text-xs">
-                  <span className="text-slate-400">客製化標線寬度</span>
-                  <span className="text-emerald-400 font-mono">{(cw.stripeWidth ?? 0.4).toFixed(2)} m</span>
+                  <span className={'text-slate-400'}>客製化標線寬度</span>
+                  <span className="text-emerald-500 font-mono font-bold">{(cw.stripeWidth ?? 0.4).toFixed(2)} m</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <input
@@ -2209,7 +2381,7 @@ export default function PropsPanel({
                         stripeWidth: parseFloat(e.target.value)
                       });
                     }}
-                    className="flex-1 accent-emerald-500 cursor-pointer"
+                    className="flex-1 accent-blue-500 cursor-pointer"
                   />
                   <input
                     type="number"
@@ -2228,15 +2400,17 @@ export default function PropsPanel({
                         });
                       }
                     }}
-                    className="w-16 bg-[#1f2229] border border-[#2d3039] px-1 py-0.5 rounded text-white text-right focus:outline-none focus:border-blue-500 font-mono text-xs"
+                    className={`w-16 border px-1 py-0.5 rounded text-right focus:outline-none focus:border-blue-500 font-mono text-xs ${
+                      'bg-[#1f2229] border-[#2d3039] text-white'
+                    }`}
                   />
                 </div>
               </div>
 
               <div className="space-y-1.5">
                 <div className="flex justify-between text-xs">
-                  <span className="text-slate-400">客製化標線間距</span>
-                  <span className="text-emerald-400 font-mono">{(cw.stripeGap ?? 0.4).toFixed(2)} m</span>
+                  <span className={'text-slate-400'}>客製化標線間距</span>
+                  <span className="text-emerald-500 font-mono font-bold">{(cw.stripeGap ?? 0.4).toFixed(2)} m</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <input
@@ -2252,7 +2426,7 @@ export default function PropsPanel({
                         stripeGap: parseFloat(e.target.value)
                       });
                     }}
-                    className="flex-1 accent-emerald-500 cursor-pointer"
+                    className="flex-1 accent-blue-500 cursor-pointer"
                   />
                   <input
                     type="number"
@@ -2271,7 +2445,9 @@ export default function PropsPanel({
                         });
                       }
                     }}
-                    className="w-16 bg-[#1f2229] border border-[#2d3039] px-1 py-0.5 rounded text-white text-right focus:outline-none focus:border-blue-500 font-mono text-xs"
+                    className={`w-16 border px-1 py-0.5 rounded text-right focus:outline-none focus:border-blue-500 font-mono text-xs ${
+                      'bg-[#1f2229] border-[#2d3039] text-white'
+                    }`}
                   />
                 </div>
               </div>
@@ -2306,23 +2482,33 @@ export default function PropsPanel({
 
         return (
           <div className="space-y-4">
-            <div className="p-3 bg-[#1f2229]/40 rounded-lg border border-[#2d3039] space-y-2">
-              <h4 className="text-xs font-semibold text-slate-350 flex items-center gap-1.5">
+            <div className={`p-3 rounded-lg border space-y-2 ${
+              'bg-[#181a20] border-[#2d3039] text-slate-350'
+            }`}>
+              <h4 className={`text-xs font-semibold flex items-center gap-1.5 ${
+                'text-slate-350'
+              }`}>
                 {renderPropsIcon(selectedElement.type)}
-                <span>路面指向線 (Direction Arrow)</span>
+                <span>路面指向線</span>
               </h4>
-              <p className="text-[10px] text-slate-455 leading-normal">
+              <p className={`text-[10px] leading-normal ${
+                'text-slate-455'
+              }`}>
                 指示車輛行駛方向之指向線標記。
               </p>
-              <div className="grid grid-cols-2 gap-x-2 gap-y-1 font-mono text-[10px] text-slate-400 pt-1">
-                <span>中心坐標 X:</span> <span className="text-slate-200">{arrow.p.x.toFixed(2)} m</span>
-                <span>中心坐標 Y:</span> <span className="text-slate-200">{arrow.p.y.toFixed(2)} m</span>
+              <div className={`grid grid-cols-2 gap-x-2 gap-y-1 font-mono text-[10px] pt-1 ${
+                'text-slate-400'
+              }`}>
+                <span>中心坐標 X:</span> <span className={'text-slate-200'}>{arrow.p.x.toFixed(2)} m</span>
+                <span>中心坐標 Y:</span> <span className={'text-slate-200'}>{arrow.p.y.toFixed(2)} m</span>
               </div>
             </div>
 
-            <div className="space-y-3 p-3 bg-[#1f2229]/40 border border-[#2d3039] rounded-lg">
+            <div className={`space-y-3 p-3 border rounded-lg ${
+              'bg-[#1f2229]/40 border-[#2d3039]'
+            }`}>
               <div className="space-y-1.5 text-xs">
-                <label className="text-slate-400 block font-medium">箭頭類型</label>
+                <label className={`block font-medium text-slate-400`}>箭頭類型</label>
                 <select
                   value={arrowType}
                   onChange={(e) => {
@@ -2331,18 +2517,20 @@ export default function PropsPanel({
                       arrowType: e.target.value as any
                     });
                   }}
-                  className="w-full bg-[#1f2229] border border-[#2d3039] px-2 py-1.5 rounded text-white focus:outline-none focus:border-blue-500 text-xs"
+                  className={`w-full border px-2 py-1.5 rounded focus:outline-none focus:border-blue-500 text-xs ${
+                    'bg-[#1f2229] border-[#2d3039] text-white'
+                  }`}
                 >
                   {Object.entries(arrowLabels).map(([val, label]) => (
-                    <option key={val} value={val} className="bg-[#14161c]">{label}</option>
+                    <option key={val} value={val} className={'bg-[#14161c]'}>{label}</option>
                   ))}
                 </select>
               </div>
 
               <div className="space-y-1 text-xs">
                 <div className="flex justify-between">
-                  <span className="text-slate-400">長度 (m)</span>
-                  <span className="text-slate-200 font-mono font-bold">{length.toFixed(1)} m</span>
+                  <span className={'text-slate-400'}>長度 (m)</span>
+                  <span className={`font-mono font-bold text-slate-200`}>{length.toFixed(1)} m</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <input
@@ -2376,15 +2564,17 @@ export default function PropsPanel({
                         });
                       }
                     }}
-                    className="w-16 bg-[#1f2229] border border-[#2d3039] px-1 py-0.5 rounded text-white text-right focus:outline-none focus:border-blue-500 font-mono text-xs"
+                    className={`w-16 border px-1 py-0.5 rounded text-right focus:outline-none focus:border-blue-500 font-mono text-xs ${
+                      'bg-[#1f2229] border-[#2d3039] text-white'
+                    }`}
                   />
                 </div>
               </div>
 
               <div className="space-y-1 text-xs">
                 <div className="flex justify-between">
-                  <span className="text-slate-400">旋轉偏角 (度)</span>
-                  <span className="text-slate-200 font-mono font-bold">{angleDeg}°</span>
+                  <span className={'text-slate-400'}>旋轉偏角 (度)</span>
+                  <span className={`font-mono font-bold text-slate-200`}>{angleDeg}°</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <input
@@ -2419,7 +2609,9 @@ export default function PropsPanel({
                         });
                       }
                     }}
-                    className="w-16 bg-[#1f2229] border border-[#2d3039] px-1 py-0.5 rounded text-white text-right focus:outline-none focus:border-blue-500 font-mono text-xs"
+                    className={`w-16 border px-1 py-0.5 rounded text-right focus:outline-none focus:border-blue-500 font-mono text-xs ${
+                      'bg-[#1f2229] border-[#2d3039] text-white'
+                    }`}
                   />
                 </div>
               </div>
@@ -2439,6 +2631,82 @@ export default function PropsPanel({
         );
       }
 
+      case 'measurement': {
+        const meas = selectedElement as any;
+        const len = getLineElementLength(meas);
+        return (
+          <div className="space-y-4">
+            <div className={`p-3 rounded-lg border space-y-2 ${
+              'bg-[#181a20] border-[#2d3039] text-slate-350'
+            }`}>
+              <h4 className={`text-xs font-semibold flex items-center gap-1.5 ${
+                'text-slate-350'
+              }`}>
+                <svg viewBox="0 0 24 24" className="w-4 h-4 inline-block shrink-0" fill="none" stroke="currentColor" strokeWidth="1.8">
+                  <path d="M4 12v8M20 12v8M2 14h20" />
+                </svg>
+                <span>標線長度測量</span>
+              </h4>
+              <div className={`grid grid-cols-2 gap-x-2 gap-y-1 font-mono text-[10px] pt-1 ${
+                'text-slate-400'
+              }`}>
+                <span>類型:</span> <span className={'text-slate-200'}>測距工具</span>
+                <span>量測距離:</span> <span className="text-amber-500 font-bold">{len.toFixed(2)} m</span>
+                <span>起點:</span> <span className={'text-slate-200'}>({meas.points?.[0]?.x.toFixed(2)}, {meas.points?.[0]?.y.toFixed(2)})</span>
+                <span>終點:</span> <span className={'text-slate-200'}>({meas.points?.[1]?.x.toFixed(2)}, {meas.points?.[1]?.y.toFixed(2)})</span>
+              </div>
+            </div>
+            <button
+              onClick={() => {
+                onSaveHistory?.();
+                onDeleteElement(selectedElement.id);
+              }}
+              className={`w-full py-2 text-xs rounded transition-colors ${
+                'bg-red-950/20 text-red-400 border border-red-950/40 hover:bg-red-950/40 hover:text-red-300'
+              }`}
+            >
+              刪除此測量標記
+            </button>
+          </div>
+        );
+      }
+
+      case 'angular_dimension': {
+        const angEl = selectedElement as any;
+        return (
+          <div className="space-y-4">
+            <div className={`p-3 rounded-lg border space-y-2 ${
+              'bg-[#181a20] border-[#2d3039] text-slate-350'
+            }`}>
+              <h4 className={`text-xs font-semibold flex items-center gap-1.5 ${
+                'text-slate-350'
+              }`}>
+                <Compass className="w-4 h-4 shrink-0" />
+                <span>夾角角度標註</span>
+              </h4>
+              <div className={`grid grid-cols-2 gap-x-2 gap-y-1 font-mono text-[10px] pt-1 ${
+                'text-slate-400'
+              }`}>
+                <span>類型:</span> <span className={'text-slate-200'}>角度標註</span>
+                <span>計算角度:</span> <span className="text-pink-500 font-bold">{angEl.angleDeg.toFixed(1)}°</span>
+                <span>相交頂點:</span> <span className={'text-slate-200'}>({angEl.center?.x.toFixed(2)}, {angEl.center?.y.toFixed(2)})</span>
+              </div>
+            </div>
+            <button
+              onClick={() => {
+                onSaveHistory?.();
+                onDeleteElement(selectedElement.id);
+              }}
+              className={`w-full py-2 text-xs rounded transition-colors ${
+                'bg-red-950/20 text-red-400 border border-red-950/40 hover:bg-red-950/40 hover:text-red-300'
+              }`}
+            >
+              刪除此角度標註
+            </button>
+          </div>
+        );
+      }
+
       default:
         return null;
     }
@@ -2453,22 +2721,28 @@ export default function PropsPanel({
 };
 
   return (
-    <div id="right-property-panel" className="bg-[#14161c] w-full h-full p-4 flex flex-col select-none">
+    <div id="right-property-panel" className={`w-full h-full p-4 flex flex-col select-none ${
+      'bg-[#14161c] text-slate-300'
+    }`}>
       <div className="space-y-5 overflow-y-auto flex-1 pr-1">
         
         {/* Module Title */}
-        <div className="flex items-center gap-2 border-b border-[#2d3039] pb-3">
-          <Settings className="w-4 h-4 text-slate-500" />
-          <h3 className="text-xs font-bold text-slate-300 uppercase tracking-widest">屬性控制台</h3>
+        <div className={`flex items-center gap-2 border-b pb-3 ${
+          'border-[#2d3039]'
+        }`}>
+          <Settings className={`w-4 h-4 text-slate-500`} />
+          <h3 className={`text-xs font-bold uppercase tracking-widest ${
+            'text-slate-300'
+          }`}>屬性控制台</h3>
         </div>
-
-
 
         {/* Selected Element Controls (Render Dynamic) */}
         <div className="pt-1 space-y-2">
           <div className="flex items-center gap-1.5 mb-1">
-            <Layers className="w-3.5 h-3.5 text-slate-500" />
-            <h4 className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">所選 CAD 特徵點控制</h4>
+            <Layers className={`w-3.5 h-3.5 text-slate-500`} />
+            <h4 className={`text-[11px] font-bold uppercase tracking-wider ${
+              'text-slate-500'
+            }`}>所選 CAD 特徵點控制</h4>
           </div>
           {renderSelectedElementProps()}
         </div>

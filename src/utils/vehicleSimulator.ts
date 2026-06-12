@@ -154,11 +154,12 @@ function simulateFrontAxleDrag(
   // Initial state setup
   const F_0 = path[0];
   const theta_0 = F_0.heading; // Align with the initial path tangent
+  const dir = config.reverse ? -1 : 1;
   
   // R_0 is placed L distance behind F_0
   const R_0 = {
-    x: F_0.x - L_px * Math.cos(theta_0),
-    y: F_0.y - L_px * Math.sin(theta_0),
+    x: F_0.x - dir * L_px * Math.cos(theta_0),
+    y: F_0.y - dir * L_px * Math.sin(theta_0),
   };
 
   const corners_0 = calculateCorners(R_0, theta_0, config);
@@ -166,8 +167,8 @@ function simulateFrontAxleDrag(
   let trailerState_0 = {};
   if (config.enableTrailer) {
     const R_trailer_0 = {
-      x: R_0.x - Lt_px * Math.cos(theta_0),
-      y: R_0.y - Lt_px * Math.sin(theta_0),
+      x: R_0.x - dir * Lt_px * Math.cos(theta_0),
+      y: R_0.y - dir * Lt_px * Math.sin(theta_0),
     };
     const trailerCorners_0 = calculateTrailerCorners(R_trailer_0, theta_0, config);
     trailerState_0 = {
@@ -201,12 +202,14 @@ function simulateFrontAxleDrag(
       // Rear axle is pulled towards the new front axle
       // maintaining exactly L wheelbase distance.
       R_k = {
-        x: F_k.x - L_px * (dx / d),
-        y: F_k.y - L_px * (dy / d),
+        x: F_k.x - dir * L_px * (dx / d),
+        y: F_k.y - dir * L_px * (dy / d),
       };
     }
 
-    const heading_k = Math.atan2(F_k.y - R_k.y, F_k.x - R_k.x);
+    const heading_k = config.reverse 
+      ? Math.atan2(R_k.y - F_k.y, R_k.x - F_k.x)
+      : Math.atan2(F_k.y - R_k.y, F_k.x - R_k.x);
     
     // Steering angle delta = path heading (direction front wheel wants to go) - body heading
     const pathHeading = F_k.heading;
@@ -266,20 +269,21 @@ function simulateActivePurePursuit(
   // Simulation step size (px). Space out steps by approx 1.5 px (representing smooth small increments)
   const ds = 1.5; 
   const maxSteps = Math.min(1200, path.length * 3); // Guard limit to prevent memory overflow
+  const dir = config.reverse ? -1 : 1;
 
-  // Start with the FRONT axle exactly at the beginning of the path (path[0]), and the rear axle behind it.
+  // Start with the FRONT axle exactly at the beginning of the path (path[0]), and the rear axle behind/in-front.
   let theta_curr = path[0].heading;
   let R_curr = {
-    x: path[0].x - L_px * Math.cos(theta_curr),
-    y: path[0].y - L_px * Math.sin(theta_curr),
+    x: path[0].x - dir * L_px * Math.cos(theta_curr),
+    y: path[0].y - dir * L_px * Math.sin(theta_curr),
   };
   let steer_curr = 0;
   let F_curr = { x: path[0].x, y: path[0].y };
   let corners_curr = calculateCorners(R_curr, theta_curr, config);
 
   let R_trailer_curr = {
-    x: R_curr.x - Lt_px * Math.cos(theta_curr),
-    y: R_curr.y - Lt_px * Math.sin(theta_curr),
+    x: R_curr.x - dir * Lt_px * Math.cos(theta_curr),
+    y: R_curr.y - dir * Lt_px * Math.sin(theta_curr),
   };
   let theta_trailer_curr = theta_curr;
   let trailerCorners_curr = calculateTrailerCorners(R_trailer_curr, theta_trailer_curr, config);
@@ -336,7 +340,8 @@ function simulateActivePurePursuit(
     const gVecX = G.x - R_curr.x;
     const gVecY = G.y - R_curr.y;
     const beta = Math.atan2(gVecY, gVecX);
-    const alpha = normalizeAngle(beta - theta_curr);
+    // If reversing, target direction is relative to back axle heading (theta_curr + PI)
+    const alpha = normalizeAngle(config.reverse ? (beta - (theta_curr + Math.PI)) : (beta - theta_curr));
 
     // 4. Calculate Pure Pursuit steering steering angle: delta = atan2(2 * L * sin(alpha), l_d)
     const targetSteeringAngle = Math.atan2(2 * L_px * Math.sin(alpha), l_d_px);
@@ -355,17 +360,17 @@ function simulateActivePurePursuit(
     steer_curr = Math.max(-MAX_STEER, Math.min(MAX_STEER, steer_curr));
 
     // 5. Update vehicle coordinates
-    // dTheta = ds * tan(delta) / L
-    // dR_x = ds * cos(Theta)
-    // dR_y = ds * sin(Theta)
-    const nextTheta = theta_curr + (ds * Math.tan(steer_curr)) / L_px;
+    // dTheta = dir * ds * tan(delta) / L
+    // dR_x = dir * ds * cos(Theta)
+    // dR_y = dir * ds * sin(Theta)
+    const nextTheta = theta_curr + dir * (ds * Math.tan(steer_curr)) / L_px;
     const nextR = {
-      x: R_curr.x + ds * Math.cos(nextTheta),
-      y: R_curr.y + ds * Math.sin(nextTheta),
+      x: R_curr.x + dir * ds * Math.cos(nextTheta),
+      y: R_curr.y + dir * ds * Math.sin(nextTheta),
     };
     const nextF = {
-      x: nextR.x + L_px * Math.cos(nextTheta),
-      y: nextR.y + L_px * Math.sin(nextTheta),
+      x: nextR.x + dir * L_px * Math.cos(nextTheta),
+      y: nextR.y + dir * L_px * Math.sin(nextTheta),
     };
     const nextCorners = calculateCorners(nextR, nextTheta, config);
 
@@ -378,8 +383,8 @@ function simulateActivePurePursuit(
       let nextR_trailer = { ...R_trailer_curr };
       if (d_t > 0.001) {
         nextR_trailer = {
-          x: nextR.x - Lt_px * (dx_t / d_t),
-          y: nextR.y - Lt_px * (dy_t / d_t),
+          x: nextR.x - dir * Lt_px * (dx_t / d_t),
+          y: nextR.y - dir * Lt_px * (dy_t / d_t),
         };
       }
       const nextTheta_trailer = Math.atan2(nextR.y - nextR_trailer.y, nextR.x - nextR_trailer.x);
