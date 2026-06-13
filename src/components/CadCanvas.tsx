@@ -3703,6 +3703,15 @@ export default function CadCanvas({
         }
       }
 
+      // If hovering over the first point to close the loop, let handlePointerUp
+      // append the closing node with the EXACT first-point coordinates.
+      // Returning here prevents handlePointerDown from adding a potentially
+      // mis-snapped point that would diverge from the first node.
+      if (isClosingPathDrag) {
+        setSpDraggingIndex(null);
+        return;
+      }
+
       const nextPoints = [...spPoints, clickPt];
       let nextCpLeft = [...spCpLeft, { ...clickPt }];
       let nextCpRight = [...spCpRight, { ...clickPt }];
@@ -4202,7 +4211,27 @@ export default function CadCanvas({
 
     if (isClosingPathDrag) {
       setIsClosingPathDrag(false);
-      handleCompleteSmartPath(spPoints, spCpLeft, spCpRight);
+      if (spPoints.length >= 2) {
+        // Determine whether the active tool produces a closed area polygon
+        // (Sidewalk / channelization→island).  For these types the first node
+        // IS both the start and the end — the renderer closes the shape via
+        // sampleClosedBezierLoop / ctx.closePath(), so no duplicate closing
+        // node is added.  For line types we still append a node at exactly the
+        // first point's coordinates so head and tail share the same position.
+        const isClosedAreaTool = activeTool === 'Sidewalk' || activeTool === 'channelization';
+
+        if (isClosedAreaTool) {
+          // Area polygon: n points, first node = start = end (no duplicate).
+          handleCompleteSmartPath(spPoints, spCpLeft, spCpRight);
+        } else {
+          // Line type: n+1 points, last node has identical coords to first node.
+          const closingPt: Point2D = { ...spPoints[0] };
+          const closingPts = [...spPoints, closingPt];
+          const closingCpL = [...spCpLeft, { ...closingPt }];
+          const closingCpR = [...spCpRight, { ...closingPt }];
+          handleCompleteSmartPath(closingPts, closingCpL, closingCpR);
+        }
+      }
       return;
     }
 
@@ -4739,32 +4768,28 @@ export default function CadCanvas({
               ctx.restore();
             }
           } else if (el.type === 'Sidewalk') {
-            // Sidewalk pavement: Solid gray fill + 10cm dark border envelope
-            const segPts = getPathOffsetCurves(ref.points, ref.cpLeft, ref.cpRight, 0, 30);
-            if (segPts.length >= 2) {
-              ctx.save();
-              ctx.fillStyle = '#A9A9A9'; // Engineering gray pavement fill
-              ctx.strokeStyle = '#1e293b'; // 10cm dark gray border
-              ctx.lineWidth = Math.max(1.5, zoom * 0.1); // 10cm border
+            // Sidewalk pavement: Solid gray fill + 10cm dark border envelope.
+            // Use sampleClosedBezierLoop so the closing segment (last→first
+            // anchor) is a proper Bezier curve, matching island rendering.
+            if (ref.points.length >= 3) {
+              const closedPts = sampleClosedBezierLoop(ref.points, ref.cpLeft, ref.cpRight, 20);
+              if (closedPts.length >= 3) {
+                ctx.save();
+                ctx.fillStyle = '#A9A9A9';
+                ctx.strokeStyle = '#1e293b';
+                ctx.lineWidth = Math.max(1.5, zoom * 0.1);
 
-              ctx.beginPath();
-              segPts.forEach((pt, idx) => {
-                const s = worldToScreen(pt.x, pt.y);
-                if (idx === 0) ctx.moveTo(s.x, s.y);
-                else ctx.lineTo(s.x, s.y);
-              });
-              
-              // Close the sidewalk polygon back to start
-              const startS = worldToScreen(segPts[0].x, segPts[0].y);
-              ctx.lineTo(startS.x, startS.y);
-              ctx.closePath();
-
-              // Fill pavement
-              ctx.fill();
-              
-              // Draw outer border
-              ctx.stroke();
-              ctx.restore();
+                ctx.beginPath();
+                closedPts.forEach((pt, idx) => {
+                  const s = worldToScreen(pt.x, pt.y);
+                  if (idx === 0) ctx.moveTo(s.x, s.y);
+                  else ctx.lineTo(s.x, s.y);
+                });
+                ctx.closePath();
+                ctx.fill();
+                ctx.stroke();
+                ctx.restore();
+              }
             }
           } else if (el.type === 'BuildingLine') {
             ctx.strokeStyle = '#00ffff';

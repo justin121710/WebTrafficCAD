@@ -733,72 +733,106 @@ export function offsetSegment(a: Point2D, b: Point2D, d: number): { p1: Point2D;
 }
 
 /**
- * Translates every anchor and its pair of control handles by the anchor's
- * bisector-normal vector, preserving the Bezier curve shape while producing
- * a clean parallel-copy offset.
+ * Perpendicular distance from point P to the infinite line through A and B.
+ */
+function perpDistToLine(p: Point2D, a: Point2D, b: Point2D): number {
+  const dx = b.x - a.x, dy = b.y - a.y;
+  const len = Math.hypot(dx, dy);
+  if (len < 1e-12) return Math.hypot(p.x - a.x, p.y - a.y);
+  return Math.abs((p.y - a.y) * dx - (p.x - a.x) * dy) / len;
+}
+
+/**
+ * Douglas-Peucker polyline simplification.
+ * Recursively removes points that lie within `epsilon` of the chord,
+ * keeping only the geometrically significant vertices.
+ */
+function simplifyPolyline(pts: Point2D[], epsilon: number): Point2D[] {
+  if (pts.length <= 2) return pts.slice();
+  let maxDist = 0, maxIdx = 0;
+  const first = pts[0], last = pts[pts.length - 1];
+  for (let i = 1; i < pts.length - 1; i++) {
+    const d = perpDistToLine(pts[i], first, last);
+    if (d > maxDist) { maxDist = d; maxIdx = i; }
+  }
+  if (maxDist > epsilon) {
+    const L = simplifyPolyline(pts.slice(0, maxIdx + 1), epsilon);
+    const R = simplifyPolyline(pts.slice(maxIdx), epsilon);
+    return [...L.slice(0, -1), ...R];
+  }
+  return [first, last];
+}
+
+/**
+ * Computes a geometrically accurate parallel offset of a multi-segment Bezier path.
+ *
+ * Approach:
+ *  1. Densely sample the original curve, offset each sample along its local
+ *     perpendicular normal (accurate geometry even on tight curves).
+ *  2. Apply Douglas-Peucker simplification to collapse the dense polyline back
+ *     to only the vertices that are geometrically significant (prevents node-
+ *     count explosion when the result is offset-copied multiple times).
+ *  3. Fit Catmull-Rom smooth Bezier handles to the simplified vertices so the
+ *     resulting element renders as a C1-continuous smooth curve.
  *
  * Positive offsetDist → left (90° CCW from travel direction).
  * Negative offsetDist → right.
+ *
+ * @param samplesPerSegment  Dense-sampling density per original segment (default 20).
+ * @param simplifyEpsilon    Douglas-Peucker tolerance in world units (default 0.04 m = 4 cm).
  */
 export function offsetBezierPath(
   points: Point2D[],
   cpLeft: Point2D[],
   cpRight: Point2D[],
-  offsetDist: number
+  offsetDist: number,
+  samplesPerSegment: number = 20,
+  simplifyEpsilon: number = 0.04
 ): { points: Point2D[]; cpLeft: Point2D[]; cpRight: Point2D[] } {
   const n = points.length;
   if (n < 2) return { points, cpLeft, cpRight };
 
-  // Per-anchor bisector normals (90° CCW from the average travel direction).
-  // For degenerate handles (coincident with anchor), fall back to adjacent anchors.
-  const normals: Point2D[] = points.map((pt, i) => {
-    let tangent: Point2D;
+  // 1. Dense-sample → offset each point along its local perpendicular normal.
+  const densePts = getPathOffsetCurves(
+    points, cpLeft, cpRight, offsetDist, samplesPerSegment
+  );
+  if (densePts.length < 2) return { points, cpLeft, cpRight };
 
-    const isDegenerate = (cp: Point2D | undefined, ref: Point2D) =>
-      !cp || (Math.abs(cp.x - ref.x) < 1e-9 && Math.abs(cp.y - ref.y) < 1e-9);
+  // 2. Simplify: collapse near-collinear runs, keeping only vertices that
+  //    deviate more than `simplifyEpsilon` from the local chord.
+  //    This prevents the node-count explosion caused by re-offsetting an
+  //    already-dense polyline (which would otherwise multiply node count by
+  //    samplesPerSegment on every copy operation).
+  const simplified = simplifyPolyline(densePts, simplifyEpsilon);
+  if (simplified.length < 2) return { points, cpLeft, cpRight };
+
+  // 3. Fit Catmull-Rom → cubic Bezier handles for smooth C1-continuous rendering.
+  //    For interior node i: handle delta = (P[i+1] - P[i-1]) / 6
+  //    For endpoints: handle delta = (adjacent - endpoint) / 3
+  const m = simplified.length;
+  const newCpLeft:  Point2D[] = new Array(m);
+  const newCpRight: Point2D[] = new Array(m);
+
+  for (let i = 0; i < m; i++) {
+    const p = simplified[i];
+    let dx: number, dy: number;
 
     if (i === 0) {
-      const cpR = cpRight[0];
-      const candidate = !isDegenerate(cpR, pt) ? cpR! : points[1];
-      tangent = { x: candidate.x - pt.x, y: candidate.y - pt.y };
-    } else if (i === n - 1) {
-      const cpL = cpLeft[n - 1];
-      const candidate = !isDegenerate(cpL, pt) ? cpL! : points[n - 2];
-      tangent = { x: pt.x - candidate.x, y: pt.y - candidate.y };
+      dx = (simplified[1].x - p.x) / 3;
+      dy = (simplified[1].y - p.y) / 3;
+    } else if (i === m - 1) {
+      dx = (p.x - simplified[m - 2].x) / 3;
+      dy = (p.y - simplified[m - 2].y) / 3;
     } else {
-      // Incoming: use cpLeft[i] if non-degenerate, else use previous anchor
-      const cpIn  = !isDegenerate(cpLeft[i], pt)  ? cpLeft[i]!  : points[i - 1];
-      // Outgoing: use cpRight[i] if non-degenerate, else use next anchor
-      const cpOut = !isDegenerate(cpRight[i], pt) ? cpRight[i]! : points[i + 1];
-      const tIn  = normalize({ x: pt.x - cpIn.x,  y: pt.y - cpIn.y  });
-      const tOut = normalize({ x: cpOut.x - pt.x, y: cpOut.y - pt.y });
-      const avg  = { x: tIn.x + tOut.x, y: tIn.y + tOut.y };
-      // If tIn and tOut are anti-parallel (sharp 180° turn), use tOut
-      tangent = Math.hypot(avg.x, avg.y) > 1e-6 ? avg : tOut;
+      dx = (simplified[i + 1].x - simplified[i - 1].x) / 6;
+      dy = (simplified[i + 1].y - simplified[i - 1].y) / 6;
     }
 
-    const t = normalize(tangent);
-    // Guard: if tangent is still zero (collinear degenerate), try chord
-    if (Math.hypot(t.x, t.y) < 1e-9) {
-      const chord = i < n - 1
-        ? { x: points[i + 1].x - pt.x, y: points[i + 1].y - pt.y }
-        : { x: pt.x - points[i - 1].x, y: pt.y - points[i - 1].y };
-      const tc = normalize(chord);
-      return { x: -tc.y, y: tc.x };
-    }
-    return { x: -t.y, y: t.x }; // 90° CCW normal
-  });
+    newCpLeft[i]  = { x: p.x - dx, y: p.y - dy };
+    newCpRight[i] = { x: p.x + dx, y: p.y + dy };
+  }
 
-  const shift = (p: Point2D, i: number): Point2D => ({
-    x: p.x + normals[i].x * offsetDist,
-    y: p.y + normals[i].y * offsetDist,
-  });
-
-  return {
-    points:  points.map((p, i)  => shift(p, i)),
-    cpLeft:  cpLeft.map((p, i)  => shift(p, i)),
-    cpRight: cpRight.map((p, i) => shift(p, i)),
-  };
+  return { points: simplified, cpLeft: newCpLeft, cpRight: newCpRight };
 }
 
 /**

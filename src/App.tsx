@@ -1444,7 +1444,7 @@ export default function App() {
   };
 
   // Export high resolution PNG following the 10% bounding box padding calculations
-  const handleExportPNG = () => {
+  const handleExportPNG = (transparent = false) => {
     try {
       if (elements.length === 0 && !bgImage) {
         showToast('當前畫布為空，無底圖與幾何資料可以匯出為圖片！', 'error');
@@ -1561,9 +1561,11 @@ export default function App() {
         return;
       }
 
-      // Fill dark Blueprint blueprint theme background
-      ctx.fillStyle = '#0f1115';
-      ctx.fillRect(0, 0, imgWidth, imgHeight);
+      // Fill dark blueprint background (skipped in transparent mode)
+      if (!transparent) {
+        ctx.fillStyle = '#0f1115';
+        ctx.fillRect(0, 0, imgWidth, imgHeight);
+      }
 
       // Zoom mapping ratios
       const zoom = imgWidth / finalW;
@@ -1575,8 +1577,8 @@ export default function App() {
 
       const drawElementsAndSave = () => {
         try {
-          // Draw reference grid ONLY if there's no background image or if it's calibrated
-          const shouldShowGrid = !bgImage || bgImage.isCalibrated;
+          // Draw reference grid (skipped in transparent mode)
+          const shouldShowGrid = !transparent && (!bgImage || bgImage.isCalibrated);
           if (shouldShowGrid) {
             ctx.strokeStyle = 'rgba(255, 255, 255, 0.04)';
             ctx.lineWidth = 1;
@@ -1615,7 +1617,7 @@ export default function App() {
                   else ctx.lineTo(s.x, s.y);
                 });
                 ctx.closePath();
-                ctx.fillStyle = 'rgba(15, 23, 42, 0.75)';
+                ctx.fillStyle = transparent ? 'rgba(180, 200, 220, 0.25)' : 'rgba(15, 23, 42, 0.75)';
                 ctx.fill();
                 ctx.strokeStyle = island.color || '#ffffff';
                 ctx.lineWidth = Math.max(1.5, zoom * 0.1);
@@ -1908,22 +1910,24 @@ export default function App() {
                   });
                   ctx.stroke();
                 } else if (el.type === 'Sidewalk') {
-                  const segPts = getPathOffsetCurves(ref.points, ref.cpLeft, ref.cpRight, 0, 30);
-                  if (segPts.length >= 2) {
-                    ctx.save();
-                    ctx.fillStyle = '#A9A9A9';
-                    ctx.strokeStyle = '#1e293b';
-                    ctx.lineWidth = Math.max(1.5, zoom * 0.1);
-                    ctx.beginPath();
-                    segPts.forEach((pt, idx) => {
-                      const s = worldToScreen(pt.x, pt.y);
-                      if (idx === 0) ctx.moveTo(s.x, s.y);
-                      else ctx.lineTo(s.x, s.y);
-                    });
-                    ctx.closePath();
-                    ctx.fill();
-                    ctx.stroke();
-                    ctx.restore();
+                  if (ref.points.length >= 3) {
+                    const closedPts = sampleClosedBezierLoop(ref.points, ref.cpLeft, ref.cpRight, 20);
+                    if (closedPts.length >= 3) {
+                      ctx.save();
+                      ctx.fillStyle = '#A9A9A9';
+                      ctx.strokeStyle = '#1e293b';
+                      ctx.lineWidth = Math.max(1.5, zoom * 0.1);
+                      ctx.beginPath();
+                      closedPts.forEach((pt, idx) => {
+                        const s = worldToScreen(pt.x, pt.y);
+                        if (idx === 0) ctx.moveTo(s.x, s.y);
+                        else ctx.lineTo(s.x, s.y);
+                      });
+                      ctx.closePath();
+                      ctx.fill();
+                      ctx.stroke();
+                      ctx.restore();
+                    }
                   }
                 } else if (el.type === 'yield_line') {
                   const segPts = getPathOffsetCurves(ref.points, ref.cpLeft, ref.cpRight, 0, 30);
@@ -1988,7 +1992,7 @@ export default function App() {
           try {
             const a = document.createElement('a');
             a.href = dataUrl;
-            a.download = `WebTrafficCAD_Blueprint_${new Date().toISOString().slice(0, 10)}.png`;
+            a.download = `WebTrafficCAD_${transparent ? 'Transparent' : 'Blueprint'}_${new Date().toISOString().slice(0, 10)}.png`;
             document.body.appendChild(a);
             a.click();
             document.body.removeChild(a);
@@ -2000,31 +2004,30 @@ export default function App() {
         }
       };
 
-      if (bgImage && bgImage.src) {
+      if (!transparent && bgImage && bgImage.src) {
+        // Non-transparent mode: draw background image first, then CAD elements on top
         const bgImg = new Image();
         if (!bgImage.src.startsWith('data:')) {
           bgImg.crossOrigin = "anonymous"; // Safe mode for canvas save
         }
         bgImg.onload = () => {
-          // Draw image onto canvas based on its world coordinates
-          const tl = worldToScreen(bgImage.x - bgImage.widthMeters / 2, bgImage.y + bgImage.heightMeters / 2); // Top left
-          const br = worldToScreen(bgImage.x + bgImage.widthMeters / 2, bgImage.y - bgImage.heightMeters / 2); // Bottom right
+          const tl = worldToScreen(bgImage.x - bgImage.widthMeters / 2, bgImage.y + bgImage.heightMeters / 2);
+          const br = worldToScreen(bgImage.x + bgImage.widthMeters / 2, bgImage.y - bgImage.heightMeters / 2);
           const sW = br.x - tl.x;
           const sH = br.y - tl.y;
-          
           ctx.save();
           ctx.globalAlpha = bgImage.opacity !== undefined ? bgImage.opacity : 0.5;
           ctx.drawImage(bgImg, tl.x, tl.y, sW, sH);
           ctx.restore();
-          
           drawElementsAndSave();
         };
         bgImg.onerror = (err) => {
           console.warn("Background image failed to load for high-res PNG export, using fallback", err);
-          drawElementsAndSave(); // fallback
+          drawElementsAndSave();
         };
         bgImg.src = bgImage.src;
       } else {
+        // Transparent mode: skip background image, draw only CAD elements on clear canvas
         drawElementsAndSave();
       }
     } catch (outerErr) {
@@ -2157,17 +2160,28 @@ export default function App() {
               <ChevronDown className="w-3 h-3 text-blue-400/70" />
             </button>
             {isExportDropdownOpen && (
-              <div className="absolute right-0 top-full mt-1.5 w-48 rounded bg-[#1f2229] border border-[#2d3039] shadow-xl py-1 z-30">
+              <div className="absolute right-0 top-full mt-1.5 w-56 rounded bg-[#1f2229] border border-[#2d3039] shadow-xl py-1 z-30">
                 <button
                   onClick={() => {
-                    handleExportPNG();
+                    handleExportPNG(false);
                     setIsExportDropdownOpen(false);
                   }}
                   className="flex items-center gap-2 w-full px-3 py-2 text-xs text-left text-slate-350 hover:bg-slate-800 hover:text-white transition-all cursor-pointer"
                 >
                   <ImageIcon className="w-3.5 h-3.5 text-blue-400" />
-                  <span>匯出工程圖 (PNG)</span>
+                  <span>匯出工程圖 PNG (深色背景)</span>
                 </button>
+                <button
+                  onClick={() => {
+                    handleExportPNG(true);
+                    setIsExportDropdownOpen(false);
+                  }}
+                  className="flex items-center gap-2 w-full px-3 py-2 text-xs text-left text-slate-350 hover:bg-slate-800 hover:text-white transition-all cursor-pointer"
+                >
+                  <ImageIcon className="w-3.5 h-3.5 text-sky-300" />
+                  <span>匯出工程圖 PNG (透明背景)</span>
+                </button>
+                <div className="my-1 border-t border-[#2d3039]" />
                 <button
                   onClick={() => {
                     handleExportDXF();
