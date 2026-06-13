@@ -1563,14 +1563,12 @@ export default function CadCanvas({
         }
       }
       if (e.key === 'v' || e.key === 'V' || e.code === 'KeyV') {
-        if (appMode === 'cad') {
-          e.preventDefault();
-          if (isLineOrPathTool(activeTool) && spPoints.length >= 2) {
-            handleCompleteSmartPath(spPoints, spCpLeft, spCpRight);
-          }
-          // Always switch to select; the activeTool-change useEffect clears any partial spPoints
-          setActiveTool('select');
+        e.preventDefault();
+        if (appMode === 'cad' && isLineOrPathTool(activeTool) && spPoints.length >= 2) {
+          // Complete the in-progress path before switching to select
+          handleCompleteSmartPath(spPoints, spCpLeft, spCpRight);
         }
+        setActiveTool('select');
       }
       if (e.key === 'Escape') {
         e.preventDefault();

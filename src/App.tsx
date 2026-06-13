@@ -990,9 +990,6 @@ export default function App() {
       } else if (isCmdOrCtrl && e.key.toLowerCase() === 'y') {
         e.preventDefault();
         handleRedo();
-      } else if (e.key.toLowerCase() === 'v') {
-        e.preventDefault();
-        setActiveTool('select');
       } else if (activeTool === 'select' && (selectedElement || selectedElementIds.length > 0) && (e.key === 'Delete' || e.key === 'Backspace')) {
         e.preventDefault();
         const idsToDel = selectedElementIds.length > 0 ? selectedElementIds : (selectedElement ? [selectedElement.id] : []);
