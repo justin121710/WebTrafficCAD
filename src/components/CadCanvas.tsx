@@ -922,6 +922,56 @@ function getElementBoundingBox(el: any): { minX: number; maxX: number; minY: num
   return { minX, maxX, minY, maxY };
 }
 
+// Remove self-intersecting loops from a dense offset polyline.
+// Walks forward; when the new segment crosses any earlier result segment,
+// truncates the loop and inserts the intersection point instead.
+function trimPolylineSelfIntersections(pts: Point2D[]): Point2D[] {
+  if (pts.length < 4) return pts;
+
+  const segIntersect = (a0: Point2D, a1: Point2D, b0: Point2D, b1: Point2D): Point2D | null => {
+    const dx1 = a1.x - a0.x, dy1 = a1.y - a0.y;
+    const dx2 = b1.x - b0.x, dy2 = b1.y - b0.y;
+    const denom = dx1 * dy2 - dy1 * dx2;
+    if (Math.abs(denom) < 1e-10) return null;
+    const t = ((b0.x - a0.x) * dy2 - (b0.y - a0.y) * dx2) / denom;
+    const u = ((b0.x - a0.x) * dy1 - (b0.y - a0.y) * dx1) / denom;
+    if (t > 1e-6 && t < 1 - 1e-6 && u > 1e-6 && u < 1 - 1e-6) {
+      return { x: a0.x + t * dx1, y: a0.y + t * dy1 };
+    }
+    return null;
+  };
+
+  const result: Point2D[] = [pts[0]];
+
+  for (let i = 1; i < pts.length; i++) {
+    const cur = pts[i];
+    const prev = result[result.length - 1];
+
+    // Check segment [prev→cur] against all earlier result segments
+    let foundJ = -1;
+    let foundIx: Point2D | null = null;
+    for (let j = 0; j < result.length - 2; j++) {
+      const ix = segIntersect(prev, cur, result[j], result[j + 1]);
+      if (ix) {
+        foundJ = j;
+        foundIx = ix;
+        // Keep searching for an earlier crossing (the one closest to the start)
+      }
+    }
+
+    if (foundJ >= 0 && foundIx) {
+      // Trim the loop: remove everything from foundJ+1 onward, insert crossing point
+      result.splice(foundJ + 1);
+      result.push(foundIx);
+    } else {
+      result.push(cur);
+    }
+  }
+
+  return result;
+}
+
+
 interface CadCanvasProps {
   elements: CadElement[];
   onAddElement: (el: CadElement) => void;
@@ -4650,13 +4700,15 @@ export default function CadCanvas({
               });
               ctx.stroke();
 
-              // Separate border strokes — each independently avoids self-intersection
+              // Separate border strokes — trimmed to remove self-intersection loops at sharp corners
               const borderWidth = Math.max(1.0, zoom * 0.05);
               ctx.strokeStyle = '#f472b6';
               ctx.lineWidth = borderWidth;
               ctx.lineJoin = 'round';
 
-              const leftOffset = getPathOffsetCurves(ref.points, ref.cpLeft, ref.cpRight, -laneWidth / 2, 40);
+              const leftOffset = trimPolylineSelfIntersections(
+                getPathOffsetCurves(ref.points, ref.cpLeft, ref.cpRight, -laneWidth / 2, 40)
+              );
               if (leftOffset.length >= 2) {
                 ctx.beginPath();
                 leftOffset.forEach((pt, idx) => {
@@ -4667,7 +4719,9 @@ export default function CadCanvas({
                 ctx.stroke();
               }
 
-              const rightOffset = getPathOffsetCurves(ref.points, ref.cpLeft, ref.cpRight, laneWidth / 2, 40);
+              const rightOffset = trimPolylineSelfIntersections(
+                getPathOffsetCurves(ref.points, ref.cpLeft, ref.cpRight, laneWidth / 2, 40)
+              );
               if (rightOffset.length >= 2) {
                 ctx.beginPath();
                 rightOffset.forEach((pt, idx) => {
@@ -6123,7 +6177,9 @@ export default function CadCanvas({
               ctx.lineWidth = Math.max(1.0, zoom * 0.05);
               ctx.lineJoin = 'round';
 
-              const leftOffset = getPathOffsetCurves(previewPoints, previewCpLeft, previewCpRight, -laneWidth / 2, 40);
+              const leftOffset = trimPolylineSelfIntersections(
+                getPathOffsetCurves(previewPoints, previewCpLeft, previewCpRight, -laneWidth / 2, 40)
+              );
               if (leftOffset.length >= 2) {
                 ctx.beginPath();
                 leftOffset.forEach((pt, idx) => {
@@ -6134,7 +6190,9 @@ export default function CadCanvas({
                 ctx.stroke();
               }
 
-              const rightOffset = getPathOffsetCurves(previewPoints, previewCpLeft, previewCpRight, laneWidth / 2, 40);
+              const rightOffset = trimPolylineSelfIntersections(
+                getPathOffsetCurves(previewPoints, previewCpLeft, previewCpRight, laneWidth / 2, 40)
+              );
               if (rightOffset.length >= 2) {
                 ctx.beginPath();
                 rightOffset.forEach((pt, idx) => {
