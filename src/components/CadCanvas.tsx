@@ -1567,14 +1567,8 @@ export default function CadCanvas({
           e.preventDefault();
           if (isLineOrPathTool(activeTool) && spPoints.length >= 2) {
             handleCompleteSmartPath(spPoints, spCpLeft, spCpRight);
-          } else if (spPoints.length === 1) {
-            setSpPoints([]);
-            setSpCpLeft([]);
-            setSpCpRight([]);
           }
-          if (draftPoints.length === 1) {
-            setDraftPoints([]);
-          }
+          // Always switch to select; the activeTool-change useEffect clears any partial spPoints
           setActiveTool('select');
         }
       }
@@ -4682,57 +4676,57 @@ export default function CadCanvas({
             ctx.restore();
           } else if (el.type === 'bicycle_lane') {
             const laneWidth = (el as any).width || 1.5;
-            const centerPts = getPathOffsetCurves(ref.points, ref.cpLeft, ref.cpRight, 0, 40);
 
-            if (centerPts.length >= 2) {
+            const leftOffset = trimPolylineSelfIntersections(
+              getPathOffsetCurves(ref.points, ref.cpLeft, ref.cpRight, -laneWidth / 2, 40)
+            );
+            const rightOffset = trimPolylineSelfIntersections(
+              getPathOffsetCurves(ref.points, ref.cpLeft, ref.cpRight, laneWidth / 2, 40)
+            );
+
+            if (leftOffset.length >= 2 && rightOffset.length >= 2) {
               ctx.save();
-              // Wide fill stroke using centerline — lineJoin:'round' prevents corner knotting
-              ctx.lineJoin = 'round';
-              ctx.lineCap = 'round';
               ctx.setLineDash([]);
-              ctx.strokeStyle = isSelected ? 'rgba(244, 114, 182, 0.40)' : 'rgba(244, 114, 182, 0.20)';
-              ctx.lineWidth = laneWidth * zoom;
+
+              // Solid polygon fill: left border → right border reversed → close
+              ctx.fillStyle = isSelected ? 'rgba(244, 114, 182, 0.40)' : 'rgba(244, 114, 182, 0.20)';
               ctx.beginPath();
-              centerPts.forEach((pt, idx) => {
+              leftOffset.forEach((pt, idx) => {
+                const s = worldToScreen(pt.x, pt.y);
+                if (idx === 0) ctx.moveTo(s.x, s.y);
+                else ctx.lineTo(s.x, s.y);
+              });
+              for (let i = rightOffset.length - 1; i >= 0; i--) {
+                const s = worldToScreen(rightOffset[i].x, rightOffset[i].y);
+                ctx.lineTo(s.x, s.y);
+              }
+              ctx.closePath();
+              ctx.fill();
+
+              // Border strokes — trimmed so no crossing on inner edge
+              const borderWidth = Math.max(1.0, zoom * 0.05);
+              ctx.strokeStyle = '#f472b6';
+              ctx.lineWidth = borderWidth;
+              ctx.lineJoin = 'round';
+
+              ctx.beginPath();
+              leftOffset.forEach((pt, idx) => {
                 const s = worldToScreen(pt.x, pt.y);
                 if (idx === 0) ctx.moveTo(s.x, s.y);
                 else ctx.lineTo(s.x, s.y);
               });
               ctx.stroke();
 
-              // Separate border strokes — trimmed to remove self-intersection loops at sharp corners
-              const borderWidth = Math.max(1.0, zoom * 0.05);
-              ctx.strokeStyle = '#f472b6';
-              ctx.lineWidth = borderWidth;
-              ctx.lineJoin = 'round';
-
-              const leftOffset = trimPolylineSelfIntersections(
-                getPathOffsetCurves(ref.points, ref.cpLeft, ref.cpRight, -laneWidth / 2, 40)
-              );
-              if (leftOffset.length >= 2) {
-                ctx.beginPath();
-                leftOffset.forEach((pt, idx) => {
-                  const s = worldToScreen(pt.x, pt.y);
-                  if (idx === 0) ctx.moveTo(s.x, s.y);
-                  else ctx.lineTo(s.x, s.y);
-                });
-                ctx.stroke();
-              }
-
-              const rightOffset = trimPolylineSelfIntersections(
-                getPathOffsetCurves(ref.points, ref.cpLeft, ref.cpRight, laneWidth / 2, 40)
-              );
-              if (rightOffset.length >= 2) {
-                ctx.beginPath();
-                rightOffset.forEach((pt, idx) => {
-                  const s = worldToScreen(pt.x, pt.y);
-                  if (idx === 0) ctx.moveTo(s.x, s.y);
-                  else ctx.lineTo(s.x, s.y);
-                });
-                ctx.stroke();
-              }
+              ctx.beginPath();
+              rightOffset.forEach((pt, idx) => {
+                const s = worldToScreen(pt.x, pt.y);
+                if (idx === 0) ctx.moveTo(s.x, s.y);
+                else ctx.lineTo(s.x, s.y);
+              });
+              ctx.stroke();
 
               if (isSelected) {
+                const centerPts = getPathOffsetCurves(ref.points, ref.cpLeft, ref.cpRight, 0, 30);
                 ctx.strokeStyle = '#ec4899';
                 ctx.lineWidth = Math.max(1.5, zoom * 0.04);
                 ctx.setLineDash([zoom * 0.2, zoom * 0.3]);
@@ -6156,52 +6150,53 @@ export default function CadCanvas({
             ctx.restore();
           } else if (activeTool === 'bicycle_lane') {
             const laneWidth = 1.5;
-            const centerPts = getPathOffsetCurves(previewPoints, previewCpLeft, previewCpRight, 0, 40);
 
-            if (centerPts.length >= 2) {
+            const leftOffset = trimPolylineSelfIntersections(
+              getPathOffsetCurves(previewPoints, previewCpLeft, previewCpRight, -laneWidth / 2, 40)
+            );
+            const rightOffset = trimPolylineSelfIntersections(
+              getPathOffsetCurves(previewPoints, previewCpLeft, previewCpRight, laneWidth / 2, 40)
+            );
+
+            if (leftOffset.length >= 2 && rightOffset.length >= 2) {
               ctx.save();
-              ctx.lineJoin = 'round';
-              ctx.lineCap = 'round';
               ctx.setLineDash([]);
-              ctx.strokeStyle = 'rgba(244, 114, 182, 0.20)';
-              ctx.lineWidth = laneWidth * zoom;
+
+              // Solid polygon fill
+              ctx.fillStyle = 'rgba(244, 114, 182, 0.20)';
               ctx.beginPath();
-              centerPts.forEach((pt, idx) => {
+              leftOffset.forEach((pt, idx) => {
+                const s = worldToScreen(pt.x, pt.y);
+                if (idx === 0) ctx.moveTo(s.x, s.y);
+                else ctx.lineTo(s.x, s.y);
+              });
+              for (let i = rightOffset.length - 1; i >= 0; i--) {
+                const s = worldToScreen(rightOffset[i].x, rightOffset[i].y);
+                ctx.lineTo(s.x, s.y);
+              }
+              ctx.closePath();
+              ctx.fill();
+
+              // Border strokes
+              ctx.strokeStyle = '#f472b6';
+              ctx.lineWidth = Math.max(1.0, zoom * 0.05);
+              ctx.lineJoin = 'round';
+
+              ctx.beginPath();
+              leftOffset.forEach((pt, idx) => {
                 const s = worldToScreen(pt.x, pt.y);
                 if (idx === 0) ctx.moveTo(s.x, s.y);
                 else ctx.lineTo(s.x, s.y);
               });
               ctx.stroke();
 
-              ctx.strokeStyle = '#f472b6';
-              ctx.lineWidth = Math.max(1.0, zoom * 0.05);
-              ctx.lineJoin = 'round';
-
-              const leftOffset = trimPolylineSelfIntersections(
-                getPathOffsetCurves(previewPoints, previewCpLeft, previewCpRight, -laneWidth / 2, 40)
-              );
-              if (leftOffset.length >= 2) {
-                ctx.beginPath();
-                leftOffset.forEach((pt, idx) => {
-                  const s = worldToScreen(pt.x, pt.y);
-                  if (idx === 0) ctx.moveTo(s.x, s.y);
-                  else ctx.lineTo(s.x, s.y);
-                });
-                ctx.stroke();
-              }
-
-              const rightOffset = trimPolylineSelfIntersections(
-                getPathOffsetCurves(previewPoints, previewCpLeft, previewCpRight, laneWidth / 2, 40)
-              );
-              if (rightOffset.length >= 2) {
-                ctx.beginPath();
-                rightOffset.forEach((pt, idx) => {
-                  const s = worldToScreen(pt.x, pt.y);
-                  if (idx === 0) ctx.moveTo(s.x, s.y);
-                  else ctx.lineTo(s.x, s.y);
-                });
-                ctx.stroke();
-              }
+              ctx.beginPath();
+              rightOffset.forEach((pt, idx) => {
+                const s = worldToScreen(pt.x, pt.y);
+                if (idx === 0) ctx.moveTo(s.x, s.y);
+                else ctx.lineTo(s.x, s.y);
+              });
+              ctx.stroke();
               ctx.restore();
             }
           } else if (activeTool === 'BuildingLine') {
