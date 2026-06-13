@@ -2714,7 +2714,7 @@ export default function App() {
                 <button
                   type="button"
                   onClick={() => setSimShowSweptPath(!simShowSweptPath)}
-                  className={`w-full h-10 rounded-lg flex items-center justify-center transition-all border cursor-pointer ${
+                  className={`w-full h-14 rounded-lg flex flex-col items-center justify-center gap-0.5 transition-all border cursor-pointer ${
                     simShowSweptPath
                       ? 'bg-indigo-950/60 text-[#00FFFF] border-[#00FFFF]/80 shadow-[0_0_6px_rgba(0,255,255,0.25)]'
                       : 'text-slate-400 bg-[#0f1115]/40 border-[#2d3039]/20 hover:border-[#3b4252] hover:bg-[#1f2229]'
@@ -2727,13 +2727,14 @@ export default function App() {
                     <line x1="8" y1="6" x2="8" y2="18" />
                     <line x1="16" y1="6" x2="16" y2="18" />
                   </svg>
+                  <span className="text-[9px] leading-none font-medium">包絡線</span>
                 </button>
 
                 {/* 2. 前後軸中心軌跡 */}
                 <button
                   type="button"
                   onClick={() => setSimShowAxleTracks(!simShowAxleTracks)}
-                  className={`w-full h-10 rounded-lg flex items-center justify-center transition-all border cursor-pointer ${
+                  className={`w-full h-14 rounded-lg flex flex-col items-center justify-center gap-0.5 transition-all border cursor-pointer ${
                     simShowAxleTracks
                       ? 'bg-indigo-950/60 text-[#00FFFF] border-[#00FFFF]/80 shadow-[0_0_6px_rgba(0,255,255,0.2)]'
                       : 'text-slate-400 bg-[#0f1115]/40 border-[#2d3039]/20 hover:border-[#3b4252] hover:bg-[#1f2229]'
@@ -2745,13 +2746,14 @@ export default function App() {
                     <circle cx="12" cy="7" r="2" fill="currentColor" />
                     <circle cx="12" cy="17" r="2" fill="currentColor" />
                   </svg>
+                  <span className="text-[9px] leading-none font-medium">軸中心</span>
                 </button>
 
                 {/* 3. 連續骨架投影 */}
                 <button
                   type="button"
                   onClick={() => setSimShowBodyWireframe(!simShowBodyWireframe)}
-                  className={`w-full h-10 rounded-lg flex items-center justify-center transition-all border cursor-pointer ${
+                  className={`w-full h-14 rounded-lg flex flex-col items-center justify-center gap-0.5 transition-all border cursor-pointer ${
                     simShowBodyWireframe
                       ? 'bg-indigo-950/60 text-[#00FFFF] border-[#00FFFF]/80 shadow-[0_0_6px_rgba(0,255,255,0.25)]'
                       : 'text-slate-400 bg-[#0f1115]/40 border-[#2d3039]/20 hover:border-[#3b4252] hover:bg-[#1f2229]'
@@ -2764,6 +2766,7 @@ export default function App() {
                     <line x1="6" y1="10" x2="18" y2="10" />
                     <line x1="6" y1="14" x2="18" y2="14" />
                   </svg>
+                  <span className="text-[9px] leading-none font-medium">車架</span>
                 </button>
 
                 {/* 4. 路口輔助線 或 佔位格 */}
@@ -2771,7 +2774,7 @@ export default function App() {
                   <button
                     type="button"
                     onClick={() => setSimShowIntersectionHelpers(!simShowIntersectionHelpers)}
-                    className={`w-full h-10 rounded-lg flex items-center justify-center transition-all border cursor-pointer ${
+                    className={`w-full h-14 rounded-lg flex flex-col items-center justify-center gap-0.5 transition-all border cursor-pointer ${
                       simShowIntersectionHelpers
                         ? 'bg-indigo-950/60 text-[#00FFFF] border-[#00FFFF]/80 shadow-[0_0_6px_rgba(0,255,255,0.25)]'
                         : 'text-slate-400 bg-[#0f1115]/40 border-[#2d3039]/20 hover:border-[#3b4252] hover:bg-[#1f2229]'
@@ -2782,9 +2785,10 @@ export default function App() {
                       <path d="M4 12h16M12 4v16" strokeDasharray="2 2" />
                       <path d="M8 8l8 8M16 8l-8 8" />
                     </svg>
+                    <span className="text-[9px] leading-none font-medium">輔助線</span>
                   </button>
                 ) : (
-                  <div className="w-full h-10 rounded-lg border border-dashed border-[#2d3039]/20 bg-[#0f1115]/10" />
+                  <div className="w-full h-14 rounded-lg border border-dashed border-[#2d3039]/20 bg-[#0f1115]/10" />
                 )}
               </div>
             </div>

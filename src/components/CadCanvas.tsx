@@ -850,6 +850,10 @@ function transformElement(
   if (copy.pB1) copy.pB1 = tx(copy.pB1);
   if (copy.pB2) copy.pB2 = tx(copy.pB2);
 
+  // angular_dimension
+  if (copy.pStart1) copy.pStart1 = tx(copy.pStart1);
+  if (copy.pStart2) copy.pStart2 = tx(copy.pStart2);
+
   // three_center_curve outputs
   if (copy.pStart) copy.pStart = tx(copy.pStart);
   if (copy.pIntersection) copy.pIntersection = tx(copy.pIntersection);
@@ -1211,6 +1215,10 @@ export default function CadCanvas({
   const [draggedCrosswalkItem, setDraggedCrosswalkItem] = useState<{
     elementId: string;
     pointKey: 'pA1' | 'pA2' | 'pB1' | 'pB2';
+  } | null>(null);
+  const [draggedAngularPoint, setDraggedAngularPoint] = useState<{
+    elementId: string;
+    pointKey: 'center' | 'pStart1' | 'pStart2';
   } | null>(null);
 
   // Element-wide drag & rotate states
@@ -2222,6 +2230,23 @@ export default function CadCanvas({
       return;
     }
 
+    // 2.6. Dragging angular dimension control points
+    if (draggedAngularPoint) {
+      const angEl = elements.find(el => el.id === draggedAngularPoint.elementId) as any;
+      if (angEl) {
+        const center    = draggedAngularPoint.pointKey === 'center'   ? activeWorldPos : angEl.center;
+        const pStart1   = draggedAngularPoint.pointKey === 'pStart1'  ? activeWorldPos : angEl.pStart1;
+        const pStart2   = draggedAngularPoint.pointKey === 'pStart2'  ? activeWorldPos : angEl.pStart2;
+        const a1 = Math.atan2(pStart1.y - center.y, pStart1.x - center.x);
+        const a2 = Math.atan2(pStart2.y - center.y, pStart2.x - center.x);
+        let diff = a2 - a1;
+        while (diff > Math.PI) diff -= 2 * Math.PI;
+        while (diff < -Math.PI) diff += 2 * Math.PI;
+        onUpdateElement({ ...angEl, center, pStart1, pStart2, angleDeg: Math.abs(diff) * (180 / Math.PI) });
+      }
+      return;
+    }
+
     // 3. Spdragging active curves handles under active construction
     if (isLineOrPathTool(activeTool) && spDraggingIndex !== null) {
       const i = spDraggingIndex;
@@ -3224,6 +3249,24 @@ export default function CadCanvas({
           return;
         }
       }
+
+      // Class D: Angular Dimension drag handles
+      if (el.type === 'angular_dimension') {
+        const angEl = el as any;
+        const candidates: { key: 'center' | 'pStart1' | 'pStart2'; pos: { x: number; y: number } }[] = [
+          { key: 'center',  pos: angEl.center  },
+          { key: 'pStart1', pos: angEl.pStart1 },
+          { key: 'pStart2', pos: angEl.pStart2 },
+        ];
+        for (const { key, pos } of candidates) {
+          const sp = worldToScreen(pos.x, pos.y);
+          if (Math.hypot(sx - sp.x, sy - sp.y) < 12) {
+            onSaveHistoryBeforeDrag();
+            setDraggedAngularPoint({ elementId: el.id, pointKey: key });
+            return;
+          }
+        }
+      }
     }
 
     // 2. Select Tool Hit-checking itself (if no handle was captured)
@@ -4100,6 +4143,7 @@ export default function CadCanvas({
     setDragStartAnchor(null);
     setDragStartRefPoint(null);
     setDraggedCrosswalkItem(null);
+    setDraggedAngularPoint(null);
     setSpDraggingIndex(null);
     setIsDraggingElement(false);
     setElementDragStartPos(null);
@@ -4197,7 +4241,7 @@ export default function CadCanvas({
       const isCmdOrCtrl = e.ctrlKey || e.metaKey;
       
       if (appMode !== 'simulation' && isLineOrPathTool(activeTool) && spPoints.length >= 2) {
-        if (e.key === 'Enter' || (e.key.toLowerCase() === 'v' && !isCmdOrCtrl)) {
+        if (e.key === 'Enter') {
           e.preventDefault();
           handleCompleteSmartPath(spPoints, spCpLeft, spCpRight);
         }
@@ -4587,42 +4631,57 @@ export default function CadCanvas({
             ctx.stroke();
             ctx.restore();
           } else if (el.type === 'bicycle_lane') {
-            // 新增腳踏車道(粉紅色)，繪製方法如同車流軌跡，但只留下車流軌跡的底色，點選時出現軌跡，不需要出現腳踏車體。
             const laneWidth = (el as any).width || 1.5;
-            const halfW = laneWidth / 2;
+            const centerPts = getPathOffsetCurves(ref.points, ref.cpLeft, ref.cpRight, 0, 40);
 
-            const leftOffset = getPathOffsetCurves(ref.points, ref.cpLeft, ref.cpRight, -halfW, 40);
-            const rightOffset = getPathOffsetCurves(ref.points, ref.cpLeft, ref.cpRight, halfW, 40);
-
-            if (leftOffset.length >= 2 && rightOffset.length >= 2) {
+            if (centerPts.length >= 2) {
               ctx.save();
-              ctx.fillStyle = isSelected ? 'rgba(244, 114, 182, 0.40)' : 'rgba(244, 114, 182, 0.20)'; // pink backdrop fill
-              ctx.strokeStyle = '#f472b6'; // pink outer borders
-              ctx.lineWidth = Math.max(1.0, zoom * 0.05);
-
+              // Wide fill stroke using centerline — lineJoin:'round' prevents corner knotting
+              ctx.lineJoin = 'round';
+              ctx.lineCap = 'round';
+              ctx.setLineDash([]);
+              ctx.strokeStyle = isSelected ? 'rgba(244, 114, 182, 0.40)' : 'rgba(244, 114, 182, 0.20)';
+              ctx.lineWidth = laneWidth * zoom;
               ctx.beginPath();
-              // Left border trace
-              leftOffset.forEach((pt, idx) => {
+              centerPts.forEach((pt, idx) => {
                 const s = worldToScreen(pt.x, pt.y);
                 if (idx === 0) ctx.moveTo(s.x, s.y);
                 else ctx.lineTo(s.x, s.y);
               });
-              // Right border trace back
-              for (let i = rightOffset.length - 1; i >= 0; i--) {
-                const s = worldToScreen(rightOffset[i].x, rightOffset[i].y);
-                ctx.lineTo(s.x, s.y);
-              }
-              ctx.closePath();
-              ctx.fill();
               ctx.stroke();
 
-              // Selected lane path track
+              // Separate border strokes — each independently avoids self-intersection
+              const borderWidth = Math.max(1.0, zoom * 0.05);
+              ctx.strokeStyle = '#f472b6';
+              ctx.lineWidth = borderWidth;
+              ctx.lineJoin = 'round';
+
+              const leftOffset = getPathOffsetCurves(ref.points, ref.cpLeft, ref.cpRight, -laneWidth / 2, 40);
+              if (leftOffset.length >= 2) {
+                ctx.beginPath();
+                leftOffset.forEach((pt, idx) => {
+                  const s = worldToScreen(pt.x, pt.y);
+                  if (idx === 0) ctx.moveTo(s.x, s.y);
+                  else ctx.lineTo(s.x, s.y);
+                });
+                ctx.stroke();
+              }
+
+              const rightOffset = getPathOffsetCurves(ref.points, ref.cpLeft, ref.cpRight, laneWidth / 2, 40);
+              if (rightOffset.length >= 2) {
+                ctx.beginPath();
+                rightOffset.forEach((pt, idx) => {
+                  const s = worldToScreen(pt.x, pt.y);
+                  if (idx === 0) ctx.moveTo(s.x, s.y);
+                  else ctx.lineTo(s.x, s.y);
+                });
+                ctx.stroke();
+              }
+
               if (isSelected) {
-                ctx.strokeStyle = '#ec4899'; // deep pink active path track
+                ctx.strokeStyle = '#ec4899';
                 ctx.lineWidth = Math.max(1.5, zoom * 0.04);
                 ctx.setLineDash([zoom * 0.2, zoom * 0.3]);
-
-                const centerPts = getPathOffsetCurves(ref.points, ref.cpLeft, ref.cpRight, 0, 30);
                 ctx.beginPath();
                 centerPts.forEach((pt, idx) => {
                   const s = worldToScreen(pt.x, pt.y);
@@ -5336,6 +5395,27 @@ export default function CadCanvas({
         ctx.textBaseline = 'middle';
         ctx.fillText(text, tx, ty);
         ctx.restore();
+
+        // Draggable control point handles when selected
+        if (isSelected) {
+          const handles = [
+            { s: sCenter, color: '#a855f7' },
+            { s: sStart1, color: '#f472b6' },
+            { s: sStart2, color: '#f472b6' },
+          ];
+          handles.forEach(({ s, color }) => {
+            ctx.save();
+            ctx.fillStyle = color;
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = 1.5;
+            ctx.setLineDash([]);
+            ctx.beginPath();
+            ctx.arc(s.x, s.y, 5, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.stroke();
+            ctx.restore();
+          });
+        }
       }
     });
 
@@ -6022,30 +6102,48 @@ export default function CadCanvas({
             ctx.restore();
           } else if (activeTool === 'bicycle_lane') {
             const laneWidth = 1.5;
-            const halfW = laneWidth / 2;
+            const centerPts = getPathOffsetCurves(previewPoints, previewCpLeft, previewCpRight, 0, 40);
 
-            const leftOffset = getPathOffsetCurves(previewPoints, previewCpLeft, previewCpRight, -halfW, 40);
-            const rightOffset = getPathOffsetCurves(previewPoints, previewCpLeft, previewCpRight, halfW, 40);
-
-            if (leftOffset.length >= 2 && rightOffset.length >= 2) {
+            if (centerPts.length >= 2) {
               ctx.save();
-              ctx.fillStyle = 'rgba(244, 114, 182, 0.20)';
-              ctx.strokeStyle = '#f472b6';
-              ctx.lineWidth = Math.max(1.0, zoom * 0.05);
-
+              ctx.lineJoin = 'round';
+              ctx.lineCap = 'round';
+              ctx.setLineDash([]);
+              ctx.strokeStyle = 'rgba(244, 114, 182, 0.20)';
+              ctx.lineWidth = laneWidth * zoom;
               ctx.beginPath();
-              leftOffset.forEach((pt, idx) => {
+              centerPts.forEach((pt, idx) => {
                 const s = worldToScreen(pt.x, pt.y);
                 if (idx === 0) ctx.moveTo(s.x, s.y);
                 else ctx.lineTo(s.x, s.y);
               });
-              for (let i = rightOffset.length - 1; i >= 0; i--) {
-                const s = worldToScreen(rightOffset[i].x, rightOffset[i].y);
-                ctx.lineTo(s.x, s.y);
-              }
-              ctx.closePath();
-              ctx.fill();
               ctx.stroke();
+
+              ctx.strokeStyle = '#f472b6';
+              ctx.lineWidth = Math.max(1.0, zoom * 0.05);
+              ctx.lineJoin = 'round';
+
+              const leftOffset = getPathOffsetCurves(previewPoints, previewCpLeft, previewCpRight, -laneWidth / 2, 40);
+              if (leftOffset.length >= 2) {
+                ctx.beginPath();
+                leftOffset.forEach((pt, idx) => {
+                  const s = worldToScreen(pt.x, pt.y);
+                  if (idx === 0) ctx.moveTo(s.x, s.y);
+                  else ctx.lineTo(s.x, s.y);
+                });
+                ctx.stroke();
+              }
+
+              const rightOffset = getPathOffsetCurves(previewPoints, previewCpLeft, previewCpRight, laneWidth / 2, 40);
+              if (rightOffset.length >= 2) {
+                ctx.beginPath();
+                rightOffset.forEach((pt, idx) => {
+                  const s = worldToScreen(pt.x, pt.y);
+                  if (idx === 0) ctx.moveTo(s.x, s.y);
+                  else ctx.lineTo(s.x, s.y);
+                });
+                ctx.stroke();
+              }
               ctx.restore();
             }
           } else if (activeTool === 'BuildingLine') {
