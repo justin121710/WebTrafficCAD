@@ -61,6 +61,69 @@ const getDarkerColor = (hex: string): string => {
   return `rgb(${r}, ${g}, ${b})`;
 };
 
+function getElementCentroid(el: CadElement): { x: number; y: number } {
+  const c = el as any;
+  const pts: { x: number; y: number }[] = [];
+  if (c.points?.length) { pts.push(...c.points); }
+  else {
+    if (c.p) pts.push(c.p);
+    if (c.p1) pts.push(c.p1);
+    if (c.p2) pts.push(c.p2);
+    if (c.center) pts.push(c.center);
+    if (c.pA1) pts.push(c.pA1); if (c.pA2) pts.push(c.pA2);
+    if (c.pB1) pts.push(c.pB1); if (c.pB2) pts.push(c.pB2);
+    if (c.pStart) pts.push(c.pStart);
+    if (c.pIntersection) pts.push(c.pIntersection);
+    if (c.pEnd) pts.push(c.pEnd);
+  }
+  if (!pts.length) return { x: 0, y: 0 };
+  return { x: pts.reduce((s, p) => s + p.x, 0) / pts.length, y: pts.reduce((s, p) => s + p.y, 0) / pts.length };
+}
+
+function cloneElementWithOffset(el: CadElement, dx: number, dy: number): CadElement {
+  const clone = JSON.parse(JSON.stringify(el)) as any;
+  clone.id = `${el.type}-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+  const off = (p: { x: number; y: number }) => ({ x: p.x + dx, y: p.y + dy });
+  if (clone.points) clone.points = clone.points.map(off);
+  if (clone.cpLeft) clone.cpLeft = clone.cpLeft.map(off);
+  if (clone.cpRight) clone.cpRight = clone.cpRight.map(off);
+  if (clone.p) clone.p = off(clone.p);
+  if (clone.p1) clone.p1 = off(clone.p1);
+  if (clone.p2) clone.p2 = off(clone.p2);
+  if (clone.center) clone.center = off(clone.center);
+  if (clone.pA1) clone.pA1 = off(clone.pA1); if (clone.pA2) clone.pA2 = off(clone.pA2);
+  if (clone.pB1) clone.pB1 = off(clone.pB1); if (clone.pB2) clone.pB2 = off(clone.pB2);
+  if (clone.pStart) clone.pStart = off(clone.pStart);
+  if (clone.pIntersection) clone.pIntersection = off(clone.pIntersection);
+  if (clone.pEnd) clone.pEnd = off(clone.pEnd);
+  return clone as CadElement;
+}
+
+function mirrorElement(el: CadElement, axis: 'H' | 'V'): CadElement {
+  const clone = JSON.parse(JSON.stringify(el)) as any;
+  const { x: cx, y: cy } = getElementCentroid(el);
+  const flipPt = (p: { x: number; y: number }) => ({
+    x: axis === 'H' ? 2 * cx - p.x : p.x,
+    y: axis === 'V' ? 2 * cy - p.y : p.y
+  });
+  if (clone.points) clone.points = clone.points.map(flipPt);
+  if (clone.cpLeft) clone.cpLeft = clone.cpLeft.map(flipPt);
+  if (clone.cpRight) clone.cpRight = clone.cpRight.map(flipPt);
+  if (clone.p) clone.p = flipPt(clone.p);
+  if (clone.p1) clone.p1 = flipPt(clone.p1);
+  if (clone.p2) clone.p2 = flipPt(clone.p2);
+  if (clone.center) clone.center = flipPt(clone.center);
+  if (clone.pA1) clone.pA1 = flipPt(clone.pA1); if (clone.pA2) clone.pA2 = flipPt(clone.pA2);
+  if (clone.pB1) clone.pB1 = flipPt(clone.pB1); if (clone.pB2) clone.pB2 = flipPt(clone.pB2);
+  if (clone.pStart) clone.pStart = flipPt(clone.pStart);
+  if (clone.pIntersection) clone.pIntersection = flipPt(clone.pIntersection);
+  if (clone.pEnd) clone.pEnd = flipPt(clone.pEnd);
+  if (clone.angle !== undefined) {
+    clone.angle = axis === 'H' ? Math.PI - clone.angle : -clone.angle;
+  }
+  return clone as CadElement;
+}
+
 export default function App() {
   // App Mode State: 'cad' | 'simulation' (預設為 'cad')
   const [appMode, setAppMode] = useState<'cad' | 'simulation'>('cad');
@@ -309,6 +372,8 @@ export default function App() {
   const [activeTool, setActiveTool] = useState<CadTool>('select');
   const [selectedElement, setSelectedElement] = useState<CadElement | null>(null);
   const [selectedElementIds, setSelectedElementIds] = useState<string[]>([]);
+  const [clipboardElement, setClipboardElement] = useState<CadElement | null>(null);
+  const drawingActiveRef = useRef(false);
   const [selectedAnchorIndices, setSelectedAnchorIndices] = useState<number[]>([]);
 
   // Parking stamp & zone state configurations for default parameters
@@ -986,11 +1051,40 @@ export default function App() {
 
       if (isCmdOrCtrl && e.key.toLowerCase() === 'z') {
         e.preventDefault();
-        handleUndo();
+        if (!drawingActiveRef.current) handleUndo();
+        // When drawing is active, CadCanvas handles Ctrl+Z to undo the last placed node
       } else if (isCmdOrCtrl && e.key.toLowerCase() === 'y') {
         e.preventDefault();
         handleRedo();
-      } else if (activeTool === 'select' && (selectedElement || selectedElementIds.length > 0) && (e.key === 'Delete' || e.key === 'Backspace')) {
+      } else if (isCmdOrCtrl && e.key.toLowerCase() === 'c') {
+        if (selectedElement) {
+          e.preventDefault();
+          setClipboardElement(JSON.parse(JSON.stringify(selectedElement)));
+        }
+      } else if (isCmdOrCtrl && e.key.toLowerCase() === 'v') {
+        if (clipboardElement) {
+          e.preventDefault();
+          const pasted = cloneElementWithOffset(clipboardElement, 1.0, -1.0);
+          saveHistory(elements);
+          setElements(prev => [...prev, pasted]);
+          setSelectedElement(pasted);
+        }
+      } else if (!isCmdOrCtrl && activeTool === 'select' && selectedElement && !drawingActiveRef.current) {
+        if (e.key === 'h' || e.key === 'H') {
+          e.preventDefault();
+          const mirrored = mirrorElement(selectedElement, 'H');
+          saveHistory(elements);
+          setElements(prev => prev.map(el => el.id === selectedElement.id ? mirrored : el));
+          setSelectedElement(mirrored);
+        } else if (e.key === 'j' || e.key === 'J') {
+          e.preventDefault();
+          const mirrored = mirrorElement(selectedElement, 'V');
+          saveHistory(elements);
+          setElements(prev => prev.map(el => el.id === selectedElement.id ? mirrored : el));
+          setSelectedElement(mirrored);
+        }
+      }
+      if (!isCmdOrCtrl && activeTool === 'select' && (selectedElement || selectedElementIds.length > 0) && (e.key === 'Delete' || e.key === 'Backspace')) {
         e.preventDefault();
         const idsToDel = selectedElementIds.length > 0 ? selectedElementIds : (selectedElement ? [selectedElement.id] : []);
         if (idsToDel.length > 0) {
@@ -1006,7 +1100,8 @@ export default function App() {
   }, [
     elements, historyStack, redoStack, activeTool, selectedElement, selectedElementIds,
     appMode, simRawPoints, setSimDrawMode, setSimIsIntersectionMode,
-    handleSimUndoLastNode, handleSimLockCurrentPath, handleSimClear
+    handleSimUndoLastNode, handleSimLockCurrentPath, handleSimClear,
+    clipboardElement
   ]);
 
   // 點擊外部時關閉匯出選單
@@ -1805,7 +1900,7 @@ export default function App() {
                   ctx.stroke();
                   ctx.setLineDash([]);
                 } else if (el.type === 'yellow_double') {
-                  ctx.strokeStyle = '#f59e0b';
+                  ctx.strokeStyle = '#FFC800';
                   ctx.lineWidth = Math.max(1.5, zoom * 0.1);
                   
                   const leftOffset = getPathOffsetCurves(ref.points, ref.cpLeft, ref.cpRight, 0.1, 25);
@@ -1840,7 +1935,7 @@ export default function App() {
                   ctx.stroke();
                   ctx.setLineDash([]);
                 } else if (el.type === 'yellow_dashed') {
-                  ctx.strokeStyle = '#eab308'; // Yellow-500 yellow_dashed
+                  ctx.strokeStyle = '#FFC800';
                   ctx.lineWidth = el.isLeftTurnGuide ? Math.max(1.5, zoom * 0.3) : Math.max(1.5, zoom * 0.12);
                   ctx.setLineDash(el.isLeftTurnGuide ? [zoom * 1.0, zoom * 2.0] : [zoom * 4.0, zoom * 6.0]);
                   ctx.beginPath();
@@ -2808,9 +2903,10 @@ export default function App() {
 
         {/* Central CAD Infinite Canvas */}
         <div className="flex-1 h-full min-w-0 relative flex flex-col">
-          <CadCanvas 
+          <CadCanvas
             elements={elements}
             onAddElement={handleAddElement}
+            onDrawingActiveChange={(active) => { drawingActiveRef.current = active; }}
             onUpdateElement={handleUpdateElement}
           onUpdateElements={handleUpdateElements}
           selectedElement={selectedElement}

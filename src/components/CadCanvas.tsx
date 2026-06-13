@@ -1081,6 +1081,7 @@ interface CadCanvasProps {
   setRoadArrowConfig?: (cfg: any) => void;
   simHasCollision?: boolean;
   setSimHasCollision?: (b: boolean) => void;
+  onDrawingActiveChange?: (active: boolean) => void;
 }
 
 export default function CadCanvas({
@@ -1186,7 +1187,8 @@ export default function CadCanvas({
   setSimIsDragging,
   simBodyOpacity = 0.4,
   simHasCollision = false,
-  setSimHasCollision
+  setSimHasCollision,
+  onDrawingActiveChange
 }: CadCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -1554,6 +1556,16 @@ export default function CadCanvas({
       if (e.code === 'Space') {
         setSpacePressed(true);
       }
+      const isCmdOrCtrl = e.ctrlKey || e.metaKey;
+      if (isCmdOrCtrl && e.key.toLowerCase() === 'z') {
+        if (appMode === 'cad' && isLineOrPathTool(activeTool) && spPoints.length > 0) {
+          e.preventDefault();
+          setSpPoints(prev => prev.slice(0, -1));
+          setSpCpLeft(prev => prev.slice(0, -1));
+          setSpCpRight(prev => prev.slice(0, -1));
+          return;
+        }
+      }
       if (e.code === 'Enter') {
         if (appMode === 'cad') {
           e.preventDefault();
@@ -1595,7 +1607,12 @@ export default function CadCanvas({
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, [spPoints, spCpLeft, spCpRight, activeTool]);
+  }, [spPoints, spCpLeft, spCpRight, activeTool, appMode]);
+
+  // Notify parent whether a path is actively being drawn (used to intercept Ctrl+Z in App.tsx)
+  useEffect(() => {
+    onDrawingActiveChange?.(appMode === 'cad' && isLineOrPathTool(activeTool) && spPoints.length > 0);
+  }, [activeTool, spPoints, appMode]);
 
   const normalize = (v: { x: number; y: number }): { x: number; y: number } => {
     const len = Math.hypot(v.x, v.y);
@@ -2122,14 +2139,6 @@ export default function CadCanvas({
 
     // 1. Dragging sketch circle center or radius controllers
     if (activeHandle) {
-      if (activeHandle.nodeIndex === 25) { // dragging parking space center (rotation)
-        latestMouseWorldPosRef.current = activeWorldPos;
-        return;
-      }
-      if (activeHandle.nodeIndex === 30) { // dragging road arrow center (rotation)
-        latestMouseWorldPosRef.current = activeWorldPos;
-        return;
-      }
       if (activeHandle.nodeIndex === 10) { // dragging sketch circle center
         const circ = elements.find(el => el.id === activeHandle.elementId) as any;
         if (circ) {
@@ -2941,7 +2950,14 @@ export default function CadCanvas({
 
     if (e.button !== 0) return; // Only process left clicks below
 
-    const clickPt = snapTarget ? snapTarget.point : screenToWorld(sx, sy);
+    let clickPt = snapTarget ? snapTarget.point : screenToWorld(sx, sy);
+    if (e.shiftKey && !snapTarget && isLineOrPathTool(activeTool) && spPoints.length > 0) {
+      const p0 = spPoints[spPoints.length - 1];
+      const dx = clickPt.x - p0.x;
+      const dy = clickPt.y - p0.y;
+      if (Math.abs(dx) >= Math.abs(dy)) clickPt = { x: clickPt.x, y: p0.y };
+      else clickPt = { x: p0.x, y: clickPt.y };
+    }
 
     if (yieldLineDecisionState) {
       if (e.button === 0) {
@@ -3087,179 +3103,6 @@ export default function CadCanvas({
         const center = getParkingSpaceCenter(pk);
         const sCenter = worldToScreen(center.x, center.y);
 
-        if (Math.hypot(sx - sCenter.x, sy - sCenter.y) < 12) {
-          onSaveHistoryBeforeDrag();
-          setActiveHandle({ elementId: el.id, nodeIndex: 25 }); // 25 representing center rotation handle
-          
-          rotatingCenterRef.current = center;
-          detectionRefPointRef.current = center;
-          latestMouseWorldPosRef.current = clickPt;
-          
-          if (rotationIntervalRef.current) {
-            clearInterval(rotationIntervalRef.current);
-          }
-          
-          let lastProcessedMousePos: { x: number; y: number } | null = null;
-          let isMouseStationary = false;
-          
-          rotationIntervalRef.current = setInterval(() => {
-            if (!rotatingCenterRef.current || !latestMouseWorldPosRef.current) return;
-            
-            const curMouse = {
-              x: latestMouseWorldPosRef.current.x,
-              y: latestMouseWorldPosRef.current.y
-            };
-            
-            const didMouseNotMove = lastProcessedMousePos &&
-                                    lastProcessedMousePos.x === curMouse.x &&
-                                    lastProcessedMousePos.y === curMouse.y;
-            
-            if (didMouseNotMove) {
-              isMouseStationary = true;
-            } else {
-              if (isMouseStationary && lastProcessedMousePos) {
-                detectionRefPointRef.current = { ...lastProcessedMousePos };
-              }
-              isMouseStationary = false;
-            }
-            
-            lastProcessedMousePos = { ...curMouse };
-            
-            const curElements = latestElementsRef.current;
-            const currentPk = curElements.find(item => item.id === el.id) as any;
-            if (!currentPk) return;
-            
-            const detPt = detectionRefPointRef.current || rotatingCenterRef.current;
-            const d = distance(curMouse, detPt);
-            const isUp = curMouse.y > detPt.y;
-            
-            const baseDelta = (1 * Math.PI) / 180; // 1 degree per 100ms -> 10 degrees per second
-            const speedFactor = Math.max(0.5, d / 3.0);
-            const angleDelta = baseDelta * speedFactor;
-            
-            const currentAngle = currentPk.angle !== undefined 
-              ? currentPk.angle 
-              : (currentPk.p2 && currentPk.p1 ? Math.atan2(currentPk.p2.y - currentPk.p1.y, currentPk.p2.x - currentPk.p1.x) : 0);
-            
-            let newAngle = isUp ? (currentAngle + angleDelta) : (currentAngle - angleDelta);
-            while (newAngle > Math.PI) newAngle -= 2 * Math.PI;
-            while (newAngle < -Math.PI) newAngle += 2 * Math.PI;
-            
-            const L = currentPk.length || 5.5;
-            const W = currentPk.width || 2.5;
-            const cos = Math.cos(newAngle);
-            const sin = Math.sin(newAngle);
-            
-            const newP1 = {
-              x: rotatingCenterRef.current.x - (L / 2) * cos + (W / 2) * sin,
-              y: rotatingCenterRef.current.y - (L / 2) * sin - (W / 2) * cos
-            };
-            
-            const newP2 = {
-              x: newP1.x + cos * L,
-              y: newP1.y + sin * L
-            };
-            
-            const updatedPk = {
-              ...currentPk,
-              angle: newAngle,
-              p1: newP1,
-              p2: newP2
-            };
-            
-            onUpdateElement(updatedPk);
-            
-            if (setParkingStampConfig) {
-              setParkingStampConfig({
-                slotType: currentPk.slotType,
-                width: W,
-                length: L,
-                angle: newAngle
-              });
-            }
-          }, 100);
-          return;
-        }
-      }
-
-      // Class B.6: Road arrow rotation handle
-      if (el.type === 'road_arrow') {
-        const arrow = el as any;
-        const sCenter = worldToScreen(arrow.p.x, arrow.p.y);
-
-        if (Math.hypot(sx - sCenter.x, sy - sCenter.y) < 12) {
-          onSaveHistoryBeforeDrag();
-          setActiveHandle({ elementId: el.id, nodeIndex: 30 }); // 30 representing road arrow rotation handle
-          
-          rotatingCenterRef.current = arrow.p;
-          detectionRefPointRef.current = arrow.p;
-          latestMouseWorldPosRef.current = clickPt;
-          
-          if (rotationIntervalRef.current) {
-            clearInterval(rotationIntervalRef.current);
-          }
-          
-          let lastProcessedMousePos: { x: number; y: number } | null = null;
-          let isMouseStationary = false;
-          
-          rotationIntervalRef.current = setInterval(() => {
-            if (!rotatingCenterRef.current || !latestMouseWorldPosRef.current) return;
-            
-            const curMouse = {
-              x: latestMouseWorldPosRef.current.x,
-              y: latestMouseWorldPosRef.current.y
-            };
-            
-            const didMouseNotMove = lastProcessedMousePos &&
-                                    lastProcessedMousePos.x === curMouse.x &&
-                                    lastProcessedMousePos.y === curMouse.y;
-            
-            if (didMouseNotMove) {
-              isMouseStationary = true;
-            } else {
-              if (isMouseStationary && lastProcessedMousePos) {
-                detectionRefPointRef.current = { ...lastProcessedMousePos };
-              }
-              isMouseStationary = false;
-            }
-            
-            lastProcessedMousePos = { ...curMouse };
-            
-            const curElements = latestElementsRef.current;
-            const currentArrow = curElements.find(item => item.id === el.id) as any;
-            if (!currentArrow) return;
-            
-            const detPt = detectionRefPointRef.current || rotatingCenterRef.current;
-            const d = distance(curMouse, detPt);
-            const isUp = curMouse.y > detPt.y;
-            
-            const baseDelta = (1 * Math.PI) / 180;
-            const speedFactor = Math.max(0.5, d / 3.0);
-            const angleDelta = baseDelta * speedFactor;
-            
-            const currentAngle = currentArrow.angle !== undefined ? currentArrow.angle : 0;
-            
-            let newAngle = isUp ? (currentAngle + angleDelta) : (currentAngle - angleDelta);
-            while (newAngle > Math.PI) newAngle -= 2 * Math.PI;
-            while (newAngle < -Math.PI) newAngle += 2 * Math.PI;
-            
-            const updatedArrow = {
-              ...currentArrow,
-              angle: newAngle
-            };
-            
-            onUpdateElement(updatedArrow);
-            
-            if (setRoadArrowConfig) {
-              setRoadArrowConfig({
-                arrowType: currentArrow.arrowType,
-                length: currentArrow.length,
-                angle: newAngle
-              });
-            }
-          }, 100);
-          return;
-        }
       }
 
       // Class C: Crosswalk drag handles
@@ -3793,97 +3636,6 @@ export default function CadCanvas({
       onAddElement(parkingEl);
       onSelectElement(parkingEl);
       setDraftPoints([]);
-
-      // 立刻啟動旋轉定時器以實現「按下時上下拉旋轉」
-      setActiveHandle({ elementId: newId, nodeIndex: 25 });
-      rotatingCenterRef.current = clickPt;
-      detectionRefPointRef.current = clickPt;
-      latestMouseWorldPosRef.current = clickPt;
-
-      if (rotationIntervalRef.current) {
-        clearInterval(rotationIntervalRef.current);
-      }
-
-      let lastProcessedMousePos: { x: number; y: number } | null = null;
-      let isMouseStationary = false;
-
-      rotationIntervalRef.current = setInterval(() => {
-        if (!rotatingCenterRef.current || !latestMouseWorldPosRef.current) return;
-        
-        const curMouse = {
-          x: latestMouseWorldPosRef.current.x,
-          y: latestMouseWorldPosRef.current.y
-        };
-        
-        const didMouseNotMove = lastProcessedMousePos &&
-                                lastProcessedMousePos.x === curMouse.x &&
-                                lastProcessedMousePos.y === curMouse.y;
-        
-        if (didMouseNotMove) {
-          isMouseStationary = true;
-        } else {
-          if (isMouseStationary && lastProcessedMousePos) {
-            detectionRefPointRef.current = { ...lastProcessedMousePos };
-          }
-          isMouseStationary = false;
-        }
-        
-        lastProcessedMousePos = { ...curMouse };
-        
-        const curElements = latestElementsRef.current;
-        const currentPk = curElements.find(item => item.id === newId) as any;
-        if (!currentPk) return;
-        
-        // 旋轉速度與距離成正比的變速計算
-        const detPt = detectionRefPointRef.current || rotatingCenterRef.current;
-        const d = distance(curMouse, detPt);
-        const isUp = curMouse.y > detPt.y;
-        
-        const baseDelta = (1 * Math.PI) / 180; // 1度/100ms -> 10度/秒
-        const speedFactor = Math.max(0.5, d / 3.0);
-        const angleDelta = baseDelta * speedFactor;
-        
-        const currentAngle = currentPk.angle !== undefined 
-          ? currentPk.angle 
-          : (currentPk.p2 && currentPk.p1 ? Math.atan2(currentPk.p2.y - currentPk.p1.y, currentPk.p2.x - currentPk.p1.x) : 0);
-        
-        let newAngle = isUp ? (currentAngle + angleDelta) : (currentAngle - angleDelta);
-        while (newAngle > Math.PI) newAngle -= 2 * Math.PI;
-        while (newAngle < -Math.PI) newAngle += 2 * Math.PI;
-        
-        const L = currentPk.length || 5.5;
-        const W = currentPk.width || 2.5;
-        const nextCos = Math.cos(newAngle);
-        const nextSin = Math.sin(newAngle);
-        
-        const newP1 = {
-          x: rotatingCenterRef.current.x - (L / 2) * nextCos + (W / 2) * nextSin,
-          y: rotatingCenterRef.current.y - (L / 2) * nextSin - (W / 2) * nextCos
-        };
-        
-        const newP2 = {
-          x: newP1.x + nextCos * L,
-          y: newP1.y + nextSin * L
-        };
-        
-        const updatedPk = {
-          ...currentPk,
-          angle: newAngle,
-          p1: newP1,
-          p2: newP2
-        };
-        
-        onUpdateElement(updatedPk);
-        
-        if (setParkingStampConfig) {
-          setParkingStampConfig({
-            slotType: currentPk.slotType,
-            width: W,
-            length: L,
-            angle: newAngle
-          });
-        }
-      }, 100);
       return;
     }
 
@@ -3906,76 +3658,6 @@ export default function CadCanvas({
       onAddElement(arrowEl);
       onSelectElement(arrowEl);
       setDraftPoints([]);
-
-      // 立刻啟動旋轉定時器以實現「按下時上下拉旋轉」
-      setActiveHandle({ elementId: newId, nodeIndex: 30 });
-      rotatingCenterRef.current = clickPt;
-      detectionRefPointRef.current = clickPt;
-      latestMouseWorldPosRef.current = clickPt;
-
-      if (rotationIntervalRef.current) {
-        clearInterval(rotationIntervalRef.current);
-      }
-
-      let lastProcessedMousePos: { x: number; y: number } | null = null;
-      let isMouseStationary = false;
-
-      rotationIntervalRef.current = setInterval(() => {
-        if (!rotatingCenterRef.current || !latestMouseWorldPosRef.current) return;
-        
-        const curMouse = {
-          x: latestMouseWorldPosRef.current.x,
-          y: latestMouseWorldPosRef.current.y
-        };
-        
-        const didMouseNotMove = lastProcessedMousePos &&
-                                lastProcessedMousePos.x === curMouse.x &&
-                                lastProcessedMousePos.y === curMouse.y;
-        
-        if (didMouseNotMove) {
-          isMouseStationary = true;
-        } else {
-          if (isMouseStationary && lastProcessedMousePos) {
-            detectionRefPointRef.current = { ...lastProcessedMousePos };
-          }
-          isMouseStationary = false;
-        }
-        
-        lastProcessedMousePos = { ...curMouse };
-        
-        const curElements = latestElementsRef.current;
-        const currentArrow = curElements.find(item => item.id === newId) as any;
-        if (!currentArrow) return;
-        
-        const detPt = detectionRefPointRef.current || rotatingCenterRef.current;
-        const d = distance(curMouse, detPt);
-        const isUp = curMouse.y > detPt.y;
-        
-        const baseDelta = (1 * Math.PI) / 180;
-        const speedFactor = Math.max(0.5, d / 3.0);
-        const angleDelta = baseDelta * speedFactor;
-        
-        const currentAngle = currentArrow.angle !== undefined ? currentArrow.angle : 0;
-        
-        let newAngle = isUp ? (currentAngle + angleDelta) : (currentAngle - angleDelta);
-        while (newAngle > Math.PI) newAngle -= 2 * Math.PI;
-        while (newAngle < -Math.PI) newAngle += 2 * Math.PI;
-        
-        const updatedArrow = {
-          ...currentArrow,
-          angle: newAngle
-        };
-        
-        onUpdateElement(updatedArrow);
-        
-        if (setRoadArrowConfig) {
-          setRoadArrowConfig({
-            arrowType: stampType,
-            length: stampLength,
-            angle: newAngle
-          });
-        }
-      }, 100);
       return;
     }
 
@@ -4332,8 +4014,8 @@ export default function CadCanvas({
 
 
     const whiteColor = '#ffffff';
-    const yellowColor = '#f59e0b';
-    const yellowDashedColor = '#eab308';
+    const yellowColor = '#FFC800';
+    const yellowDashedColor = '#FFC800';
     const primaryLineColor = '#ffffff';
     const textDrawColor = '#e2e8f0';
 
@@ -4503,8 +4185,10 @@ export default function CadCanvas({
       ctx.stroke();
     }
 
-    // RENDER MAIN GEOMETRIES
-    elements.forEach((el) => {
+    // RENDER MAIN GEOMETRIES — BuildingLine always rendered last (on top)
+    const nonBuildingLineEls = elements.filter(el => el.type !== 'BuildingLine');
+    const buildingLineEls = elements.filter(el => el.type === 'BuildingLine');
+    [...nonBuildingLineEls, ...buildingLineEls].forEach((el) => {
       const isSelected = appMode === 'cad' && (selectedElement?.id === el.id || selectedElementIds.includes(el.id));
       
       if (
@@ -6250,7 +5934,7 @@ export default function CadCanvas({
             ctx.restore();
 
             if (previewPoints.length >= 2) {
-              const tempZone = {
+              const tempZoneInner = {
                 points: previewPoints,
                 cpLeft: previewCpLeft,
                 cpRight: previewCpRight,
@@ -6262,7 +5946,7 @@ export default function CadCanvas({
                 side: parkingZoneConfig?.side || 'right'
               };
               try {
-                const slots = generateParkingZoneSlots(tempZone);
+                const slots = generateParkingZoneSlots(tempZoneInner);
                 slots.forEach((slot) => {
                   ctx.save();
                   ctx.lineCap = 'round';
@@ -6289,6 +5973,38 @@ export default function CadCanvas({
                 console.error("Error generating preview parking slots:", err);
               }
             }
+          }
+
+          // Segment arc-length labels — one per placed segment, plus the preview-to-cursor segment
+          if (activeTool !== 'parking_zone') {
+            ctx.save();
+            ctx.setLineDash([]);
+            const fontSize = Math.max(10, Math.min(14, zoom * 0.55));
+            ctx.font = `bold ${fontSize}px monospace`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            for (let segIdx = 0; segIdx < previewPoints.length - 1; segIdx++) {
+              const p0 = previewPoints[segIdx];
+              const cpR = previewCpRight[segIdx] || p0;
+              const cpL = previewCpLeft[segIdx + 1] || previewPoints[segIdx + 1];
+              const p1 = previewPoints[segIdx + 1];
+              const bPts = sampleCubicBezier(p0, cpR, cpL, p1, 40);
+              let arcLen = 0;
+              for (let k = 1; k < bPts.length; k++) {
+                arcLen += Math.hypot(bPts[k].x - bPts[k - 1].x, bPts[k].y - bPts[k - 1].y);
+              }
+              if (arcLen < 0.02) continue;
+              const mid = bPts[Math.floor(bPts.length / 2)];
+              const sLabel = worldToScreen(mid.x, mid.y);
+              const isPreview = segIdx === previewPoints.length - 2;
+              const text = `${arcLen.toFixed(2)}m`;
+              const tw = ctx.measureText(text).width;
+              ctx.fillStyle = isPreview ? 'rgba(0,0,0,0.45)' : 'rgba(0,0,0,0.70)';
+              ctx.fillRect(sLabel.x - tw / 2 - 3, sLabel.y - fontSize / 2 - 2, tw + 6, fontSize + 4);
+              ctx.fillStyle = isPreview ? 'rgba(255,255,255,0.65)' : '#ffffff';
+              ctx.fillText(text, sLabel.x, sLabel.y);
+            }
+            ctx.restore();
           }
         }
       }

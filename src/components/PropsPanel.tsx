@@ -41,8 +41,8 @@ function renderPropsIcon(type: string) {
     case 'yellow_double':
       return (
         <svg viewBox="0 0 24 24" className={baseClass} fill="none" strokeWidth="2.5">
-          <line x1="8" y1="3" x2="8" y2="21" stroke="#FFCC00" />
-          <line x1="16" y1="3" x2="16" y2="21" stroke="#FFCC00" />
+          <line x1="8" y1="3" x2="8" y2="21" stroke="#FFC800" />
+          <line x1="16" y1="3" x2="16" y2="21" stroke="#FFC800" />
         </svg>
       );
     case 'white_double':
@@ -66,7 +66,7 @@ function renderPropsIcon(type: string) {
       );
     case 'yellow_dashed':
       return (
-        <svg viewBox="0 0 24 24" className={baseClass} fill="none" stroke="#eab308" strokeWidth="2">
+        <svg viewBox="0 0 24 24" className={baseClass} fill="none" stroke="#FFC800" strokeWidth="2">
           <line x1="12" y1="3" x2="12" y2="21" strokeDasharray="5,4" />
         </svg>
       );
@@ -2057,7 +2057,7 @@ export default function PropsPanel({
               <div className="flex gap-2">
                 {[
                   { name: '法規白色', value: '#ffffff' },
-                  { name: '槽化黃色', value: '#FFCC00' }
+                  { name: '槽化黃色', value: '#FFC800' }
                 ].map((colorOpt) => (
                   <button
                     key={colorOpt.value}

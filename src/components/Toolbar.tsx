@@ -51,8 +51,8 @@ function renderToolIcon(id: CadTool) {
     case 'yellow_double':
       return (
         <svg viewBox="0 0 24 24" className="w-[24px] h-[24px]" fill="none" strokeWidth="2.5">
-          <line x1="8" y1="3" x2="8" y2="21" stroke="#FFCC00" />
-          <line x1="16" y1="3" x2="16" y2="21" stroke="#FFCC00" />
+          <line x1="8" y1="3" x2="8" y2="21" stroke="#FFC800" />
+          <line x1="16" y1="3" x2="16" y2="21" stroke="#FFC800" />
         </svg>
       );
     case 'white_double':
@@ -76,7 +76,7 @@ function renderToolIcon(id: CadTool) {
       );
     case 'yellow_dashed':
       return (
-        <svg viewBox="0 0 24 24" className="w-[24px] h-[24px]" fill="none" stroke="#eab308" strokeWidth="2">
+        <svg viewBox="0 0 24 24" className="w-[24px] h-[24px]" fill="none" stroke="#FFC800" strokeWidth="2">
           <line x1="12" y1="3" x2="12" y2="21" strokeDasharray="5,4" />
         </svg>
       );
