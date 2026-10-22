@@ -22,7 +22,8 @@ function openDb(): Promise<IDBDatabase> {
   });
 }
 
-export async function saveAutosave(project: any): Promise<void> {
+/** 自動暫存；回傳是否成功（IndexedDB 失敗時改存 localStorage，兩者都失敗才回傳 false） */
+export async function saveAutosave(project: any): Promise<boolean> {
   const record: AutosaveRecord = { savedAt: new Date().toISOString(), project };
   try {
     const db = await openDb();
@@ -33,12 +34,15 @@ export async function saveAutosave(project: any): Promise<void> {
       tx.onerror = () => reject(tx.error);
     });
     db.close();
+    return true;
   } catch {
     try {
       const slim = { ...record, project: { ...project, bgImage: null } };
       localStorage.setItem(LS_KEY, JSON.stringify(slim));
+      return true;
     } catch {
-      // 儲存空間不足或被封鎖時略過，不影響操作
+      // 儲存空間不足或被封鎖：由呼叫端提示使用者另存專案檔
+      return false;
     }
   }
 }

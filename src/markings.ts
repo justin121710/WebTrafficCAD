@@ -65,7 +65,13 @@ export const ACI: Record<MarkColor, number> = {
   guide: 5, annot: 30, angle: 6, curve: 5, text: 7, moto: 7,
 };
 
-export type Primitive =
+/** 原語共用的顏色覆寫（軌跡模擬依路徑配色）：css 用於畫布／PNG，aci 用於 DXF 圖層顏色 */
+interface ColorOverride {
+  css?: string;
+  aci?: number;
+}
+
+export type Primitive = ColorOverride & (
   | {
       kind: 'line';
       pts: Point2D[];
@@ -125,7 +131,7 @@ export type Primitive =
       a1: number;
       color: MarkColor;
       layer: string;
-    };
+    });
 
 /** 正式名稱（工具列、提示、屬性面板、圖層說明共用） */
 export const MARKING_NAMES: Record<string, string> = {

@@ -16,10 +16,6 @@ import {
   BuildingLineElement,
   ParkingSpaceElement,
   BicycleLaneElement,
-  Waypoint,
-  VehicleConfig,
-  SimulationState,
-  ControllerMode,
   Point,
   MeasurementElement,
   AngularDimensionElement
@@ -45,6 +41,7 @@ import {
   calculateSteeringAngle,
   getWheelbaseForVehicle,
   getMaxSteeringAngleForPath,
+  getMaxSteerForVehicle,
   getRoadArrowOutlinePoints,
   getArcFromThreePoints,
   getLineIntersection,
@@ -53,55 +50,11 @@ import {
 import { arrowData } from '../arrowData';
 import { getElementPrimitives, suggestHeading, getMotoBoxCorners, MARKING_NAMES, PATH_LINE_TYPES } from '../markings';
 import { renderPrimitives } from '../renderPrimitives';
-import { calculateIntersectionCurve } from '../utils/pathInterpolator';
-import { calculateCorners, calculateTrailerCorners } from '../utils/vehicleSimulator';
+import SimulationLayer from '../simulation/SimulationLayer';
+import { simStore } from '../simulation/store';
+import { cadMinPathRadius } from '../simulation/vehicles';
+import { SimInteraction, SimPointer } from '../simulation/interaction';
 import { Search, Ruler } from 'lucide-react';
-
-const parseColorToRgbStr = (color: string | undefined): string => {
-  if (!color) return '99, 102, 241';
-  if (color.startsWith('#')) {
-    const hex = color.replace('#', '');
-    if (hex.length === 3) {
-      const r = parseInt(hex[0] + hex[0], 16);
-      const g = parseInt(hex[1] + hex[1], 16);
-      const b = parseInt(hex[2] + hex[2], 16);
-      return `${r}, ${g}, ${b}`;
-    } else if (hex.length === 6) {
-      const r = parseInt(hex.substring(0, 2), 16);
-      const g = parseInt(hex.substring(2, 4), 16);
-      const b = parseInt(hex.substring(4, 6), 16);
-      return `${r}, ${g}, ${b}`;
-    }
-  }
-  const rgbMap: Record<string, string> = {
-    indigo: '99, 102, 241',
-    emerald: '16, 185, 129',
-    amber: '245, 158, 11',
-    rose: '244, 63, 94',
-    sky: '14, 165, 233'
-  };
-  return rgbMap[color] || '99, 102, 241';
-};
-
-const getDarkerRgbStr = (color: string | undefined): string => {
-  const rgb = parseColorToRgbStr(color);
-  return rgb.split(',').map(x => Math.round(parseInt(x.trim(), 10) * 0.5)).join(', ');
-};
-
-
-const ensureSmoothWaypoint = (idx: number, points: Waypoint[]): Waypoint[] => {
-  if (idx < 0 || idx >= points.length) return points;
-  const pt = { ...points[idx] };
-  const hOutLen = Math.hypot(pt.handleOut.x, pt.handleOut.y);
-  if (hOutLen < 5) {
-    pt.handleOut = { x: 0, y: 0 };
-    pt.handleIn = { x: 0, y: 0 };
-    const next = [...points];
-    next[idx] = pt;
-    return next;
-  }
-  return points;
-};
 
 function getParkingSpaceCenter(pk: { p1: Point2D; angle?: number; length?: number; width?: number; p2?: Point2D }): Point2D {
   const L = pk.length || 5.0;
@@ -970,79 +923,12 @@ interface CadCanvasProps {
   selectedElementIds?: string[];
   onSelectElementIdsChange?: (ids: string[]) => void;
   onUpdateElements?: (elements: CadElement[]) => void;
-  simBodyOpacity?: number;
-
-  // Simulation Mode Props
+  // 軌跡模擬模式（模擬的狀態與操作在 src/simulation，這裡只轉交指標事件與顯示覆蓋層）
   appMode?: 'cad' | 'simulation';
-  simConfig?: VehicleConfig;
-  setSimConfig?: React.Dispatch<React.SetStateAction<VehicleConfig>>;
-  simControllerMode?: ControllerMode;
-  simRawPoints?: Waypoint[];
-  setSimRawPoints?: React.Dispatch<React.SetStateAction<Waypoint[]>>;
-  simDrawMode?: "select" | "drag" | "click" | "smartpath";
-  setSimDrawMode?: (mode: "select" | "drag" | "click" | "smartpath") => void;
-  simIsPlaying?: boolean;
-  setSimIsPlaying?: (b: boolean) => void;
-  simCurrentStepIndex?: number;
-  setSimCurrentStepIndex?: (idx: number) => void;
-  simTrajectory?: SimulationState[];
-  simInterpolatedPath?: any[]; // PathPoint[]
-  simLockedPaths?: any[];
-  setSimLockedPaths?: React.Dispatch<React.SetStateAction<any[]>>;
-  simThemeColor?: string;
-  simShowSweptPath?: boolean;
-  simShowCornerTracks?: boolean;
-  simShowAxleTracks?: boolean;
-  simShowBodyWireframe?: boolean;
-  simSweptOpacity?: number;
-  simDraggingWaypointIndex?: number | null;
-  setSimDraggingWaypointIndex?: (idx: number | null) => void;
-  simDraggingHandleType?: "anchor" | "handleIn" | "handleOut" | null;
-  setSimDraggingHandleType?: (t: "anchor" | "handleIn" | "handleOut" | null) => void;
-  simIsDraggingFirstVec?: boolean;
-  setSimIsDraggingFirstVec?: (b: boolean) => void;
-  simFirstVecStart?: Point | null;
-  setSimFirstVecStart?: (p: Point | null) => void;
-  simFirstVecEnd?: Point | null;
-  setSimFirstVecEnd?: (p: Point | null) => void;
-  simClickStartHeadingRef?: React.MutableRefObject<number | null>;
-  simFractionalStepRef?: React.MutableRefObject<number>;
-  onSelectLockedPath?: (id: string) => void;
-
-  // Intersection simulation props
-  simIsIntersectionMode?: boolean;
-  simP0X?: number | null;
-  setSimP0X?: (x: number | null) => void;
-  simP0Y?: number | null;
-  setSimP0Y?: (y: number | null) => void;
-  simP0Angle?: number;
-  setSimP0Angle?: (a: number) => void;
-  simP3X?: number | null;
-  setSimP3X?: (x: number | null) => void;
-  simP3Y?: number | null;
-  setSimP3Y?: (y: number | null) => void;
-  simP3Angle?: number;
-  setSimP3Angle?: (a: number) => void;
-  simP1RatioPercent?: number;
-  simP2RatioPercent?: number;
-  simIntersectionPickState?: "none" | "p0" | "p3";
-  setSimIntersectionPickState?: (s: "none" | "p0" | "p3") => void;
-  simShowIntersectionHelpers?: boolean;
-  simEnableOutswing?: boolean;
-  simI1RatioPercent?: number;
-  simI1OffsetDistance?: number;
-  simI2RatioPercent?: number;
-  simI2OffsetDistance?: number;
-  simStartExtensionM?: number;
-  simEndExtensionM?: number;
-  simIsCalibrating?: boolean;
-  setSimIsCalibrating?: (b: boolean) => void;
-  editingPathId?: string | null;
-  setSimIsDragging?: (dragging: boolean) => void;
+  /** 畫布定位請求（例如點擊衝突清單） */
+  focusRequest?: { pt: Point2D; seq: number } | null;
   roadArrowConfig?: { arrowType: 'straight' | 'left' | 'right' | 'straight_left' | 'straight_right', length: number, angle: number };
   setRoadArrowConfig?: (cfg: any) => void;
-  simHasCollision?: boolean;
-  setSimHasCollision?: (b: boolean) => void;
 }
 
 export default function CadCanvas({
@@ -1081,77 +967,8 @@ export default function CadCanvas({
   selectedElementIds = [],
   onSelectElementIdsChange,
   onUpdateElements,
-  onSelectLockedPath,
-
-  // Simulation Props
   appMode = 'cad',
-  simConfig = { L: 2.7, W: 1.8, Of: 0.9, Or: 1.0, speed: 3.0, scale: 25, lookahead: 6.0 },
-  setSimConfig,
-  simControllerMode = ControllerMode.FRONT_AXLE_DRAG,
-  simRawPoints = [],
-  setSimRawPoints,
-  simDrawMode = 'click',
-  setSimDrawMode,
-  simIsPlaying = false,
-  setSimIsPlaying,
-  simCurrentStepIndex = 0,
-  setSimCurrentStepIndex,
-  simTrajectory = [],
-  simInterpolatedPath = [],
-  simLockedPaths = [],
-  setSimLockedPaths,
-  simThemeColor = 'indigo',
-  simShowSweptPath = true,
-  simShowCornerTracks = true,
-  simShowAxleTracks = true,
-  simShowBodyWireframe = true,
-  simSweptOpacity = 0.12,
-  simDraggingWaypointIndex = null,
-  setSimDraggingWaypointIndex,
-  simDraggingHandleType = null,
-  setSimDraggingHandleType,
-  simIsDraggingFirstVec = false,
-  setSimIsDraggingFirstVec,
-  simFirstVecStart = null,
-  setSimFirstVecStart,
-  simFirstVecEnd = null,
-  setSimFirstVecEnd,
-  simClickStartHeadingRef,
-  simFractionalStepRef,
-
-  // Intersection simulation props
-  simIsIntersectionMode = false,
-  simP0X = null,
-  setSimP0X,
-  simP0Y = null,
-  setSimP0Y,
-  simP0Angle = 0,
-  setSimP0Angle,
-  simP3X = null,
-  setSimP3X,
-  simP3Y = null,
-  setSimP3Y,
-  simP3Angle = -90,
-  setSimP3Angle,
-  simP1RatioPercent = 70,
-  simP2RatioPercent = 70,
-  simIntersectionPickState = 'none',
-  setSimIntersectionPickState,
-  simShowIntersectionHelpers = true,
-  simEnableOutswing = false,
-  simI1RatioPercent = 50,
-  simI1OffsetDistance = 1.5,
-  simI2RatioPercent = 50,
-  simI2OffsetDistance = 1.5,
-  simStartExtensionM = 0.0,
-  simEndExtensionM = 10.0,
-  simIsCalibrating = false,
-  setSimIsCalibrating,
-  editingPathId = null,
-  setSimIsDragging,
-  simBodyOpacity = 0.4,
-  simHasCollision = false,
-  setSimHasCollision
+  focusRequest = null,
 }: CadCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -1161,8 +978,6 @@ export default function CadCanvas({
   const [marqueeStartPos, setMarqueeStartPos] = useState<Point2D | null>(null);
   const [marqueeEndPos, setMarqueeEndPos] = useState<Point2D | null>(null);
   const [draggedElementsInitialStates, setDraggedElementsInitialStates] = useState<{ [id: string]: CadElement }>({});
-  const [isDraggingWholePath, setIsDraggingWholePath] = useState(false);
-  const [pathDragStartWorld, setPathDragStartWorld] = useState<Point2D | null>(null);
 
   // Viewport State: zoom is pixels per meter. Start with 12 pixels per meter.
   const [viewport, setViewport] = useState<ViewportState>({
@@ -1176,18 +991,11 @@ export default function CadCanvas({
   const [mouseWorld, setMouseWorld] = useState<Point2D>({ x: 0, y: 0 });
   const [snapTarget, setSnapTarget] = useState<SnapTarget | null>(null);
 
-  // Simulation dragging local states
-  const [isDraggingRoadA, setIsDraggingRoadA] = useState(false);
-  const [isDraggingRoadB, setIsDraggingRoadB] = useState(false);
-  const [activeDragPoint, setActiveDragPoint] = useState<'none' | 'p0' | 'p3'>('none');
-  const [pathDragStartPoints, setPathDragStartPoints] = useState<Waypoint[]>([]);
-
   // Advanced Tools States and Refs
 
 
   const isPerpSnappedRef = useRef<boolean>(false);
   const perpSnapLineRef = useRef<{ p1: Point2D; p2: Point2D; targetA: Point2D; targetB: Point2D } | null>(null);
-  const isSimDrawingDragRef = useRef(false);
 
   // Interactive drawings draft states (used by polygon channels & circles)
   const [draftPoints, setDraftPoints] = useState<Point2D[]>([]);
@@ -1311,17 +1119,6 @@ export default function CadCanvas({
     }
   }, [activeTool]);
 
-  // 清理軌跡模擬模式下單個節點的草稿
-  const prevSimDrawModeRef = useRef(simDrawMode);
-  useEffect(() => {
-    if (prevSimDrawModeRef.current !== simDrawMode) {
-      if (simDrawMode === 'select' && simRawPoints && simRawPoints.length === 1 && setSimRawPoints) {
-        setSimRawPoints([]);
-      }
-      prevSimDrawModeRef.current = simDrawMode;
-    }
-  }, [simDrawMode, simRawPoints, setSimRawPoints]);
-
   // Track key pressed (for dragging with spacebar etc)
   const [spacePressed, setSpacePressed] = useState(false);
 
@@ -1398,6 +1195,31 @@ export default function CadCanvas({
       y: (centerY - sy + viewport.panY) / viewport.zoom // standard engineering CAD Cartesian coordinate
     };
   };
+
+  // 軌跡模擬：指標事件轉交給 SimInteraction（鎖點與平移仍由本元件處理）
+  const simInputRef = useRef<SimInteraction | null>(null);
+  if (!simInputRef.current) simInputRef.current = new SimInteraction(simStore);
+  const simInput = simInputRef.current;
+  const lastSimPointer = useRef<SimPointer | null>(null);
+  const simPointer = (e: React.PointerEvent | React.MouseEvent, sx: number, sy: number, world: Point2D): SimPointer => {
+    const p: SimPointer = {
+      sx, sy, world,
+      shift: e.shiftKey,
+      alt: e.altKey,
+      button: e.button ?? 0,
+      pointerType: (e as React.PointerEvent).pointerType || 'mouse',
+      w2s: worldToScreen,
+      elements,
+    };
+    lastSimPointer.current = p;
+    return p;
+  };
+
+  // 定位請求：把指定點移到畫面中央
+  useEffect(() => {
+    if (!focusRequest) return;
+    setViewport(prev => ({ ...prev, zoom: Math.max(prev.zoom, 8), panX: -focusRequest.pt.x * Math.max(prev.zoom, 8), panY: focusRequest.pt.y * Math.max(prev.zoom, 8) }));
+  }, [focusRequest?.seq]);
 
   const isLineOrPathTool = (tool: CadTool) => {
     return tool === 'guideline' || 
@@ -1551,6 +1373,8 @@ export default function CadCanvas({
       if (e.code === 'Space') {
         setSpacePressed(true);
       }
+      // 模擬模式的快捷鍵由 App 統一處理
+      if (appMode === 'simulation') return;
       if (e.code === 'Enter') {
         if (appMode === 'cad') {
           e.preventDefault();
@@ -1593,9 +1417,6 @@ export default function CadCanvas({
         setSpCpLeft([]);
         setSpCpRight([]);
         setDraftPoints([]);
-        if (appMode === 'simulation' && setSimRawPoints) {
-          setSimRawPoints([]);
-        }
         setActiveTool('select');
       }
     };
@@ -1945,107 +1766,7 @@ export default function CadCanvas({
       const activeWorldPos = snap ? snap.point : literalWorld;
       setMouseWorld(activeWorldPos);
       setSnapTarget(snap);
-
-      const pxX = activeWorldPos.x * simConfig.scale;
-      const pxY = activeWorldPos.y * simConfig.scale;
-
-      if (simIsIntersectionMode) {
-        if (isDraggingRoadA && setSimP0Angle && simP0X !== null && simP0Y !== null) {
-          const dx = pxX - simP0X;
-          const dy = pxY - simP0Y;
-          if (Math.hypot(dx, dy) > 2) {
-            setSimP0Angle(Math.round(Math.atan2(dy, dx) * 180 / Math.PI));
-          }
-          return;
-        }
-        if (isDraggingRoadB && setSimP3Angle && simP3X !== null && simP3Y !== null) {
-          const dx = pxX - simP3X;
-          const dy = pxY - simP3Y;
-          if (Math.hypot(dx, dy) > 2) {
-            setSimP3Angle(Math.round(Math.atan2(dy, dx) * 180 / Math.PI));
-          }
-          return;
-        }
-        if (activeDragPoint === "p0" && setSimP0X && setSimP0Y) {
-          setSimP0X(Math.round(pxX));
-          setSimP0Y(Math.round(pxY));
-        } else if (activeDragPoint === "p3" && setSimP3X && setSimP3Y) {
-          setSimP3X(Math.round(pxX));
-          setSimP3Y(Math.round(pxY));
-        }
-        return;
-      }
-
-      if (simIsDraggingFirstVec && setSimFirstVecEnd) {
-        setSimFirstVecEnd({ x: pxX, y: pxY });
-        return;
-      }
-
-      if (simDrawMode === 'drag' && isSimDrawingDragRef.current && setSimRawPoints) {
-        setSimRawPoints(prev => {
-          if (prev.length === 0) {
-            return [{ x: pxX, y: pxY, handleIn: { x: 0, y: 0 }, handleOut: { x: 0, y: 0 } }];
-          } else {
-            const lastPt = prev[prev.length - 1];
-            const dist = Math.hypot(pxX - lastPt.x, pxY - lastPt.y);
-            const threshold = prev.length === 1 ? 1.0 : 5.0;
-            if (dist > threshold) {
-              return [...prev, { x: pxX, y: pxY, handleIn: { x: 0, y: 0 }, handleOut: { x: 0, y: 0 } }];
-            }
-            return prev;
-          }
-        });
-        return;
-      }
-
-      if (isDraggingWholePath && pathDragStartWorld && setSimRawPoints && pathDragStartPoints.length > 0) {
-        const dx = activeWorldPos.x - pathDragStartWorld.x;
-        const dy = activeWorldPos.y - pathDragStartWorld.y;
-        const dxPx = dx * simConfig.scale;
-        const dyPx = dy * simConfig.scale;
-
-        const updated = pathDragStartPoints.map(wp => ({
-          ...wp,
-          x: wp.x + dxPx,
-          y: wp.y + dyPx
-        }));
-        setSimRawPoints(updated);
-        return;
-      }
-
-      if (simDraggingWaypointIndex !== null && simDraggingHandleType !== null && setSimRawPoints && simRawPoints.length > 0) {
-        const updatedPoints = [...simRawPoints];
-        const wp = { ...updatedPoints[simDraggingWaypointIndex] };
-
-        if (simDraggingHandleType === 'anchor') {
-          wp.x = pxX;
-          wp.y = pxY;
-        } else if (simDraggingHandleType === 'handleOut') {
-          wp.handleOut = {
-            x: pxX - wp.x,
-            y: pxY - wp.y
-          };
-          wp.handleIn = {
-            x: -wp.handleOut.x,
-            y: -wp.handleOut.y
-          };
-        } else if (simDraggingHandleType === 'handleIn') {
-          wp.handleIn = {
-            x: pxX - wp.x,
-            y: pxY - wp.y
-          };
-          wp.handleOut = {
-            x: -wp.handleIn.x,
-            y: -wp.handleIn.y
-          };
-        }
-
-        updatedPoints[simDraggingWaypointIndex] = wp;
-        setSimRawPoints(updatedPoints);
-        
-        if (setSimCurrentStepIndex) setSimCurrentStepIndex(0);
-        if (simFractionalStepRef) simFractionalStepRef.current = 0;
-      }
+      simInput.move(simPointer(e, sx, sy, activeWorldPos));
       return;
     }
 
@@ -2310,7 +2031,7 @@ export default function CadCanvas({
           }
         }
         
-        const limit = designVehicle === 'passenger' ? 4.5 : 12.5;
+        const limit = cadMinPathRadius(designVehicle);
         const isValid = minR >= limit;
 
         onUpdateElement({
@@ -2416,7 +2137,7 @@ export default function CadCanvas({
         const r = getBezierMinRadiusOfCurvature(mergedPts[j], mergedCpR[j], mergedCpL[j + 1], mergedPts[j + 1]);
         if (r < mergedMinR) mergedMinR = r;
       }
-      const limit = designVehicle === 'passenger' ? 4.5 : 12.5;
+      const limit = cadMinPathRadius(designVehicle);
       const isValid = mergedMinR >= limit;
 
       const updatedEl = {
@@ -2447,7 +2168,7 @@ export default function CadCanvas({
       if (r < minR) minR = r;
     }
 
-    const limit = designVehicle === 'passenger' ? 4.5 : 12.5;
+    const limit = cadMinPathRadius(designVehicle);
     const isValid = minR >= limit;
 
     if (finalType === 'yield_line') {
@@ -2642,312 +2363,13 @@ export default function CadCanvas({
         e.preventDefault();
         return;
       }
-      if (e.button === 2) {
-        if (simRawPoints && simRawPoints.length === 1 && setSimRawPoints) {
-          setSimRawPoints([]);
-        }
-        e.preventDefault();
-        return;
-      }
-      if (e.button !== 0) return;
-
-      const clickPt = snapTarget ? snapTarget.point : screenToWorld(sx, sy);
-      const pxX = clickPt.x * simConfig.scale;
-      const pxY = clickPt.y * simConfig.scale;
-
-      if (simIsIntersectionMode) {
-        if (simIntersectionPickState === "p0" && setSimP0X && setSimP0Y) {
-          setSimP0X(Math.round(pxX));
-          setSimP0Y(Math.round(pxY));
-          setIsDraggingRoadA(true);
-          if (setSimIsDragging) setSimIsDragging(true);
-          return;
-        }
-        if (simIntersectionPickState === "p3" && setSimP3X && setSimP3Y) {
-          setSimP3X(Math.round(pxX));
-          setSimP3Y(Math.round(pxY));
-          setIsDraggingRoadB(true);
-          if (setSimIsDragging) setSimIsDragging(true);
-          return;
-        }
-
-        const hasP0 = simP0X !== null && simP0Y !== null;
-        const hasP3 = simP3X !== null && simP3Y !== null;
-
-        if (hasP0) {
-          const screenP0 = worldToScreen(simP0X / simConfig.scale, simP0Y / simConfig.scale);
-          if (Math.hypot(sx - screenP0.x, sy - screenP0.y) < 18) {
-            setActiveDragPoint("p0");
-            if (setSimIsDragging) setSimIsDragging(true);
-            return;
-          }
-        }
-        if (hasP3) {
-          const screenP3 = worldToScreen(simP3X / simConfig.scale, simP3Y / simConfig.scale);
-          if (Math.hypot(sx - screenP3.x, sy - screenP3.y) < 18) {
-            setActiveDragPoint("p3");
-            if (setSimIsDragging) setSimIsDragging(true);
-            return;
-          }
-        }
-        return;
-      }
-
-      if (simDrawMode === 'select') {
-        let hitNodeIndex: number | null = null;
-        let hitType: 'anchor' | 'handleIn' | 'handleOut' | null = null;
-        const hitRadiusPx = 15;
-
-        for (let i = 0; i < simRawPoints.length; i++) {
-          const wp = simRawPoints[i];
-          const screenAnchor = worldToScreen(wp.x / simConfig.scale, wp.y / simConfig.scale);
-          if (Math.hypot(sx - screenAnchor.x, sy - screenAnchor.y) < hitRadiusPx) {
-            hitNodeIndex = i;
-            hitType = 'anchor';
-            break;
-          }
-
-          if (wp.handleIn) {
-            const screenIn = worldToScreen((wp.x + wp.handleIn.x) / simConfig.scale, (wp.y + wp.handleIn.y) / simConfig.scale);
-            if (Math.hypot(sx - screenIn.x, sy - screenIn.y) < hitRadiusPx) {
-              hitNodeIndex = i;
-              hitType = 'handleIn';
-              break;
-            }
-          }
-          if (wp.handleOut) {
-            const screenOut = worldToScreen((wp.x + wp.handleOut.x) / simConfig.scale, (wp.y + wp.handleOut.y) / simConfig.scale);
-            if (Math.hypot(sx - screenOut.x, sy - screenOut.y) < hitRadiusPx) {
-              hitNodeIndex = i;
-              hitType = 'handleOut';
-              break;
-            }
-          }
-        }
-
-        if (hitNodeIndex !== null && hitType !== null && setSimDraggingWaypointIndex && setSimDraggingHandleType) {
-          setSimDraggingWaypointIndex(hitNodeIndex);
-          setSimDraggingHandleType(hitType);
-          if (setSimIsPlaying) setSimIsPlaying(false);
-          if (setSimIsDragging) setSimIsDragging(true);
-          return;
-        }
-
-        // 如果沒有點到點或手柄，檢測是否點拉了該軌跡的路徑連線部分，以供整條軌跡平移
-        let hitWholePath = false;
-        if (simRawPoints.length >= 2) {
-          for (let i = 0; i < simRawPoints.length - 1; i++) {
-            const wp0 = simRawPoints[i];
-            const wp1 = simRawPoints[i + 1];
-            const p0 = { x: wp0.x, y: wp0.y };
-            const cp0 = { x: wp0.x + wp0.handleOut.x, y: wp0.y + wp0.handleOut.y };
-            const cp1 = { x: wp1.x + wp1.handleIn.x, y: wp1.y + wp1.handleIn.y };
-            const p1 = { x: wp1.x, y: wp1.y };
-
-            const samples = sampleCubicBezier(p0, cp0, cp1, p1, 15);
-            for (let j = 0; j < samples.length - 1; j++) {
-              const sPt1 = worldToScreen(samples[j].x / simConfig.scale, samples[j].y / simConfig.scale);
-              const sPt2 = worldToScreen(samples[j + 1].x / simConfig.scale, samples[j + 1].y / simConfig.scale);
-              const res = projectPointOnSegment({ x: sx, y: sy }, sPt1, sPt2);
-              if (res.dist < 12) {
-                hitWholePath = true;
-                break;
-              }
-            }
-            if (hitWholePath) break;
-          }
-        }
-
-        if (hitWholePath) {
-          setIsDraggingWholePath(true);
-          setPathDragStartWorld(clickPt);
-          setPathDragStartPoints([...simRawPoints]);
-          if (setSimIsPlaying) setSimIsPlaying(false);
-          if (setSimIsDragging) setSimIsDragging(true);
-          return;
-        }
-
-        if (simLockedPaths && simLockedPaths.length > 0) {
-          for (let lpIdx = 0; lpIdx < simLockedPaths.length; lpIdx++) {
-            const lp = simLockedPaths[lpIdx];
-            const lpScale = lp.config.scale;
-            let hitLp = false;
-            
-            // 優先檢測點擊點是否落在貝茲曲線軌跡線段的任何一處
-            if (lp.rawPoints && lp.rawPoints.length >= 2) {
-              for (let i = 0; i < lp.rawPoints.length - 1; i++) {
-                const wp0 = lp.rawPoints[i];
-                const wp1 = lp.rawPoints[i + 1];
-                const p0 = { x: wp0.x, y: wp0.y };
-                const cp0 = { x: wp0.x + (wp0.handleOut?.x || 0), y: wp0.y + (wp0.handleOut?.y || 0) };
-                const cp1 = { x: wp1.x + (wp1.handleIn?.x || 0), y: wp1.y + (wp1.handleIn?.y || 0) };
-                const p1 = { x: wp1.x, y: wp1.y };
-
-                const samples = sampleCubicBezier(p0, cp0, cp1, p1, 15);
-                for (let j = 0; j < samples.length - 1; j++) {
-                  const sPt1 = worldToScreen(samples[j].x / lpScale, samples[j].y / lpScale);
-                  const sPt2 = worldToScreen(samples[j + 1].x / lpScale, samples[j + 1].y / lpScale);
-                  const res = projectPointOnSegment({ x: sx, y: sy }, sPt1, sPt2);
-                  if (res.dist < 12) {
-                    hitLp = true;
-                    break;
-                  }
-                }
-                if (hitLp) break;
-              }
-            }
-
-            // Fallback: 如果沒點到線段，檢測是否點擊在各節點 (Anchor) 上
-            if (!hitLp && lp.rawPoints) {
-              for (let i = 0; i < lp.rawPoints.length; i++) {
-                const wp = lp.rawPoints[i];
-                const screenAnchor = worldToScreen(wp.x / lpScale, wp.y / lpScale);
-                if (Math.hypot(sx - screenAnchor.x, sy - screenAnchor.y) < hitRadiusPx) {
-                  hitLp = true;
-                  break;
-                }
-              }
-            }
-
-            if (hitLp) {
-              if (onSelectLockedPath) {
-                onSelectLockedPath(lp.id);
-              }
-              return;
-            }
-          }
-        }
-        return;
-      }
-
-      if (simRawPoints.length === 0) {
-        if (simDrawMode !== 'drag') {
-          if (setSimIsDraggingFirstVec && setSimFirstVecStart && setSimFirstVecEnd && setSimCurrentStepIndex && simFractionalStepRef) {
-            setSimIsDraggingFirstVec(true);
-            setSimFirstVecStart({ x: pxX, y: pxY });
-            setSimFirstVecEnd({ x: pxX, y: pxY });
-            if (simClickStartHeadingRef) simClickStartHeadingRef.current = null;
-            setSimCurrentStepIndex(0);
-            simFractionalStepRef.current = 0;
-            if (setSimIsDragging) setSimIsDragging(true);
-          }
-          return;
-        } else {
-          if (setSimRawPoints) {
-            isSimDrawingDragRef.current = true;
-            setSimRawPoints([{ x: pxX, y: pxY, handleIn: { x: 0, y: 0 }, handleOut: { x: 0, y: 0 } }]);
-            if (setSimCurrentStepIndex) setSimCurrentStepIndex(0);
-            if (simFractionalStepRef) simFractionalStepRef.current = 0;
-            if (setSimIsPlaying) setSimIsPlaying(false);
-            if (setSimIsDragging) setSimIsDragging(true);
-          }
-          return;
-        }
-      }
-
-      if (simDrawMode === 'drag' && setSimRawPoints) {
-        isSimDrawingDragRef.current = true;
-        const newWp: Waypoint = {
-          x: pxX,
-          y: pxY,
-          handleIn: { x: 0, y: 0 },
-          handleOut: { x: 0, y: 0 }
-        };
-        setSimRawPoints([newWp]);
-        if (setSimIsPlaying) setSimIsPlaying(false);
-        if (setSimCurrentStepIndex) setSimCurrentStepIndex(0);
-        if (simFractionalStepRef) simFractionalStepRef.current = 0;
-        if (setSimIsDragging) setSimIsDragging(true);
-        return;
-      }
-
-      if (simDrawMode === 'click' && setSimRawPoints) {
-        const newWp: Waypoint = {
-          x: pxX,
-          y: pxY,
-          handleIn: { x: 0, y: 0 },
-          handleOut: { x: 0, y: 0 }
-        };
-        setSimRawPoints([...simRawPoints, newWp]);
-        if (setSimIsPlaying) setSimIsPlaying(false);
-        if (setSimCurrentStepIndex) setSimCurrentStepIndex(0);
-        if (simFractionalStepRef) simFractionalStepRef.current = 0;
-        return;
-      }
-
-      let hitNodeIndex: number | null = null;
-      let hitType: 'anchor' | 'handleIn' | 'handleOut' | null = null;
-      const hitRadiusPx = 25; // 依照原版 simulator 設計使用 25px 便於點擊
-
-      for (let i = 0; i < simRawPoints.length; i++) {
-        const wp = simRawPoints[i];
-        
-        const screenAnchor = worldToScreen(wp.x / simConfig.scale, wp.y / simConfig.scale);
-        if (Math.hypot(sx - screenAnchor.x, sy - screenAnchor.y) < hitRadiusPx) {
-          hitNodeIndex = i;
-          hitType = 'anchor';
-          break;
-        }
-
-        if (wp.handleIn) {
-          const screenIn = worldToScreen((wp.x + wp.handleIn.x) / simConfig.scale, (wp.y + wp.handleIn.y) / simConfig.scale);
-          if (Math.hypot(sx - screenIn.x, sy - screenIn.y) < hitRadiusPx) {
-            hitNodeIndex = i;
-            hitType = 'handleIn';
-            break;
-          }
-        }
-        if (wp.handleOut) {
-          const screenOut = worldToScreen((wp.x + wp.handleOut.x) / simConfig.scale, (wp.y + wp.handleOut.y) / simConfig.scale);
-          if (Math.hypot(sx - screenOut.x, sy - screenOut.y) < hitRadiusPx) {
-            hitNodeIndex = i;
-            hitType = 'handleOut';
-            break;
-          }
-        }
-      }
-
-      if (hitNodeIndex !== null && hitType !== null && setSimDraggingWaypointIndex && setSimDraggingHandleType) {
-        if (hitType === 'anchor' && hitNodeIndex === simRawPoints.length - 1) {
-          const wp = simRawPoints[hitNodeIndex];
-          const isCurve = (wp.handleIn && (wp.handleIn.x !== 0 || wp.handleIn.y !== 0)) ||
-                          (wp.handleOut && (wp.handleOut.x !== 0 || wp.handleOut.y !== 0));
-          if (isCurve && setSimRawPoints) {
-            const updated = [...simRawPoints];
-            updated[hitNodeIndex] = {
-              ...wp,
-              handleIn: { x: 0, y: 0 },
-              handleOut: { x: 0, y: 0 }
-            };
-            setSimRawPoints(updated);
-            return;
-          }
-        }
-
-        setSimDraggingWaypointIndex(hitNodeIndex);
-        setSimDraggingHandleType(hitType);
-        if (setSimIsPlaying) setSimIsPlaying(false);
-        if (setSimIsDragging) setSimIsDragging(true);
-      } else if (setSimRawPoints) {
-        const newWp: Waypoint = {
-          x: pxX,
-          y: pxY,
-          handleIn: { x: 0, y: 0 },
-          handleOut: { x: 0, y: 0 }
-        };
-
-        const nextPts = [...simRawPoints, newWp];
-        setSimRawPoints(nextPts);
-
-        if (setSimDraggingWaypointIndex && setSimDraggingHandleType) {
-          setSimDraggingWaypointIndex(nextPts.length - 1);
-          setSimDraggingHandleType('handleOut');
-        }
-
-        if (setSimIsPlaying) setSimIsPlaying(false);
-        if (setSimCurrentStepIndex) setSimCurrentStepIndex(0);
-        if (simFractionalStepRef) simFractionalStepRef.current = 0;
-      }
+      // 點擊當下重新計算鎖點（觸控點擊前沒有移動事件）
+      const rawPt = screenToWorld(sx, sy);
+      const fresh = computeSnapPoint(rawPt, sx, sy);
+      const pt = fresh ? fresh.point : rawPt;
+      setSnapTarget(fresh);
+      setMouseWorld(pt);
+      if (simInput.down(simPointer(e, sx, sy, pt))) e.preventDefault();
       return;
     }
 
@@ -3905,70 +3327,8 @@ export default function CadCanvas({
   const handlePointerUp = () => {
     setIsPanning(false);
 
-    if (isDraggingWholePath) {
-      setIsDraggingWholePath(false);
-      setPathDragStartWorld(null);
-      setPathDragStartPoints([]);
-    }
-
     if (appMode === 'simulation') {
-      if (setSimIsDragging) setSimIsDragging(false);
-
-      if (simIsIntersectionMode) {
-        if (isDraggingRoadA) {
-          setIsDraggingRoadA(false);
-          if (setSimIntersectionPickState) setSimIntersectionPickState("p3");
-        } else if (isDraggingRoadB) {
-          setIsDraggingRoadB(false);
-          if (setSimIntersectionPickState) setSimIntersectionPickState("none");
-          if (setSimDrawMode) setSimDrawMode("select");
-        }
-        if (activeDragPoint !== "none") {
-          setActiveDragPoint("none");
-        }
-        return;
-      }
-
-      if (simIsDraggingFirstVec) {
-        if (setSimIsDraggingFirstVec && setSimRawPoints && simFirstVecStart && simFirstVecEnd) {
-          setSimIsDraggingFirstVec(false);
-          const dx = simFirstVecEnd.x - simFirstVecStart.x;
-          const dy = simFirstVecEnd.y - simFirstVecStart.y;
-          const heading = Math.hypot(dx, dy) > 4 ? Math.atan2(dy, dx) : 0;
-          const len = Math.max(35, Math.hypot(dx, dy));
-
-          const p0: Waypoint = {
-            x: simFirstVecStart.x,
-            y: simFirstVecStart.y,
-            handleIn: { x: -len * Math.cos(heading), y: -len * Math.sin(heading) },
-            handleOut: { x: len * Math.cos(heading), y: len * Math.sin(heading) }
-          };
-
-          if (simClickStartHeadingRef) simClickStartHeadingRef.current = heading;
-          setSimRawPoints([p0]);
-        }
-        return;
-      }
-
-      if (simDrawMode === 'smartpath') {
-        if (simDraggingWaypointIndex !== null && setSimDraggingWaypointIndex && setSimDraggingHandleType && setSimRawPoints) {
-          const idx = simDraggingWaypointIndex;
-          setSimDraggingWaypointIndex(null);
-          setSimDraggingHandleType(null);
-          setSimRawPoints((prev) => ensureSmoothWaypoint(idx, prev));
-        }
-        return;
-      }
-
-      if (simDrawMode === "drag" && isSimDrawingDragRef.current) {
-        isSimDrawingDragRef.current = false;
-        if (setSimIsPlaying) setSimIsPlaying(true);
-      }
-
-      if (setSimDraggingWaypointIndex && setSimDraggingHandleType) {
-        setSimDraggingWaypointIndex(null);
-        setSimDraggingHandleType(null);
-      }
+      if (lastSimPointer.current) simInput.up(lastSimPointer.current);
       return;
     }
     if (rotationIntervalRef.current) {
@@ -4032,6 +3392,15 @@ export default function CadCanvas({
   };
 
   const handleDoubleClick = (e: React.MouseEvent) => {
+    if (appMode === 'simulation') {
+      if (!canvasRef.current) return;
+      const rect = canvasRef.current.getBoundingClientRect();
+      const sx = e.clientX - rect.left, sy = e.clientY - rect.top;
+      const rawPt = screenToWorld(sx, sy);
+      const fresh = computeSnapPoint(rawPt, sx, sy);
+      simInput.doubleClick(simPointer(e, sx, sy, fresh ? fresh.point : rawPt));
+      return;
+    }
     if (isLineOrPathTool(activeTool) && spPoints.length >= 2) {
       handleCompleteSmartPath(spPoints, spCpLeft, spCpRight);
     }
@@ -4107,69 +3476,6 @@ export default function CadCanvas({
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
     const { zoom, panX, panY } = viewport;
-
-    let isCurrentlyColliding = false;
-    if (appMode === 'simulation' && simTrajectory && simTrajectory.length > 0) {
-      const stepsToTest = simTrajectory.slice(0, simCurrentStepIndex + 1);
-      const scale = simConfig.scale;
-      const buildingLines = elements.filter(el => el.type === 'BuildingLine');
-      
-      let hitRed = false;
-      for (const stepState of stepsToTest) {
-        if (!stepState.corners) continue;
-        const tVerts = [
-          { x: stepState.corners.fl.x / scale, y: stepState.corners.fl.y / scale },
-          { x: stepState.corners.fr.x / scale, y: stepState.corners.fr.y / scale },
-          { x: stepState.corners.rr.x / scale, y: stepState.corners.rr.y / scale },
-          { x: stepState.corners.rl.x / scale, y: stepState.corners.rl.y / scale }
-        ];
-        const tEdges = [
-          { p1: tVerts[0], p2: tVerts[1] },
-          { p1: tVerts[1], p2: tVerts[2] },
-          { p1: tVerts[2], p2: tVerts[3] },
-          { p1: tVerts[3], p2: tVerts[0] }
-        ];
-
-        const trVerts = stepState.trailerCorners ? [
-          { x: stepState.trailerCorners.fl.x / scale, y: stepState.trailerCorners.fl.y / scale },
-          { x: stepState.trailerCorners.fr.x / scale, y: stepState.trailerCorners.fr.y / scale },
-          { x: stepState.trailerCorners.rr.x / scale, y: stepState.trailerCorners.rr.y / scale },
-          { x: stepState.trailerCorners.rl.x / scale, y: stepState.trailerCorners.rl.y / scale }
-        ] : [];
-        const trEdges = stepState.trailerCorners ? [
-          { p1: trVerts[0], p2: trVerts[1] },
-          { p1: trVerts[1], p2: trVerts[2] },
-          { p1: trVerts[2], p2: trVerts[3] },
-          { p1: trVerts[3], p2: trVerts[0] }
-        ] : [];
-
-        const allVehicleEdges = [...tEdges, ...trEdges];
-
-        for (const bl of buildingLines) {
-          const blEdges = getElementEdges(bl);
-          for (const ve of allVehicleEdges) {
-            for (const ble of blEdges) {
-              if (lineSegmentsIntersect(ve.p1, ve.p2, ble.p1, ble.p2)) {
-                hitRed = true;
-                break;
-              }
-            }
-            if (hitRed) break;
-          }
-          if (hitRed) break;
-        }
-        if (hitRed) {
-          isCurrentlyColliding = true;
-          break;
-        }
-      }
-    }
-
-    if (setSimHasCollision) {
-      setTimeout(() => {
-        setSimHasCollision(isCurrentlyColliding);
-      }, 0);
-    }
 
     // RENDER BACKGROUND IMAGE (IF LOADED)
     if (bgImage && bgImgRef.current) {
@@ -4614,7 +3920,7 @@ export default function CadCanvas({
             const pNext = wholePath[k + 1];
 
             const angle = calculateSteeringAngle(pPrev, pCurr, pNext, wheelbase);
-            ctx.strokeStyle = angle > 40 ? '#ef4444' : '#06b6d4'; // Red vs Cyan
+            ctx.strokeStyle = angle > getMaxSteerForVehicle(pathVehicle) ? '#ef4444' : '#06b6d4'; // 超過該車種最大轉角為紅色
             ctx.beginPath();
             const s1 = worldToScreen(pCurr.x, pCurr.y);
             const s2 = worldToScreen(pNext.x, pNext.y);
@@ -5467,7 +4773,7 @@ export default function CadCanvas({
           const pNext = wholeActivePath[k + 1];
 
           const angle = calculateSteeringAngle(pPrev, pCurr, pNext, wheelbase);
-          ctx.strokeStyle = angle > 40 ? '#ef4444' : '#06b6d4'; // Red vs Cyan
+          ctx.strokeStyle = angle > getMaxSteerForVehicle(designVehicle) ? '#ef4444' : '#06b6d4'; // 超過該車種最大轉角為紅色
           ctx.beginPath();
           const s1 = worldToScreen(pCurr.x, pCurr.y);
           const s2 = worldToScreen(pNext.x, pNext.y);
@@ -5807,1044 +5113,19 @@ export default function CadCanvas({
       }
     }
 
-    // --- 車流軌跡模擬 (Bicycle Trajectory Simulator Rendering) ---
-    if (appMode === 'simulation') {
-      const scale = simConfig.scale;
-      const isEditing = editingPathId !== null && editingPathId !== undefined;
-
-      // Helper function to map simulator pixel coordinate to screen coordinate
-      const simToScreen = (sx: number, sy: number) => {
-        return worldToScreen(sx / scale, sy / scale);
-      };
-
-      const getSteerColor = (
-        themeColor: string | undefined,
-        steerAngleDeg: number,
-        maxSteerLimit: number
-      ) => {
-        const limit = maxSteerLimit || 40;
-        if (Math.abs(steerAngleDeg) > limit) {
-          return '#ef4444'; // 超限顯示紅色
-        }
-        // Deleted local parseColorToRgbStr, using global one instead
-        const rgb = parseColorToRgbStr(themeColor);
-        const ratio = Math.min(1, Math.abs(steerAngleDeg) / limit);
-        const alpha = 0.25 + 0.75 * ratio;
-        return `rgba(${rgb}, ${alpha})`;
-      };
-
-      // 1. 繪製所有已儲存/鎖定的軌跡 (Locked Paths)
-      if (editingPathId === null) {
-        simLockedPaths.forEach((lp) => {
-          const lpColor = lp.themeColor;
-          
-          const parseColorToHex = (color: string | undefined): string => {
-            if (!color) return '#6366f1';
-            if (color.startsWith('#')) return color;
-            const colorHex: Record<string, string> = {
-              indigo: '#6366f1',
-              emerald: '#10b981',
-              amber: '#f59e0b',
-              rose: '#f43f5e',
-              sky: '#0ea5e9'
-            };
-            return colorHex[color] || '#6366f1';
-          };
-
-          const activeColor = parseColorToHex(lpColor);
-          const colorRgb = parseColorToRgbStr(lpColor);
-
-        // A. 繪製已鎖定軌跡的包絡線 (Swept Path)
-        if (!isEditing && simShowSweptPath && lp.trajectory && lp.trajectory.length > 0) {
-          ctx.save();
-          ctx.fillStyle = activeColor;
-          ctx.globalAlpha = simSweptOpacity * 0.5; // 已鎖定軌跡的掃掠稍微調淡
-
-          lp.trajectory.forEach((state: any) => {
-            // Tractor corners
-            ctx.beginPath();
-            const sFl = simToScreen(state.corners.fl.x, state.corners.fl.y);
-            const sFr = simToScreen(state.corners.fr.x, state.corners.fr.y);
-            const sRr = simToScreen(state.corners.rr.x, state.corners.rr.y);
-            const sRl = simToScreen(state.corners.rl.x, state.corners.rl.y);
-
-            ctx.moveTo(sFl.x, sFl.y);
-            ctx.lineTo(sFr.x, sFr.y);
-            ctx.lineTo(sRr.x, sRr.y);
-            ctx.lineTo(sRl.x, sRl.y);
-            ctx.closePath();
-            ctx.fill();
-
-            // Trailer corners (if enabled)
-            if (state.trailerCorners) {
-              ctx.beginPath();
-              const stFl = simToScreen(state.trailerCorners.fl.x, state.trailerCorners.fl.y);
-              const stFr = simToScreen(state.trailerCorners.fr.x, state.trailerCorners.fr.y);
-              const stRr = simToScreen(state.trailerCorners.rr.x, state.trailerCorners.rr.y);
-              const stRl = simToScreen(state.trailerCorners.rl.x, state.trailerCorners.rl.y);
-
-              ctx.moveTo(stFl.x, stFl.y);
-              ctx.lineTo(stFr.x, stFr.y);
-              ctx.lineTo(stRr.x, stRr.y);
-              ctx.lineTo(stRl.x, stRl.y);
-              ctx.closePath();
-              ctx.fill();
-            }
-          });
-          ctx.restore();
-        }
-
-        // B. 繪製已鎖定軌跡引導路徑
-        if (lp.trajectory && lp.trajectory.length > 1) {
-          ctx.save();
-          ctx.lineWidth = 1.8;
-          const limit = lp.config?.maxSteerLimit ?? 40;
-          for (let i = 0; i < lp.trajectory.length - 1; i++) {
-            const stateStart = lp.trajectory[i];
-            const stateEnd = lp.trajectory[i + 1];
-            
-            const steerAngleDeg = Math.abs((stateStart.steering * 180) / Math.PI);
-            ctx.strokeStyle = getSteerColor(lp.themeColor, steerAngleDeg, limit);
-            
-            ctx.beginPath();
-            const s1 = simToScreen(stateStart.rearAxle.x, stateStart.rearAxle.y);
-            const s2 = simToScreen(stateEnd.rearAxle.x, stateEnd.rearAxle.y);
-            ctx.moveTo(s1.x, s1.y);
-            ctx.lineTo(s2.x, s2.y);
-            ctx.stroke();
-          }
-          ctx.restore();
-        }
-
-        // C. 繪製已鎖定車輛末端位置 (Ghost Vehicle at End)
-        if (!isEditing && lp.trajectory && lp.trajectory.length > 0) {
-          ctx.save();
-          const state = lp.trajectory[lp.trajectory.length - 1];
-          ctx.strokeStyle = activeColor;
-          ctx.lineWidth = 1.5;
-          ctx.fillStyle = 'rgba(30, 41, 59, 0.4)';
-
-          // Tractor
-          ctx.beginPath();
-          const sFl = simToScreen(state.corners.fl.x, state.corners.fl.y);
-          const sFr = simToScreen(state.corners.fr.x, state.corners.fr.y);
-          const sRr = simToScreen(state.corners.rr.x, state.corners.rr.y);
-          const sRl = simToScreen(state.corners.rl.x, state.corners.rl.y);
-          ctx.moveTo(sFl.x, sFl.y);
-          ctx.lineTo(sFr.x, sFr.y);
-          ctx.lineTo(sRr.x, sRr.y);
-          ctx.lineTo(sRl.x, sRl.y);
-          ctx.closePath();
-          ctx.fill();
-          ctx.stroke();
-
-          // Trailer
-          if (state.trailerCorners) {
-            ctx.beginPath();
-            const stFl = simToScreen(state.trailerCorners.fl.x, state.trailerCorners.fl.y);
-            const stFr = simToScreen(state.trailerCorners.fr.x, state.trailerCorners.fr.y);
-            const stRr = simToScreen(state.trailerCorners.rr.x, state.trailerCorners.rr.y);
-            const stRl = simToScreen(state.trailerCorners.rl.x, state.trailerCorners.rl.y);
-            ctx.moveTo(stFl.x, stFl.y);
-            ctx.lineTo(stFr.x, stFr.y);
-            ctx.lineTo(stRr.x, stRr.y);
-            ctx.lineTo(stRl.x, stRl.y);
-            ctx.closePath();
-            ctx.fill();
-            ctx.stroke();
-          }
-          ctx.restore();
-        }
-
-        // D. 繪製已鎖定軌跡的 Corner 輪胎/角點軌跡線 (Corner Tracks)
-        if (!isEditing && simShowCornerTracks && lp.trajectory && lp.trajectory.length > 1) {
-          ctx.save();
-          ctx.lineWidth = 1;
-          ctx.setLineDash([2, 3]);
-          ctx.strokeStyle = `rgba(${colorRgb}, 0.45)`;
-
-          // fl
-          ctx.beginPath();
-          lp.trajectory.forEach((state: any, idx: number) => {
-            const pt = simToScreen(state.corners.fl.x, state.corners.fl.y);
-            if (idx === 0) ctx.moveTo(pt.x, pt.y);
-            else ctx.lineTo(pt.x, pt.y);
-          });
-          ctx.stroke();
-
-          // fr
-          ctx.beginPath();
-          lp.trajectory.forEach((state: any, idx: number) => {
-            const pt = simToScreen(state.corners.fr.x, state.corners.fr.y);
-            if (idx === 0) ctx.moveTo(pt.x, pt.y);
-            else ctx.lineTo(pt.x, pt.y);
-          });
-          ctx.stroke();
-
-          // rl / rr
-          ctx.beginPath();
-          lp.trajectory.forEach((state: any, idx: number) => {
-            const pt = simToScreen(state.corners.rl.x, state.corners.rl.y);
-            if (idx === 0) ctx.moveTo(pt.x, pt.y);
-            else ctx.lineTo(pt.x, pt.y);
-          });
-          ctx.stroke();
-
-          ctx.beginPath();
-          lp.trajectory.forEach((state: any, idx: number) => {
-            const pt = simToScreen(state.corners.rr.x, state.corners.rr.y);
-            if (idx === 0) ctx.moveTo(pt.x, pt.y);
-            else ctx.lineTo(pt.x, pt.y);
-          });
-          ctx.stroke();
-
-          // Trailer corner tracks
-          if (lp.config?.enableTrailer) {
-            ctx.strokeStyle = `rgba(${colorRgb}, 0.35)`;
-            ctx.beginPath();
-            lp.trajectory.forEach((state: any, idx: number) => {
-              if (state.trailerCorners) {
-                const pt = simToScreen(state.trailerCorners.rl.x, state.trailerCorners.rl.y);
-                if (idx === 0) ctx.moveTo(pt.x, pt.y);
-                else ctx.lineTo(pt.x, pt.y);
-              }
-            });
-            ctx.stroke();
-
-            ctx.beginPath();
-            lp.trajectory.forEach((state: any, idx: number) => {
-              if (state.trailerCorners) {
-                const pt = simToScreen(state.trailerCorners.rr.x, state.trailerCorners.rr.y);
-                if (idx === 0) ctx.moveTo(pt.x, pt.y);
-                else ctx.lineTo(pt.x, pt.y);
-              }
-            });
-            ctx.stroke();
-          }
-          ctx.restore();
-        }
-
-        // E. 繪製已鎖定軌跡的連續骨架投影 (Body Wireframe)
-        if (simShowBodyWireframe && lp.trajectory && lp.trajectory.length > 0) {
-          ctx.save();
-          ctx.strokeStyle = '#ffffff';
-          ctx.lineWidth = 1.0;
-
-          const interval = 18;
-          for (let i = 0; i < lp.trajectory.length; i += interval) {
-            const state = lp.trajectory[i];
-            if (!state) continue;
-
-            // 主車線框
-            const sFl = simToScreen(state.corners.fl.x, state.corners.fl.y);
-            const sFr = simToScreen(state.corners.fr.x, state.corners.fr.y);
-            const sRr = simToScreen(state.corners.rr.x, state.corners.rr.y);
-            const sRl = simToScreen(state.corners.rl.x, state.corners.rl.y);
-
-            ctx.beginPath();
-            ctx.moveTo(sFl.x, sFl.y);
-            ctx.lineTo(sFr.x, sFr.y);
-            ctx.lineTo(sRr.x, sRr.y);
-            ctx.lineTo(sRl.x, sRl.y);
-            ctx.closePath();
-            ctx.stroke();
-
-            // 拖車線框
-            if (state.trailerCorners) {
-              const stFl = simToScreen(state.trailerCorners.fl.x, state.trailerCorners.fl.y);
-              const stFr = simToScreen(state.trailerCorners.fr.x, state.trailerCorners.fr.y);
-              const stRr = simToScreen(state.trailerCorners.rr.x, state.trailerCorners.rr.y);
-              const stRl = simToScreen(state.trailerCorners.rl.x, state.trailerCorners.rl.y);
-
-              ctx.beginPath();
-              ctx.moveTo(stFl.x, stFl.y);
-              ctx.lineTo(stFr.x, stFr.y);
-              ctx.lineTo(stRr.x, stRr.y);
-              ctx.lineTo(stRl.x, stRl.y);
-              ctx.closePath();
-              ctx.stroke();
-            }
-          }
-          ctx.restore();
-        }
-      });
-    }
-
-      // 2. 繪製目前編輯/播放的引導路徑
-      if ((simDrawMode !== 'select' || simIsIntersectionMode || isEditing) && simInterpolatedPath && simInterpolatedPath.length > 1) {
-        ctx.save();
-        ctx.lineWidth = 2.5;
-        const limit = simConfig.maxSteerLimit ?? 40;
-        for (let i = 0; i < simInterpolatedPath.length - 1; i++) {
-          const ptStart = simInterpolatedPath[i];
-          const ptEnd = simInterpolatedPath[i + 1];
-          
-          const steerAngleDeg = ptStart.steerAngleDeg ?? 0;
-          ctx.strokeStyle = getSteerColor(simThemeColor, steerAngleDeg, limit);
-          
-          ctx.beginPath();
-          const s1 = simToScreen(ptStart.x, ptStart.y);
-          const s2 = simToScreen(ptEnd.x, ptEnd.y);
-          ctx.moveTo(s1.x, s1.y);
-          ctx.lineTo(s2.x, s2.y);
-          ctx.stroke();
-        }
-        ctx.restore();
-      }
-
-      // 3. 繪製路口引導線輔助圖形 或 Raw Points 的 Anchor 與手柄輔助線
-      if (simIsIntersectionMode) {
-        const hasP0 = simP0X !== null && simP0Y !== null;
-        const hasP3 = simP3X !== null && simP3Y !== null;
-
-        // 當前正在拖曳定位起點/終點角度時，繪製滑鼠虛線引導線
-        if (isDraggingRoadA && hasP0) {
-          const sP0 = simToScreen(simP0X, simP0Y);
-          const sMouse = worldToScreen(mouseWorld.x, mouseWorld.y);
-          ctx.save();
-          ctx.strokeStyle = "rgba(99, 102, 241, 0.75)";
-          ctx.lineWidth = 1.5;
-          ctx.setLineDash([4, 4]);
-          ctx.beginPath();
-          ctx.moveTo(sP0.x, sP0.y);
-          ctx.lineTo(sMouse.x, sMouse.y);
-          ctx.stroke();
-          ctx.restore();
-        }
-        if (isDraggingRoadB && hasP3) {
-          const sP3 = simToScreen(simP3X, simP3Y);
-          const sMouse = worldToScreen(mouseWorld.x, mouseWorld.y);
-          ctx.save();
-          ctx.strokeStyle = "rgba(236, 72, 153, 0.75)";
-          ctx.lineWidth = 1.5;
-          ctx.setLineDash([4, 4]);
-          ctx.beginPath();
-          ctx.moveTo(sP3.x, sP3.y);
-          ctx.lineTo(sMouse.x, sMouse.y);
-          ctx.stroke();
-          ctx.restore();
-        }
-
-        // B. 繪製起終點方向向量箭頭的輔助函數與呼叫
-        const drawArrow = (from: Point, angle_deg: number, label: string, color: string) => {
-          const rad = (angle_deg * Math.PI) / 180;
-          const len = 40;
-          const to = {
-            x: from.x + len * Math.cos(rad),
-            y: from.y + len * Math.sin(rad),
-          };
-          const sFrom = simToScreen(from.x, from.y);
-          const sTo = simToScreen(to.x, to.y);
-
-          ctx.strokeStyle = color;
-          ctx.lineWidth = 2.5;
-          ctx.beginPath();
-          ctx.moveTo(sFrom.x, sFrom.y);
-          ctx.lineTo(sTo.x, sTo.y);
-          ctx.stroke();
-
-          // 箭頭
-          const arrowSize = 7;
-          ctx.fillStyle = color;
-          ctx.beginPath();
-          ctx.moveTo(sTo.x, sTo.y);
-          
-          const toRad = Math.atan2(sTo.y - sFrom.y, sTo.x - sFrom.x);
-          ctx.lineTo(
-            sTo.x - arrowSize * Math.cos(toRad - Math.PI / 6),
-            sTo.y - arrowSize * Math.sin(toRad - Math.PI / 6)
-          );
-          ctx.lineTo(
-            sTo.x - arrowSize * Math.cos(toRad + Math.PI / 6),
-            sTo.y - arrowSize * Math.sin(toRad + Math.PI / 6)
-          );
-          ctx.closePath();
-          ctx.fill();
-
-          // 標籤
-          ctx.font = "bold 11px sans-serif";
-          ctx.fillStyle = color;
-          ctx.fillText(label, sFrom.x - 12, sFrom.y - 12);
-        };
-
-        if (hasP0) {
-          ctx.save();
-          drawArrow({ x: simP0X, y: simP0Y }, simP0Angle, "P0 起點", "rgb(99, 102, 241)");
-          ctx.restore();
-        }
-        if (hasP3) {
-          ctx.save();
-          drawArrow({ x: simP3X, y: simP3Y }, simP3Angle, "P3 終點", "rgb(236, 72, 153)");
-          ctx.restore();
-        }
-
-        if (simShowIntersectionHelpers && hasP0 && hasP3) {
-          const p0 = { x: simP0X, y: simP0Y };
-          const p3 = { x: simP3X, y: simP3Y };
-          const { I, p1, p2, I1, I2, I1_base, I2_base } = calculateIntersectionCurve(
-            p0,
-            simP0Angle,
-            p3,
-            simP3Angle,
-            simP1RatioPercent / 100,
-            simP2RatioPercent / 100,
-            simEnableOutswing,
-            scale,
-            simI1RatioPercent,
-            simI1OffsetDistance,
-            simI2RatioPercent,
-            simI2OffsetDistance,
-            simStartExtensionM,
-            simEndExtensionM
-          );
-
-          ctx.save();
-          // A. 繪製虛擬交角中心點輔助線
-          ctx.strokeStyle = "rgba(239, 68, 68, 0.4)";
-          ctx.lineWidth = 1.5;
-          ctx.setLineDash([5, 4]);
-
-          const sP0 = simToScreen(p0.x, p0.y);
-          const sP3 = simToScreen(p3.x, p3.y);
-          const sI = simToScreen(I.x, I.y);
-
-          ctx.beginPath();
-          ctx.moveTo(sP0.x, sP0.y);
-          ctx.lineTo(sI.x, sI.y);
-          ctx.stroke();
-
-          ctx.beginPath();
-          ctx.moveTo(sP3.x, sP3.y);
-          ctx.lineTo(sI.x, sI.y);
-          ctx.stroke();
-          ctx.setLineDash([]);
-
-          // 繪製虛擬交點 I 標記
-          ctx.fillStyle = "rgb(239, 68, 68)";
-          ctx.beginPath();
-          ctx.arc(sI.x, sI.y, 6, 0, 2 * Math.PI);
-          ctx.fill();
-          ctx.strokeStyle = "white";
-          ctx.lineWidth = 1.5;
-          ctx.stroke();
-          ctx.fillStyle = "rgba(255, 255, 255, 0.95)";
-          ctx.font = "bold 10px sans-serif";
-          ctx.fillText("虛擬交點 I", sI.x + 10, sI.y + 4);
-
-          // C. 繪製 P1, P2 控制點
-          const drawControlPt = (pt: Point, name: string, color: string) => {
-            const sPt = simToScreen(pt.x, pt.y);
-            ctx.fillStyle = color;
-            ctx.beginPath();
-            ctx.arc(sPt.x, sPt.y, 6, 0, 2 * Math.PI);
-            ctx.fill();
-            ctx.strokeStyle = "white";
-            ctx.lineWidth = 1.5;
-            ctx.stroke();
-            ctx.fillStyle = "rgba(255, 255, 255, 0.9)";
-            ctx.font = "bold 9px monospace";
-            ctx.fillText(name, sPt.x + 8, sPt.y + 3);
-          };
-
-          drawControlPt(p1, `P1 (${simP1RatioPercent}%)`, "rgb(99, 102, 241)");
-          drawControlPt(p2, `P2 (${simP2RatioPercent}%)`, "rgb(236, 72, 153)");
-
-          // D. Outswing 偏移控制點
-          if (simEnableOutswing) {
-            const sI1Base = simToScreen(I1_base.x, I1_base.y);
-            const sI1 = simToScreen(I1.x, I1.y);
-            const sI2Base = simToScreen(I2_base.x, I2_base.y);
-            const sI2 = simToScreen(I2.x, I2.y);
-
-            ctx.strokeStyle = "rgba(16, 185, 129, 0.6)"; // emerald
-            ctx.lineWidth = 1.25;
-            ctx.setLineDash([3, 3]);
-
-            ctx.beginPath();
-            ctx.moveTo(sI1Base.x, sI1Base.y);
-            ctx.lineTo(sI1.x, sI1.y);
-            ctx.stroke();
-
-            ctx.strokeStyle = "rgba(236, 72, 153, 0.6)"; // pink
-            ctx.beginPath();
-            ctx.moveTo(sI2Base.x, sI2Base.y);
-            ctx.lineTo(sI2.x, sI2.y);
-            ctx.stroke();
-
-            ctx.setLineDash([]);
-
-            // 繪製投射點
-            ctx.fillStyle = "rgba(148, 163, 184, 0.8)";
-            ctx.beginPath();
-            ctx.arc(sI1Base.x, sI1Base.y, 4, 0, 2 * Math.PI);
-            ctx.arc(sI2Base.x, sI2Base.y, 4, 0, 2 * Math.PI);
-            ctx.fill();
-
-            // 繪製 I1/I2 控制點
-            ctx.fillStyle = "rgb(16, 185, 129)"; // emerald
-            ctx.beginPath();
-            ctx.arc(sI1.x, sI1.y, 6, 0, 2 * Math.PI);
-            ctx.fill();
-            ctx.strokeStyle = "white";
-            ctx.lineWidth = 1.5;
-            ctx.stroke();
-            ctx.fillStyle = "rgba(255, 255, 255, 0.9)";
-            ctx.font = "bold 9px monospace";
-            ctx.fillText(`I1 (偏移點)`, sI1.x + 8, sI1.y + 3);
-
-            ctx.fillStyle = "rgb(236, 72, 153)"; // pink
-            ctx.beginPath();
-            ctx.arc(sI2.x, sI2.y, 6, 0, 2 * Math.PI);
-            ctx.fill();
-            ctx.stroke();
-            ctx.fillStyle = "rgba(255, 255, 255, 0.9)";
-            ctx.fillText(`I2 (偏移點)`, sI2.x + 8, sI2.y + 3);
-          }
-
-          ctx.restore();
-        }
-      } else {
-        // 3. 繪製 Raw Points 的 Anchor 與手柄輔助線
-        if (simRawPoints.length > 1) {
-          ctx.save();
-          ctx.strokeStyle = 'rgba(148, 163, 184, 0.35)';
-          ctx.lineWidth = 1.5;
-          ctx.setLineDash([5, 5]);
-          ctx.beginPath();
-          const sStart = simToScreen(simRawPoints[0].x, simRawPoints[0].y);
-          ctx.moveTo(sStart.x, sStart.y);
-          for (let i = 1; i < simRawPoints.length; i++) {
-            const sNext = simToScreen(simRawPoints[i].x, simRawPoints[i].y);
-            ctx.lineTo(sNext.x, sNext.y);
-          }
-          ctx.stroke();
-          ctx.restore();
-        }
-
-        // 車流軌跡模擬的鋼筆與點擊繪圖預覽線
-        if (simRawPoints.length > 0 && (simDrawMode === 'smartpath' || simDrawMode === 'click')) {
-          ctx.save();
-          ctx.strokeStyle = 'rgba(99, 102, 241, 0.6)'; // 預覽線顏色 (indigo)
-          ctx.lineWidth = 1.5;
-          ctx.setLineDash([3, 3]);
-
-          const lastPt = simRawPoints[simRawPoints.length - 1];
-          const sStart = simToScreen(lastPt.x, lastPt.y);
-          const sEnd = simToScreen(mouseWorld.x * simConfig.scale, mouseWorld.y * simConfig.scale);
-
-          // 如果是 smartpath 並且最後一個點有 handleOut，則繪製貝茲曲線預覽
-          if (simDrawMode === 'smartpath' && lastPt.handleOut && (lastPt.handleOut.x !== 0 || lastPt.handleOut.y !== 0)) {
-            const A = { x: lastPt.x, y: lastPt.y };
-            const B = { x: lastPt.x + lastPt.handleOut.x, y: lastPt.y + lastPt.handleOut.y };
-            // 下一個點（滑鼠點）尚未決定手柄，所以 C 和 D 都重合在滑鼠點上
-            const C = { x: mouseWorld.x * simConfig.scale, y: mouseWorld.y * simConfig.scale };
-            const D = C;
-            
-            // 將 A, B, C, D 縮放到物理座標以進行 sampleCubicBezier
-            const scale = simConfig.scale;
-            const bPts = sampleCubicBezier(
-              { x: A.x / scale, y: A.y / scale },
-              { x: B.x / scale, y: B.y / scale },
-              { x: C.x / scale, y: C.y / scale },
-              { x: D.x / scale, y: D.y / scale },
-              20
-            );
-
-            ctx.beginPath();
-            bPts.forEach((pt, idx) => {
-              const s = simToScreen(pt.x * scale, pt.y * scale);
-              if (idx === 0) ctx.moveTo(s.x, s.y);
-              else ctx.lineTo(s.x, s.y);
-            });
-            ctx.stroke();
-          } else {
-            // 普通折線預覽
-            ctx.beginPath();
-            ctx.moveTo(sStart.x, sStart.y);
-            ctx.lineTo(sEnd.x, sEnd.y);
-            ctx.stroke();
-          }
-          ctx.restore();
-        }
-
-        simRawPoints.forEach((wp, idx) => {
-          const sAnchor = simToScreen(wp.x, wp.y);
-
-          ctx.save();
-          ctx.strokeStyle = 'rgba(168, 85, 247, 0.45)'; // 紫色控制柄輔助線
-          ctx.lineWidth = 1;
-
-          if (wp.handleIn && (wp.handleIn.x !== 0 || wp.handleIn.y !== 0)) {
-            const sIn = simToScreen(wp.x + wp.handleIn.x, wp.y + wp.handleIn.y);
-            ctx.beginPath();
-            ctx.moveTo(sAnchor.x, sAnchor.y);
-            ctx.lineTo(sIn.x, sIn.y);
-            ctx.stroke();
-
-            ctx.fillStyle = '#a855f7';
-            ctx.beginPath();
-            ctx.arc(sIn.x, sIn.y, 3, 0, 2 * Math.PI);
-            ctx.fill();
-          }
-
-          if (wp.handleOut && (wp.handleOut.x !== 0 || wp.handleOut.y !== 0)) {
-            const sOut = simToScreen(wp.x + wp.handleOut.x, wp.y + wp.handleOut.y);
-            ctx.beginPath();
-            ctx.moveTo(sAnchor.x, sAnchor.y);
-            ctx.lineTo(sOut.x, sOut.y);
-            ctx.stroke();
-
-            ctx.fillStyle = '#a855f7';
-            ctx.beginPath();
-            ctx.arc(sOut.x, sOut.y, 3, 0, 2 * Math.PI);
-            ctx.fill();
-          }
-
-          // Anchor 點繪製
-          const isDraggingThis = simDraggingWaypointIndex === idx;
-          ctx.fillStyle = isDraggingThis ? '#10b981' : '#6366f1';
-          ctx.strokeStyle = '#ffffff';
-          ctx.lineWidth = 1.5;
-          ctx.beginPath();
-          ctx.arc(sAnchor.x, sAnchor.y, 5, 0, 2 * Math.PI);
-          ctx.fill();
-          ctx.stroke();
-          ctx.restore();
-        });
-      }
-
-    // 4. 繪製目前播放中軌跡的包絡線 (Swept Path)
-      if (simShowSweptPath && simTrajectory && simTrajectory.length > 0) {
-        ctx.save();
-        const currentRgb = isCurrentlyColliding ? '239, 68, 68' : parseColorToRgbStr(simThemeColor);
-        const stepsToRender = simTrajectory.slice(0, simCurrentStepIndex + 1);
-
-        stepsToRender.forEach((state: any) => {
-          // Tractor
-          ctx.fillStyle = 'rgba(' + currentRgb + ', ' + simSweptOpacity + ')';
-          ctx.beginPath();
-          const sFl = simToScreen(state.corners.fl.x, state.corners.fl.y);
-          const sFr = simToScreen(state.corners.fr.x, state.corners.fr.y);
-          const sRr = simToScreen(state.corners.rr.x, state.corners.rr.y);
-          const sRl = simToScreen(state.corners.rl.x, state.corners.rl.y);
-
-          ctx.moveTo(sFl.x, sFl.y);
-          ctx.lineTo(sFr.x, sFr.y);
-          ctx.lineTo(sRr.x, sRr.y);
-          ctx.lineTo(sRl.x, sRl.y);
-          ctx.closePath();
-          ctx.fill();
-
-          // Trailer
-          if (state.trailerCorners) {
-            ctx.fillStyle = 'rgba(' + currentRgb + ', ' + simSweptOpacity + ')';
-            ctx.beginPath();
-            const stFl = simToScreen(state.trailerCorners.fl.x, state.trailerCorners.fl.y);
-            const stFr = simToScreen(state.trailerCorners.fr.x, state.trailerCorners.fr.y);
-            const stRr = simToScreen(state.trailerCorners.rr.x, state.trailerCorners.rr.y);
-            const stRl = simToScreen(state.trailerCorners.rl.x, state.trailerCorners.rl.y);
-
-            ctx.moveTo(stFl.x, stFl.y);
-            ctx.lineTo(stFr.x, stFr.y);
-            ctx.lineTo(stRr.x, stRr.y);
-            ctx.lineTo(stRl.x, stRl.y);
-            ctx.closePath();
-            ctx.fill();
-          }
-        });
-        ctx.restore();
-      }
-
-      // 5. 繪製 Corner 輪胎/角點軌跡線 (Corner Tracks)
-      if (simShowCornerTracks && simTrajectory && simTrajectory.length > 1) {
-        ctx.save();
-        ctx.lineWidth = 1;
-        ctx.setLineDash([2, 3]);
-
-        const stepsToTrack = simTrajectory.slice(0, simCurrentStepIndex + 1);
-
-        // fl
-        ctx.strokeStyle = isCurrentlyColliding ? 'rgba(239, 68, 68, 0.5)' : 'rgba(99, 102, 241, 0.4)';
-        ctx.beginPath();
-        stepsToTrack.forEach((state: any, idx: number) => {
-          const pt = simToScreen(state.corners.fl.x, state.corners.fl.y);
-          if (idx === 0) ctx.moveTo(pt.x, pt.y);
-          else ctx.lineTo(pt.x, pt.y);
-        });
-        ctx.stroke();
-
-        // fr
-        ctx.strokeStyle = isCurrentlyColliding ? 'rgba(239, 68, 68, 0.5)' : 'rgba(99, 102, 241, 0.4)';
-        ctx.beginPath();
-        stepsToTrack.forEach((state: any, idx: number) => {
-          const pt = simToScreen(state.corners.fr.x, state.corners.fr.y);
-          if (idx === 0) ctx.moveTo(pt.x, pt.y);
-          else ctx.lineTo(pt.x, pt.y);
-        });
-        ctx.stroke();
-
-        // rl / rr
-        ctx.strokeStyle = isCurrentlyColliding ? 'rgba(239, 68, 68, 0.4)' : 'rgba(99, 102, 241, 0.3)';
-        ctx.beginPath();
-        stepsToTrack.forEach((state: any, idx: number) => {
-          const pt = simToScreen(state.corners.rl.x, state.corners.rl.y);
-          if (idx === 0) ctx.moveTo(pt.x, pt.y);
-          else ctx.lineTo(pt.x, pt.y);
-        });
-        ctx.stroke();
-
-        ctx.beginPath();
-        stepsToTrack.forEach((state: any, idx: number) => {
-          const pt = simToScreen(state.corners.rr.x, state.corners.rr.y);
-          if (idx === 0) ctx.moveTo(pt.x, pt.y);
-          else ctx.lineTo(pt.x, pt.y);
-        });
-        ctx.stroke();
-
-        // Trailer corner tracks
-        if (simConfig.enableTrailer) {
-          ctx.strokeStyle = isCurrentlyColliding ? 'rgba(239, 68, 68, 0.4)' : 'rgba(245, 158, 11, 0.3)';
-          ctx.beginPath();
-          stepsToTrack.forEach((state: any, idx: number) => {
-            if (state.trailerCorners) {
-              const pt = simToScreen(state.trailerCorners.rl.x, state.trailerCorners.rl.y);
-              if (idx === 0) ctx.moveTo(pt.x, pt.y);
-              else ctx.lineTo(pt.x, pt.y);
-            }
-          });
-          ctx.stroke();
-
-          ctx.beginPath();
-          stepsToTrack.forEach((state: any, idx: number) => {
-            if (state.trailerCorners) {
-              const pt = simToScreen(state.trailerCorners.rr.x, state.trailerCorners.rr.y);
-              if (idx === 0) ctx.moveTo(pt.x, pt.y);
-              else ctx.lineTo(pt.x, pt.y);
-            }
-          });
-          ctx.stroke();
-        }
-        ctx.restore();
-      }
-
-      // 6. 繪製前後軸中心軌跡 (Axle Tracks)
-      if (simShowAxleTracks && simTrajectory && simTrajectory.length > 1) {
-        ctx.save();
-        ctx.lineWidth = 1.2;
-        const stepsToTrack = simTrajectory.slice(0, simCurrentStepIndex + 1);
-
-        // Rear Axle (The standard followed curve path)
-        ctx.strokeStyle = '#ef4444'; // 紅色後軸中心線
-        ctx.beginPath();
-        stepsToTrack.forEach((state: any, idx: number) => {
-          const pt = simToScreen(state.rearAxle.x, state.rearAxle.y);
-          if (idx === 0) ctx.moveTo(pt.x, pt.y);
-          else ctx.lineTo(pt.x, pt.y);
-        });
-        ctx.stroke();
-
-        // Front Axle
-        ctx.strokeStyle = isCurrentlyColliding ? '#ef4444' : '#3b82f6'; // 藍色前軸中心線
-        ctx.beginPath();
-        stepsToTrack.forEach((state: any, idx: number) => {
-          const pt = simToScreen(state.frontAxle.x, state.frontAxle.y);
-          if (idx === 0) ctx.moveTo(pt.x, pt.y);
-          else ctx.lineTo(pt.x, pt.y);
-        });
-        ctx.stroke();
-
-        // Trailer Rear Axle
-        if (simConfig.enableTrailer) {
-          ctx.strokeStyle = isCurrentlyColliding ? '#ef4444' : '#f59e0b'; // 橘色拖車後軸線
-          ctx.beginPath();
-          stepsToTrack.forEach((state: any, idx: number) => {
-            if (state.trailerRearAxle) {
-              const pt = simToScreen(state.trailerRearAxle.x, state.trailerRearAxle.y);
-              if (idx === 0) ctx.moveTo(pt.x, pt.y);
-              else ctx.lineTo(pt.x, pt.y);
-            }
-          });
-          ctx.stroke();
-        }
-        ctx.restore();
-      }
-
-      // 6.5 繪製連續骨架投影 (Body Wireframes)
-      if (simShowBodyWireframe && simTrajectory && simTrajectory.length > 0) {
-        ctx.save();
-        ctx.strokeStyle = isCurrentlyColliding 
-          ? '#ef4444' 
-          : '#ffffff';
-        ctx.lineWidth = 1.0;
-        
-        const interval = 18;
-        // 繪製從第 0 步到當前播放步驟之間的線框
-        for (let i = 0; i <= simCurrentStepIndex; i += interval) {
-          const state = simTrajectory[i];
-          if (!state) continue;
-
-          // 主車線框
-          const sFl = simToScreen(state.corners.fl.x, state.corners.fl.y);
-          const sFr = simToScreen(state.corners.fr.x, state.corners.fr.y);
-          const sRr = simToScreen(state.corners.rr.x, state.corners.rr.y);
-          const sRl = simToScreen(state.corners.rl.x, state.corners.rl.y);
-
-          ctx.beginPath();
-          ctx.moveTo(sFl.x, sFl.y);
-          ctx.lineTo(sFr.x, sFr.y);
-          ctx.lineTo(sRr.x, sRr.y);
-          ctx.lineTo(sRl.x, sRl.y);
-          ctx.closePath();
-          ctx.stroke();
-
-          // 拖車線框
-          if (state.trailerCorners) {
-            const stFl = simToScreen(state.trailerCorners.fl.x, state.trailerCorners.fl.y);
-            const stFr = simToScreen(state.trailerCorners.fr.x, state.trailerCorners.fr.y);
-            const stRr = simToScreen(state.trailerCorners.rr.x, state.trailerCorners.rr.y);
-            const stRl = simToScreen(state.trailerCorners.rl.x, state.trailerCorners.rl.y);
-
-            ctx.beginPath();
-            ctx.moveTo(stFl.x, stFl.y);
-            ctx.lineTo(stFr.x, stFr.y);
-            ctx.lineTo(stRr.x, stRr.y);
-            ctx.lineTo(stRl.x, stRl.y);
-            ctx.closePath();
-            ctx.stroke();
-          }
-        }
-        ctx.restore();
-      }
-
-      // 7. 繪製車體本體 (Active Vehicle Tractor & Trailer)
-      let stateToRender: any = null;
-      if (!isEditing) {
-        if (simTrajectory && simTrajectory.length > 0 && simCurrentStepIndex < simTrajectory.length) {
-          stateToRender = simTrajectory[simCurrentStepIndex];
-        } else if (simIsDraggingFirstVec && simFirstVecStart && simFirstVecEnd) {
-          const fx = simFirstVecStart.x;
-          const fy = simFirstVecStart.y;
-          const dx = simFirstVecEnd.x - fx;
-          const dy = simFirstVecEnd.y - fy;
-          const heading = Math.hypot(dx, dy) > 4 ? Math.atan2(dy, dx) : 0;
-
-          const L_px = simConfig.L * scale;
-          const rx = fx - L_px * Math.cos(heading);
-          const ry = fy - L_px * Math.sin(heading);
-
-          const corners = calculateCorners({ x: rx, y: ry }, heading, simConfig);
-          let trailerState = {};
-          if (simConfig.enableTrailer) {
-            const Lt_px = (simConfig.Lt ?? 7.5) * scale;
-            const trx = rx - Lt_px * Math.cos(heading);
-            const try_ = ry - Lt_px * Math.sin(heading);
-            const trailerCorners = calculateTrailerCorners({ x: trx, y: try_ }, heading, simConfig);
-            trailerState = {
-              trailerRearAxle: { x: trx, y: try_ },
-              trailerHeading: heading,
-              trailerCorners
-            };
-          }
-
-          stateToRender = {
-            frontAxle: { x: fx, y: fy },
-            rearAxle: { x: rx, y: ry },
-            heading: heading,
-            steering: 0,
-            corners,
-            ...trailerState
-          };
-        } else if (simRawPoints && simRawPoints.length === 1) {
-          const fx = simRawPoints[0].x;
-          const fy = simRawPoints[0].y;
-          const dx = simRawPoints[0].handleOut.x;
-          const dy = simRawPoints[0].handleOut.y;
-          const heading = Math.atan2(dy, dx);
-
-          const L_px = simConfig.L * scale;
-          const rx = fx - L_px * Math.cos(heading);
-          const ry = fy - L_px * Math.sin(heading);
-
-          const corners = calculateCorners({ x: rx, y: ry }, heading, simConfig);
-          let trailerState = {};
-          if (simConfig.enableTrailer) {
-            const Lt_px = (simConfig.Lt ?? 7.5) * scale;
-            const trx = rx - Lt_px * Math.cos(heading);
-            const try_ = ry - Lt_px * Math.sin(heading);
-            const trailerCorners = calculateTrailerCorners({ x: trx, y: try_ }, heading, simConfig);
-            trailerState = {
-              trailerRearAxle: { x: trx, y: try_ },
-              trailerHeading: heading,
-              trailerCorners
-            };
-          }
-
-          stateToRender = {
-            frontAxle: { x: fx, y: fy },
-            rearAxle: { x: rx, y: ry },
-            heading: heading,
-            steering: 0,
-            corners,
-            ...trailerState
-          };
-        }
-      }
-
-      if (stateToRender) {
-        ctx.save();
-        const state = stateToRender;
-
-        // Helper function to draw a wheel (黑色輪胎，帶有中線以反饋角度)
-        const drawWheel = (sCenter: Point, angleRad: number, isSteered: boolean) => {
-          ctx.save();
-          // 物理世界上輪寬 0.35m，長 0.9m。
-          const wWidth = 0.35 * viewport.zoom;
-          const wLength = 0.9 * viewport.zoom;
-          ctx.translate(sCenter.x, sCenter.y);
-          ctx.rotate(-angleRad);
-          
-          ctx.fillStyle = '#020617';
-          ctx.fillRect(-wLength / 2, -wWidth / 2, wLength, wWidth);
-          
-          ctx.strokeStyle = isSteered ? '#6366f1' : '#94a3b8';
-          ctx.lineWidth = 1.5;
-          ctx.beginPath();
-          ctx.moveTo(-wLength * 0.3, 0);
-          ctx.lineTo(wLength * 0.3, 0);
-          ctx.stroke();
-          ctx.restore();
-        };
-
-        // Tractor Corners mapped to screen
-        const sFl = simToScreen(state.corners.fl.x, state.corners.fl.y);
-        const sFr = simToScreen(state.corners.fr.x, state.corners.fr.y);
-        const sRr = simToScreen(state.corners.rr.x, state.corners.rr.y);
-        const sRl = simToScreen(state.corners.rl.x, state.corners.rl.y);
-
-        // A. Draw Tractor Body
-        ctx.fillStyle = 'rgba(30, 41, 59, 0.9)'; // Slate fill
-        ctx.strokeStyle = isCurrentlyColliding ? '#ef4444' : whiteColor; // Dynamic outline (主車車身邊框白色/暗色化)
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.moveTo(sFl.x, sFl.y);
-        ctx.lineTo(sFr.x, sFr.y);
-        ctx.lineTo(sRr.x, sRr.y);
-        ctx.lineTo(sRl.x, sRl.y);
-        ctx.closePath();
-        ctx.fill();
-        ctx.stroke();
-
-        // B. Draw Left & Right Wheels for Tractor
-        const bodyHeading = state.heading;
-        const cosH = Math.cos(bodyHeading);
-        const sinH = Math.sin(bodyHeading);
-        const orthoX = -sinH;
-        const orthoY = cosH;
-        // halfW (像素單位) ＝ (simConfig.W * scale) / 2
-        const halfW = (simConfig.W * scale) / 2;
-
-        const rearLeftWheelCenter = {
-          x: state.rearAxle.x + halfW * orthoX,
-          y: state.rearAxle.y + halfW * orthoY
-        };
-        const rearRightWheelCenter = {
-          x: state.rearAxle.x - halfW * orthoX,
-          y: state.rearAxle.y - halfW * orthoY
-        };
-        const frontLeftWheelCenter = {
-          x: state.frontAxle.x + halfW * orthoX,
-          y: state.frontAxle.y + halfW * orthoY
-        };
-        const frontRightWheelCenter = {
-          x: state.frontAxle.x - halfW * orthoX,
-          y: state.frontAxle.y - halfW * orthoY
-        };
-
-        // Draw rear axle wheels (非轉向輪)
-        drawWheel(simToScreen(rearLeftWheelCenter.x, rearLeftWheelCenter.y), bodyHeading, false);
-        drawWheel(simToScreen(rearRightWheelCenter.x, rearRightWheelCenter.y), bodyHeading, false);
-
-        // Draw front axle wheels (轉向輪，前輪轉向角＝bodyHeading + state.steering)
-        const frontSteeringAngle = bodyHeading + state.steering;
-        drawWheel(simToScreen(frontLeftWheelCenter.x, frontLeftWheelCenter.y), frontSteeringAngle, true);
-        drawWheel(simToScreen(frontRightWheelCenter.x, frontRightWheelCenter.y), frontSteeringAngle, true);
-
-        // C. Draw Trailer (if active)
-        if (state.trailerCorners) {
-          const stFl = simToScreen(state.trailerCorners.fl.x, state.trailerCorners.fl.y);
-          const stFr = simToScreen(state.trailerCorners.fr.x, state.trailerCorners.fr.y);
-          const stRr = simToScreen(state.trailerCorners.rr.x, state.trailerCorners.rr.y);
-          const stRl = simToScreen(state.trailerCorners.rl.x, state.trailerCorners.rl.y);
-
-          ctx.fillStyle = 'rgba(71, 85, 105, 0.9)'; // Slate-600 fill
-          ctx.strokeStyle = isCurrentlyColliding ? '#ef4444' : yellowColor; // Amber outline
-          ctx.lineWidth = 2;
-          ctx.beginPath();
-          ctx.moveTo(stFl.x, stFl.y);
-          ctx.lineTo(stFr.x, stFr.y);
-          ctx.lineTo(stRr.x, stRr.y);
-          ctx.lineTo(stRl.x, stRl.y);
-          ctx.closePath();
-          ctx.fill();
-          ctx.stroke();
-
-          // draw hitch connector line from rearAxle of tractor to front of trailer
-          const sTrailerFrontMid = {
-            x: (stFl.x + stFr.x) / 2,
-            y: (stFl.y + stFr.y) / 2
-          };
-          ctx.strokeStyle = isCurrentlyColliding ? '#ef4444' : yellowColor;
-          ctx.lineWidth = 1.5;
-          ctx.beginPath();
-          const sRearAxle = simToScreen(state.rearAxle.x, state.rearAxle.y);
-          ctx.moveTo(sRearAxle.x, sRearAxle.y);
-          ctx.lineTo(sTrailerFrontMid.x, sTrailerFrontMid.y);
-          ctx.stroke();
-
-          // Draw Trailer Wheels (Tandem double axles)
-          if (state.trailerRearAxle) {
-            const tHeading = state.trailerHeading ?? state.heading;
-            const cosTH = Math.cos(tHeading);
-            const sinTH = Math.sin(tHeading);
-            const tOrthoX = -sinTH;
-            const tOrthoY = cosTH;
-            const tHalfW = ((simConfig.Wt ?? 2.5) * scale) / 2;
-
-            // Rear Axle 1 wheels
-            const rx1 = state.trailerRearAxle.x;
-            const ry1 = state.trailerRearAxle.y;
-            const wl1 = { x: rx1 + tHalfW * tOrthoX, y: ry1 + tHalfW * tOrthoY };
-            const wr1 = { x: rx1 - tHalfW * tOrthoX, y: ry1 - tHalfW * tOrthoY };
-            drawWheel(simToScreen(wl1.x, wl1.y), tHeading, false);
-            drawWheel(simToScreen(wr1.x, wr1.y), tHeading, false);
-
-            // Rear Axle 2 wheels (Tandem axle spaced 1.1m back)
-            const tandemSpacing = 1.1 * scale;
-            const rx2 = rx1 - tandemSpacing * cosTH;
-            const ry2 = ry1 - tandemSpacing * sinTH;
-            const wl2 = { x: rx2 + tHalfW * tOrthoX, y: ry2 + tHalfW * tOrthoY };
-            const wr2 = { x: rx2 - tHalfW * tOrthoX, y: ry2 - tHalfW * tOrthoY };
-            drawWheel(simToScreen(wl2.x, wl2.y), tHeading, false);
-            drawWheel(simToScreen(wr2.x, wr2.y), tHeading, false);
-          }
-        }
-        ctx.restore();
-      }
-
-      if (zoom > 1.5) {
+    // 軌跡模擬模式：游標十字線（模擬圖形由 SimulationLayer 覆蓋層繪製）
+    if (appMode === 'simulation' && zoom > 1.5) {
       const mouseS = worldToScreen(mouseWorld.x, mouseWorld.y);
       ctx.strokeStyle = 'rgba(255, 255, 255, 0.12)';
-      
+      ctx.lineWidth = 1;
       ctx.beginPath();
       ctx.moveTo(0, mouseS.y); ctx.lineTo(canvas.width, mouseS.y);
       ctx.moveTo(mouseS.x, 0); ctx.lineTo(mouseS.x, canvas.height);
       ctx.stroke();
-
       ctx.fillStyle = '#a1a1aa';
       ctx.font = '9px monospace';
       ctx.fillText(`X: ${mouseWorld.x.toFixed(2)}m  Y: ${mouseWorld.y.toFixed(2)}m`, mouseS.x + 12, mouseS.y - 12);
     }
-  }
 
     // DRAW ACTIVE CAD GEOMETRIC SNAP DECORATION INDICATOR
     if (snapTarget) {
@@ -6941,25 +5222,6 @@ export default function CadCanvas({
       ctx.restore();
     }
 
-    // RENDER HELP TEXT DURING INTERSECTION P0/P3 POSITIONING
-    if (simIsIntersectionMode && simIntersectionPickState !== "none") {
-      const mouseS = worldToScreen(mouseWorld.x, mouseWorld.y);
-      ctx.save();
-      ctx.font = 'bold 13px sans-serif';
-      ctx.textAlign = 'center';
-      ctx.shadowColor = 'rgba(0, 0, 0, 0.8)';
-      ctx.shadowBlur = 4;
-      
-      if (simIntersectionPickState === "p0") {
-        ctx.fillStyle = 'rgb(99, 102, 241)';
-        ctx.fillText("✦ 請點擊並拖曳以定位起點 P0 的位置與朝向 ✦", mouseS.x, mouseS.y - 30);
-      } else if (simIntersectionPickState === "p3") {
-        ctx.fillStyle = 'rgb(236, 72, 153)';
-        ctx.fillText("✦ 請點擊並拖曳以定位終點 P3 的位置與朝向 ✦", mouseS.x, mouseS.y - 30);
-      }
-      ctx.restore();
-    }
-
     // DRAW AUTOCAD-STYLE SELECTION MARQUEE OVERLAY (SCREEN-SPACE OVERLAY)
     if (isMarqueeDragging && marqueeStartPos && marqueeEndPos) {
       ctx.save();
@@ -6997,15 +5259,7 @@ export default function CadCanvas({
     spacePressed, R2, designVehicle, snapToGrid, snapToEndpoint, snapToMidpoint, scaleStartPt, scaleEndPt, isScalingDrag, 
     bgImage, scalingStartScreen, scalingEndScreen, showGrid, minorGridInterval, majorGridInterval, isMarqueeDragging, 
     marqueeStartPos, marqueeEndPos, selectedElementIds, yieldLineDecisionState,
-    
-    // Simulation Modes dependencies to drive fluid rendering
-    appMode, simConfig, simControllerMode, simRawPoints, simDrawMode, simIsPlaying, simCurrentStepIndex, simTrajectory, 
-    simInterpolatedPath, simLockedPaths, simThemeColor, simShowSweptPath, simShowCornerTracks, simShowAxleTracks, 
-    simShowBodyWireframe, simSweptOpacity, simBodyOpacity, simDraggingWaypointIndex, simDraggingHandleType, simIsDraggingFirstVec, 
-    simFirstVecStart, simFirstVecEnd, simIsIntersectionMode, simP0X, simP0Y, simP0Angle, simP3X, simP3Y, simP3Angle, 
-    simP1RatioPercent, simP2RatioPercent, simIntersectionPickState, simShowIntersectionHelpers, simEnableOutswing, 
-    simI1RatioPercent, simI1OffsetDistance, simI2RatioPercent, simI2OffsetDistance, simStartExtensionM, simEndExtensionM, 
-    simIsCalibrating, canvasBackground,
+    appMode, canvasBackground,
   ]);
 
   // Curvature check for floating top error warnings
@@ -7014,7 +5268,7 @@ export default function CadCanvas({
   const activeVehicle = (selectedElement && selectedElement.type === 'smart_path') 
     ? ((selectedElement as any).designVehicle || designVehicle)
     : designVehicle;
-  const limitRadius = activeVehicle === 'passenger' ? 4.5 : activeVehicle === 'semi_trailer' ? 12.5 : 13.5;
+  const limitRadius = cadMinPathRadius(activeVehicle);
 
   if (isLineOrPathTool(activeTool) && spPoints.length > 1) {
     for (let j = 0; j < spPoints.length - 1; j++) {
@@ -7116,129 +5370,7 @@ export default function CadCanvas({
     return edges;
   };
 
-  if (appMode === 'simulation') {
-    const isCurrentlyDragging = 
-      activeDragPoint !== 'none' || 
-      isDraggingRoadA || 
-      isDraggingRoadB || 
-      (simDraggingWaypointIndex !== null && simDraggingWaypointIndex !== undefined) || 
-      isDraggingWholePath;
-
-    if (!isCurrentlyDragging && simTrajectory && simTrajectory.length > 0) {
-      const stepsToTest = simTrajectory.slice(0, simCurrentStepIndex + 1);
-      const scale = simConfig.scale;
-
-      // 1. Red warnings - BuildingLine
-      const buildingLines = elements.filter(el => el.type === 'BuildingLine');
-      let hitRed = false;
-
-      for (const stepState of stepsToTest) {
-        const tVerts = [
-          { x: stepState.corners.fl.x / scale, y: stepState.corners.fl.y / scale },
-          { x: stepState.corners.fr.x / scale, y: stepState.corners.fr.y / scale },
-          { x: stepState.corners.rr.x / scale, y: stepState.corners.rr.y / scale },
-          { x: stepState.corners.rl.x / scale, y: stepState.corners.rl.y / scale }
-        ];
-        const tEdges = [
-          { p1: tVerts[0], p2: tVerts[1] },
-          { p1: tVerts[1], p2: tVerts[2] },
-          { p1: tVerts[2], p2: tVerts[3] },
-          { p1: tVerts[3], p2: tVerts[0] }
-        ];
-
-        const trVerts = stepState.trailerCorners ? [
-          { x: stepState.trailerCorners.fl.x / scale, y: stepState.trailerCorners.fl.y / scale },
-          { x: stepState.trailerCorners.fr.x / scale, y: stepState.trailerCorners.fr.y / scale },
-          { x: stepState.trailerCorners.rr.x / scale, y: stepState.trailerCorners.rr.y / scale },
-          { x: stepState.trailerCorners.rl.x / scale, y: stepState.trailerCorners.rl.y / scale }
-        ] : [];
-        const trEdges = stepState.trailerCorners ? [
-          { p1: trVerts[0], p2: trVerts[1] },
-          { p1: trVerts[1], p2: trVerts[2] },
-          { p1: trVerts[2], p2: trVerts[3] },
-          { p1: trVerts[3], p2: trVerts[0] }
-        ] : [];
-
-        const allVehicleEdges = [...tEdges, ...trEdges];
-
-        for (const bl of buildingLines) {
-          const blEdges = getElementEdges(bl);
-          for (const ve of allVehicleEdges) {
-            for (const ble of blEdges) {
-              if (lineSegmentsIntersect(ve.p1, ve.p2, ble.p1, ble.p2)) {
-                hitRed = true;
-                break;
-              }
-            }
-            if (hitRed) break;
-          }
-          if (hitRed) break;
-        }
-        if (hitRed) {
-          hasHardCollision = true;
-          break;
-        }
-      }
-
-      // 2. Yellow warnings - Lane Lines
-      if (!hasHardCollision) {
-        const laneTypes = [
-          'yellow_double', 'white_double', 'white_solid', 'white_dashed', 
-          'yellow_dashed', 'reversible_lane', 'crossing_dashed', 'stop_line', 'red_solid', 'yellow_solid'
-        ];
-        const laneElements = elements.filter(el => laneTypes.includes(el.type));
-        let hitYellow = false;
-
-        for (const stepState of stepsToTest) {
-          const tVerts = [
-            { x: stepState.corners.fl.x / scale, y: stepState.corners.fl.y / scale },
-            { x: stepState.corners.fr.x / scale, y: stepState.corners.fr.y / scale },
-            { x: stepState.corners.rr.x / scale, y: stepState.corners.rr.y / scale },
-            { x: stepState.corners.rl.x / scale, y: stepState.corners.rl.y / scale }
-          ];
-          const tEdges = [
-            { p1: tVerts[0], p2: tVerts[1] },
-            { p1: tVerts[1], p2: tVerts[2] },
-            { p1: tVerts[2], p2: tVerts[3] },
-            { p1: tVerts[3], p2: tVerts[0] }
-          ];
-
-          const trVerts = stepState.trailerCorners ? [
-            { x: stepState.trailerCorners.fl.x / scale, y: stepState.trailerCorners.fl.y / scale },
-            { x: stepState.trailerCorners.fr.x / scale, y: stepState.trailerCorners.fr.y / scale },
-            { x: stepState.trailerCorners.rr.x / scale, y: stepState.trailerCorners.rr.y / scale },
-            { x: stepState.trailerCorners.rl.x / scale, y: stepState.trailerCorners.rl.y / scale }
-          ] : [];
-          const trEdges = stepState.trailerCorners ? [
-            { p1: trVerts[0], p2: trVerts[1] },
-            { p1: trVerts[1], p2: trVerts[2] },
-            { p1: trVerts[2], p2: trVerts[3] },
-            { p1: trVerts[3], p2: trVerts[0] }
-          ] : [];
-
-          const allVehicleEdges = [...tEdges, ...trEdges];
-
-          for (const le of laneElements) {
-            const leEdges = getElementEdges(le);
-            for (const ve of allVehicleEdges) {
-              for (const lee of leEdges) {
-                if (lineSegmentsIntersect(ve.p1, ve.p2, lee.p1, lee.p2)) {
-                  hitYellow = true;
-                  break;
-                }
-              }
-              if (hitYellow) break;
-            }
-            if (hitYellow) break;
-          }
-          if (hitYellow) {
-            hasSoftCollision = true;
-            break;
-          }
-        }
-      }
-    }
-  } else {
+  {
     if (cadAuditPts.length >= 2) {
       const swept = generateVehicleSweptPath(cadAuditPts, designVehicle);
       const allQuads = [...swept.tractorEnvelopes, ...(swept.trailerEnvelopes || [])];
@@ -7303,17 +5435,7 @@ export default function CadCanvas({
     if (isPanning) return 'grabbing';
     if (spacePressed) return 'grab';
     
-    if (appMode === 'simulation') {
-      if (simDrawMode === 'select') return 'crosshair';
-      
-      const penSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
-        <path d="M0 0 L14 4 L10 8 L18 16 L14 20 L6 12 L2 14 Z" fill="rgba(15,23,42,0.95)" stroke="white" stroke-width="1.5" stroke-linejoin="round"/>
-        <circle cx="6" cy="6" r="1.5" fill="white"/>
-        <line x1="0" y1="0" x2="5" y2="5" stroke="white" stroke-width="1.5"/>
-      </svg>`;
-      const escaped = encodeURIComponent(penSvg);
-      return `url("data:image/svg+xml;utf8,${escaped}") 0 0, auto`;
-    }
+    if (appMode === 'simulation') return simInput.cursor();
 
     if (activeTool === 'select') return 'crosshair';
 
@@ -7342,7 +5464,15 @@ export default function CadCanvas({
         onDoubleClick={handleDoubleClick}
         onWheel={handleWheel}
         onContextMenu={(e) => e.preventDefault()}
-        className="w-full h-full block"
+        className="w-full h-full block touch-none"
+      />
+
+      {/* 軌跡模擬覆蓋層（不攔截滑鼠；CAD 模式下可作為唯讀參考圖層） */}
+      <SimulationLayer
+        viewport={viewport}
+        width={canvasRef.current?.width ?? 0}
+        height={canvasRef.current?.height ?? 0}
+        mode={appMode === 'simulation' ? 'sim' : 'cad'}
       />
 
       {/* Real-time Engineering CAD HUD Collision Alerts Overlay */}
@@ -7419,38 +5549,9 @@ export default function CadCanvas({
       )}
 
       {/* Floating Instructions Banner */}
-      {((appMode === 'cad' && activeTool !== 'select') || (appMode === 'simulation' && (simDrawMode !== 'select' || simIsIntersectionMode))) && (() => {
+      {((appMode === 'cad' && activeTool !== 'select') || (appMode === 'simulation' && !!simInput.hint())) && (() => {
         const getToolInstruction = (tool: string, spCount: number, draftCount: number) => {
-          if (appMode === 'simulation') {
-            if (simIsIntersectionMode) {
-              return {
-                name: '軌跡模擬 - 路口模式',
-                desc: '點擊兩個不同的車道線以產生路口連接軌跡。'
-              };
-            }
-            switch (simDrawMode) {
-              case 'smartpath':
-                return {
-                  name: '軌跡模擬 - 鋼筆模式',
-                  desc: '左鍵點擊畫布以增加節點，按住拖曳調整切線。按 Enter 或鍵盤 v 鍵完成繪製。'
-                };
-              case 'click':
-                return {
-                  name: '軌跡模擬 - 點選模式',
-                  desc: '在畫布上依序點擊以生成軌跡節點。按 Enter 或鍵盤 v 鍵完成繪製。'
-                };
-              case 'drag':
-                return {
-                  name: '軌跡模擬 - 筆刷模式',
-                  desc: '按住滑鼠左鍵並在畫布上拖曳以直接繪製軌跡。放開滑鼠左鍵即完成繪製。'
-                };
-              default:
-                return {
-                  name: '軌跡模擬 - 軌跡繪製',
-                  desc: '在畫布上點擊或拖曳以繪製模擬軌跡。'
-                };
-            }
-          }
+          if (appMode === 'simulation') return simInput.hint()!;
           const pen = `已放置 ${spCount} 個節點。點擊新增節點、按住拖曳可彎曲；Shift 鎖定水平/垂直。Enter、雙擊或 Esc 完成。`;
           const region = `已放置 ${spCount} 個節點。沿邊界依序點擊，Enter、雙擊或點回起點即自動閉合。`;
           const name = MARKING_NAMES[tool] || '繪圖工具';

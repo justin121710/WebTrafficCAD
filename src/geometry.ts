@@ -1,4 +1,9 @@
 import { Point2D, ThreeCenterCurveElement, IslandElement, CadElement, CrosswalkElement } from './types';
+import { CadDesignVehicle, cadVehicle } from './simulation/vehicles';
+import { resample } from './simulation/pathBuilder';
+import { simulate } from './simulation/kinematics';
+import { bodyOutline, trailerOutlines } from './simulation/analysis';
+import { DEFAULT_DRIVE } from './simulation/model';
 import { arrowData } from './arrowData';
 
 export function getRoadArrowOutlinePoints(el: { p: Point2D; arrowType: string; length: number; angle: number }): Point2D[] {
@@ -1173,167 +1178,53 @@ export interface SweptPathResult {
   rightRibbon: Point2D[]; 
 }
 
+/**
+ * CAD 引導線的車輛掃掠範圍：與軌跡模擬共用車輛庫與運動學（前軸精確跟隨的曳物線）。
+ * 回傳每個姿態的車體四邊形與左右外緣，供畫布標示與衝突檢核使用。
+ */
 export function generateVehicleSweptPath(
   pathPoints: Point2D[],
-  vehicleType: 'passenger' | 'semi_trailer' | 'articulated'
+  vehicleType: CadDesignVehicle
 ): SweptPathResult {
-  if (pathPoints.length < 2) {
-    return { tractorEnvelopes: [], leftRibbon: [], rightRibbon: [] };
-  }
-
-  let wheelbase = 2.7;
-  let rearWheelbase = 5.5;
-  let width = 1.8;
-  let frontOverhang = 0.9;
-  let rearOverhang = 0.8;
-
-  if (vehicleType === 'semi_trailer') {
-    wheelbase = 6.5;
-    width = 2.5;
-    frontOverhang = 1.2;
-    rearOverhang = 1.5;
-  } else if (vehicleType === 'articulated') {
-    wheelbase = 6.5;
-    rearWheelbase = 5.5;
-    width = 2.6;
-    frontOverhang = 1.3;
-    rearOverhang = 1.5;
-  }
-
-  const halfWidth = width / 2;
-
-  // Dense resampling along segments
-  const densePath: Point2D[] = [];
-  const stepSize = 0.35;
-  densePath.push(pathPoints[0]);
-
-  for (let i = 0; i < pathPoints.length - 1; i++) {
-    const p1 = pathPoints[i];
-    const p2 = pathPoints[i + 1];
-    const dist = distance(p1, p2);
-    if (dist < 0.01) continue;
-
-    const numSteps = Math.ceil(dist / stepSize);
-    for (let s = 1; s <= numSteps; s++) {
-      const t = s / numSteps;
-      densePath.push({
-        x: p1.x + (p2.x - p1.x) * t,
-        y: p1.y + (p2.y - p1.y) * t,
-      });
-    }
-  }
-
-  if (densePath.length < 2) {
-    return { tractorEnvelopes: [], leftRibbon: [], rightRibbon: [] };
-  }
-
-  const tractorFront = densePath;
-  const tractorRear: Point2D[] = [];
-
-  const initDir = normalize({
-    x: tractorFront[1].x - tractorFront[0].x,
-    y: tractorFront[1].y - tractorFront[0].y,
-  });
-  tractorRear.push({
-    x: tractorFront[0].x - initDir.x * wheelbase,
-    y: tractorFront[0].y - initDir.y * wheelbase,
-  });
-
-  for (let i = 1; i < tractorFront.length; i++) {
-    const prevRear = tractorRear[i - 1];
-    const currFront = tractorFront[i];
-    const dir = normalize({
-      x: currFront.x - prevRear.x,
-      y: currFront.y - prevRear.y,
-    });
-    tractorRear.push({
-      x: currFront.x - dir.x * wheelbase,
-      y: currFront.y - dir.y * wheelbase,
-    });
-  }
-
-  const trailerRear: Point2D[] = [];
-  if (vehicleType === 'articulated') {
-    const initTrailerDir = normalize({
-      x: tractorRear[1].x - tractorRear[0].x,
-      y: tractorRear[1].y - tractorRear[0].y,
-    });
-    trailerRear.push({
-      x: tractorRear[0].x - initTrailerDir.x * rearWheelbase,
-      y: tractorRear[0].y - initTrailerDir.y * rearWheelbase,
-    });
-
-    for (let i = 1; i < tractorRear.length; i++) {
-      const prevTrailerRear = trailerRear[i - 1];
-      const currTractorRear = tractorRear[i];
-      const dir = normalize({
-        x: currTractorRear.x - prevTrailerRear.x,
-        y: currTractorRear.y - prevTrailerRear.y,
-      });
-      trailerRear.push({
-        x: currTractorRear.x - dir.x * rearWheelbase,
-        y: currTractorRear.y - dir.y * rearWheelbase,
-      });
-    }
-  }
-
+  if (pathPoints.length < 2) return { tractorEnvelopes: [], leftRibbon: [], rightRibbon: [] };
+  const v = cadVehicle(vehicleType);
+  const rs = resample(pathPoints, 0.1);
+  if (rs.pts.length < 2 || rs.length < 1e-3) return { tractorEnvelopes: [], leftRibbon: [], rightRibbon: [] };
+  const traj = simulate({ ...rs, warnings: [] }, v, DEFAULT_DRIVE);
   const tractorEnvelopes: Polygon4D[] = [];
   const trailerEnvelopes: Polygon4D[] = [];
   const leftRibbon: Point2D[] = [];
   const rightRibbon: Point2D[] = [];
-
-  for (let i = 0; i < densePath.length; i++) {
-    const f = tractorFront[i];
-    const r = tractorRear[i];
-
-    const dirX = f.x - r.x;
-    const dirY = f.y - r.y;
-    const len = Math.hypot(dirX, dirY);
-    if (len < 0.01) continue;
-
-    const u = { x: dirX / len, y: dirY / len };
-    const n = { x: -u.y, y: u.x };
-
-    const fl = { x: f.x + u.x * frontOverhang + n.x * halfWidth, y: f.y + u.y * frontOverhang + n.y * halfWidth };
-    const fr = { x: f.x + u.x * frontOverhang - n.x * halfWidth, y: f.y + u.y * frontOverhang - n.y * halfWidth };
-    const rl = { x: r.x - u.x * rearOverhang + n.x * halfWidth, y: r.y - u.y * rearOverhang + n.y * halfWidth };
-    const rr = { x: r.x - u.x * rearOverhang - n.x * halfWidth, y: r.y - u.y * rearOverhang - n.y * halfWidth };
-
+  const stride = Math.max(1, Math.round(0.35 / Math.max(1e-6, traj.step)));
+  for (let i = 0; i < traj.poses.length; i += stride) {
+    const p = traj.poses[i];
+    const [fl, fr, rr, rl] = bodyOutline(p, v);
     tractorEnvelopes.push({ p1: fl, p2: fr, p3: rr, p4: rl });
-
-    if (vehicleType === 'articulated') {
-      const tr = trailerRear[i];
-      const tDirX = r.x - tr.x;
-      const tDirY = r.y - tr.y;
-      const tLen = Math.hypot(tDirX, tDirY);
-      if (tLen >= 0.01) {
-        const tu = { x: tDirX / tLen, y: tDirY / tLen };
-        const tn = { x: -tu.y, y: tu.x };
-
-        const tfl = { x: r.x + tn.x * halfWidth, y: r.y + tn.y * halfWidth };
-        const tfr = { x: r.x - tn.x * halfWidth, y: r.y - tn.y * halfWidth };
-        const trl = { x: tr.x - tu.x * 1.5 + tn.x * halfWidth, y: tr.y - tu.y * 1.5 + tn.y * halfWidth };
-        const trr = { x: tr.x - tu.x * 1.5 - tn.x * halfWidth, y: tr.y - tu.y * 1.5 - tn.y * halfWidth };
-
+    const units = trailerOutlines(p, v);
+    if (units.length) {
+      leftRibbon.push(fl);
+      rightRibbon.push(fr);
+      units.forEach(([tfl, tfr, trr, trl]) => {
         trailerEnvelopes.push({ p1: tfl, p2: tfr, p3: trr, p4: trl });
-
-        leftRibbon.push(fl, tfl, trl);
-        rightRibbon.push(fr, tfr, trr);
-      }
+        leftRibbon.push(tfl, trl);
+        rightRibbon.push(tfr, trr);
+      });
     } else {
       leftRibbon.push(fl, rl);
       rightRibbon.push(fr, rr);
     }
   }
-
   return {
     tractorEnvelopes,
-    trailerEnvelopes: vehicleType === 'articulated' ? trailerEnvelopes : undefined,
+    trailerEnvelopes: v.trailer ? trailerEnvelopes : undefined,
     leftRibbon,
     rightRibbon,
   };
 }
 
+/**
+ * 依折線三點估計前輪轉角（°）。引導線代表前軸中心軌跡，前軸迴轉半徑 R 與轉角 δ 的關係為 sin δ = L / R。
+ */
 export function calculateSteeringAngle(
   pPrev: Point2D,
   pCurr: Point2D,
@@ -1352,20 +1243,24 @@ export function calculateSteeringAngle(
   while (dTheta < -Math.PI) dTheta += 2 * Math.PI;
 
   const s = (d1 + d2) / 2;
-  const curvature = dTheta / s;
-
-  const steeringAngleRad = Math.atan(wheelbase * curvature);
-  return Math.abs(steeringAngleRad * 180 / Math.PI);
+  const k = Math.abs(dTheta / s);
+  const x = wheelbase * k;
+  return x >= 1 ? 90 : (Math.asin(x) * 180) / Math.PI;
 }
 
-export function getWheelbaseForVehicle(vehicleType: 'passenger' | 'semi_trailer' | 'articulated'): number {
-  if (vehicleType === 'passenger') return 2.7;
-  return 6.5;
+/** CAD 設計車種的等效軸距（取自車輛庫） */
+export function getWheelbaseForVehicle(vehicleType: CadDesignVehicle): number {
+  return cadVehicle(vehicleType).L;
+}
+
+/** CAD 設計車種的最大前輪轉角（°，取自車輛庫） */
+export function getMaxSteerForVehicle(vehicleType: CadDesignVehicle): number {
+  return cadVehicle(vehicleType).maxSteerDeg;
 }
 
 export function getMaxSteeringAngleForPath(
   pathPoints: Point2D[],
-  vehicleType: 'passenger' | 'semi_trailer' | 'articulated'
+  vehicleType: CadDesignVehicle
 ): number {
   if (pathPoints.length < 3) return 0;
   const wheelbase = getWheelbaseForVehicle(vehicleType);

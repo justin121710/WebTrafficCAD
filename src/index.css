@@ -143,3 +143,8 @@ button.sim-color-picker-btn {
   transition: opacity 0.12s ease;
 }
 .group:hover > .ui-tip { opacity: 1; }
+
+/* 軌跡模擬：數值輸入去除上下箭頭，避免窄欄位被截斷 */
+input.sim-num::-webkit-outer-spin-button,
+input.sim-num::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+input.sim-num { -moz-appearance: textfield; appearance: textfield; }

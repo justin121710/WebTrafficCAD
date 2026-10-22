@@ -1,11 +1,18 @@
 import { useState } from 'react';
 import { MARKING_SPEC, MARKING_NAMES, getMotoBoxCorners } from '../markings';
+import { CadDesignVehicle, cadVehicle, cadMinPathRadius } from '../simulation/vehicles';
 
 /** 設計車種名稱（全介面統一） */
 export const DESIGN_VEHICLE_LABELS: Record<string, string> = {
   passenger: '小型車',
   semi_trailer: '大型車（大客車／大貨車）',
   articulated: '聯結車',
+};
+
+/** 各分類實際用於檢核的車輛庫車種（尺寸與轉角與軌跡模擬一致） */
+export const cadVehicleNote = (v: string) => {
+  const veh = cadVehicle(v as CadDesignVehicle);
+  return `${veh.name}：軸距 ${veh.L} m、最大轉角 ${veh.maxSteerDeg}°、最小引導線半徑 ${cadMinPathRadius(v as CadDesignVehicle)} m`;
 };
 import { CadElement, ThreeCenterCurveElement, IslandElement, TextElement, Point2D } from '../types';
 import { calculateWidening, distance, sampleCubicBezier, getMaxSteeringAngleForPath, generateParkingZoneSlots, offsetSegment, getPathOffsetCurves } from '../geometry';
@@ -227,6 +234,8 @@ interface PropsPanelProps {
   onUpdateElement: (el: CadElement) => void;
   onDeleteElement: (id: string) => void;
   onGenerateIslandFromCurve: (curve: any) => void;
+  /** 將車輛軌跡標線送到軌跡模擬做完整檢核 */
+  onSimulatePath?: (el: any) => void;
   onAddElement?: (el: CadElement) => void;
   
   // Undo helper
@@ -256,6 +265,7 @@ export default function PropsPanel({
   onUpdateElement,
   onDeleteElement,
   onGenerateIslandFromCurve,
+  onSimulatePath,
   onAddElement,
   onSaveHistory,
   selectedAnchorIndices = [],
@@ -2313,7 +2323,8 @@ export default function PropsPanel({
           }
         }
         const maxSteeringAngle = getMaxSteeringAngleForPath(tempPts, activeVeh);
-        const isSafe = maxSteeringAngle <= 40;
+        const steerLimit = cadVehicle(activeVeh).maxSteerDeg;
+        const isSafe = maxSteeringAngle <= steerLimit;
 
         return (
           <div className="space-y-4">
@@ -2327,7 +2338,8 @@ export default function PropsPanel({
                 <span>設計車種:</span> <span className="text-blue-400 font-bold">{DESIGN_VEHICLE_LABELS[activeVeh]}</span>
                 <span>控制端點數:</span> <span className="text-slate-300">{sp.points?.length || 0} 個</span>
                 <span>最大轉向角:</span> <span className={`${isSafe ? 'text-green-400 font-bold' : 'text-red-400 font-bold'}`}>{maxSteeringAngle ? `${maxSteeringAngle.toFixed(1)}°` : '0°'}</span>
-                <span>最大限制角度:</span> <span className="text-slate-400 font-bold">40.0°</span>
+                <span>最大限制角度:</span> <span className="text-slate-400 font-bold">{steerLimit.toFixed(1)}°</span>
+                <span>檢核車種:</span> <span className="text-slate-400">{cadVehicle(activeVeh).name}</span>
               </div>
             </div>
 
@@ -2363,8 +2375,13 @@ export default function PropsPanel({
                 })}
               </div>
               <p className="text-[9px] text-slate-500 leading-normal pt-1">
-                變更此車型可即時模擬不同車廂/聯結車型軌跡掃掠寬度。
+                {cadVehicleNote(activeVeh)}（與軌跡模擬共用車輛庫；需要完整檢核請用「軌跡模擬」）。
               </p>
+              {onSimulatePath && (
+                <button id="cad-simulate-path-btn" onClick={() => onSimulatePath(sp)} className="w-full mt-1 py-1.5 text-[11px] font-bold rounded border border-blue-500/40 text-blue-300 hover:bg-blue-500/10 cursor-pointer">
+                  以此路徑進行軌跡模擬檢核 →
+                </button>
+              )}
             </div>
 
             <div className={`p-3 rounded-lg border text-xs leading-snug flex flex-col gap-1 ${

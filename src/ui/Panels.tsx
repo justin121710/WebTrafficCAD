@@ -30,6 +30,8 @@ export interface ExportOptions {
   includeConstruction: boolean;
   includeAnnotations: boolean;
   titleBlock: boolean;
+  /** 一併輸出軌跡模擬結果（掃掠範圍、輪跡、標註） */
+  includeSimulation: boolean;
 }
 
 export function ExportPanel(props: {
@@ -74,6 +76,7 @@ export function ExportPanel(props: {
         <div className={rowCls}><span>加上圖框、比例尺、指北針</span><Toggle on={o.titleBlock} onClick={() => setOptions({ ...o, titleBlock: !o.titleBlock })} /></div>
         <div className={rowCls}><span>包含尺寸標註</span><Toggle on={o.includeAnnotations} onClick={() => setOptions({ ...o, includeAnnotations: !o.includeAnnotations })} /></div>
         <div className={rowCls}><span>包含輔助線／輔助圓</span><Toggle on={o.includeConstruction} onClick={() => setOptions({ ...o, includeConstruction: !o.includeConstruction })} /></div>
+        <div className={rowCls}><span>包含軌跡模擬（掃掠範圍、輪跡、標註）</span><Toggle id="export-include-sim" on={o.includeSimulation} onClick={() => setOptions({ ...o, includeSimulation: !o.includeSimulation })} /></div>
         {props.hiddenCount > 0 && <p className="text-[10.5px] mt-1" style={{ color: '#f59e0b' }}>有 {props.hiddenCount} 個圖層被隱藏，匯出時不會包含。</p>}
       </div>
       <div className="space-y-1 pt-1" style={{ borderTop: '1px solid var(--ui-border)' }}>
@@ -185,7 +188,7 @@ export function SettingsPanel({ v, sections = ['grid', 'snap', 'bg'] }: { v: Vie
 }
 
 /* ------------------------------------------------------------------ 圖層 */
-export function LayerPanel({ elements, hidden, onToggle, onShowAll }: { elements: CadElement[]; hidden: string[]; onToggle: (k: string) => void; onShowAll: () => void }) {
+export function LayerPanel({ elements, hidden, onToggle, onShowAll, extra }: { elements: CadElement[]; hidden: string[]; onToggle: (k: string) => void; onShowAll: () => void; extra?: React.ReactNode }) {
   const counts = new Map<string, number>();
   elements.forEach(el => { const k = layerKeyOf(el); counts.set(k, (counts.get(k) || 0) + 1); });
   hidden.forEach(k => { if (!counts.has(k)) counts.set(k, 0); });
@@ -211,6 +214,7 @@ export function LayerPanel({ elements, hidden, onToggle, onShowAll }: { elements
           );
         })}
       </div>
+      {extra}
       <p className="text-[10.5px] mt-3" style={{ color: 'var(--ui-muted)' }}>隱藏的圖層不會顯示、不能選取，也不會匯出。DXF 匯出時每個圖層有獨立名稱與顏色。</p>
     </div>
   );
