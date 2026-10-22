@@ -186,12 +186,18 @@ export function PolishedDock({ activeTool, setActiveTool, onLoadTemplate }: Prop
   const [openCat, setOpenCat] = useState<string | null>(null);
   const activeCat = TOOL_CATEGORIES.find(c => c.tools.some(t => t.id === activeTool))?.key;
   const activeDef = ALL_TOOLS.find(t => t.id === activeTool);
+  // Dock 有 transform，fixed 遮罩會被侷限，改用全域監聽關閉彈出面板
+  useEffect(() => {
+    if (!openCat) return;
+    const onDown = (e: PointerEvent) => { if (!(e.target as HTMLElement).closest('#left-toolbar')) setOpenCat(null); };
+    window.addEventListener('pointerdown', onDown, true);
+    return () => window.removeEventListener('pointerdown', onDown, true);
+  }, [openCat]);
   const catIcon: Record<string, CadTool> = { longitudinal: 'yellow_double', transverse: 'stop_line', zones: 'channelization', parking: 'parking_space', symbols: 'road_arrow', tools: 'measurement' };
   return (
     <div id="left-toolbar" className="absolute bottom-5 left-1/2 -translate-x-1/2 z-30 flex flex-col items-center gap-2">
       {openCat && (
         <>
-          <div className="fixed inset-0 z-[-1]" onClick={() => setOpenCat(null)} />
           <div id="dock-popover" className="glass rounded-2xl p-2.5 flex gap-1.5 flex-wrap justify-center max-w-[640px]">
             {TOOL_CATEGORIES.find(c => c.key === openCat)!.tools.map(t => {
               const active = activeTool === t.id;

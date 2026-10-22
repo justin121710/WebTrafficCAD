@@ -1554,6 +1554,18 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKey);
   });
 
+  // 新版介面選單：點擊選單外任何地方即關閉（玻璃面板的 backdrop-filter 會限制 fixed 遮罩，因此改用全域監聽）
+  useEffect(() => {
+    if (!modernMenu) return;
+    const onDown = (e: PointerEvent) => {
+      if (!(e.target as HTMLElement).closest('[data-menu-root]')) setModernMenu(null);
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setModernMenu(null); };
+    window.addEventListener('pointerdown', onDown, true);
+    window.addEventListener('keydown', onKey);
+    return () => { window.removeEventListener('pointerdown', onDown, true); window.removeEventListener('keydown', onKey); };
+  }, [modernMenu]);
+
   // ---------- 自動儲存 ----------
   // 啟動時檢查是否有上次未存檔的自動儲存
   useEffect(() => {
@@ -3474,27 +3486,28 @@ export default function App() {
         style={{ color: 'var(--ui-text)' }}
       >
         {icon}
-        {label && <span className="whitespace-nowrap">{label}</span>}
+        {label && <span className="whitespace-nowrap hidden xl:inline">{label}</span>}
       </button>
     );
 
     const menuBtn = (key: 'file' | 'export' | 'view', label: string, icon: React.ReactNode, id: string) => (
       <button
         id={id}
+        data-menu-root
         onClick={() => setModernMenu(modernMenu === key ? null : key)}
         className="flex items-center gap-1.5 h-8 px-2.5 rounded-lg text-xs cursor-pointer transition-colors hover:bg-white/10"
         style={modernMenu === key ? { background: 'var(--ui-accent-soft)', color: 'var(--ui-accent)' } : { color: 'var(--ui-text)' }}
       >
         {icon}
-        <span className="whitespace-nowrap">{label}</span>
+        <span className="whitespace-nowrap hidden lg:inline">{label}</span>
         <ChevronDown className="w-3 h-3 opacity-60" />
       </button>
     );
 
     const popover = (key: 'file' | 'export' | 'view', content: React.ReactNode, width = 'w-80') => modernMenu === key && (
       <>
-        <div className="fixed inset-0 z-40" onClick={() => setModernMenu(null)} />
         <div
+          data-menu-root
           id={`menu-${key}`}
           className={`absolute right-0 top-full mt-2 ${width} max-h-[75vh] overflow-y-auto p-3 z-50 shadow-2xl ${isPolished ? 'glass' : ''}`}
           style={isPolished ? { borderRadius: 16 } : { background: 'var(--ui-surface)', border: '1px solid var(--ui-border)', borderRadius: 12 }}
@@ -3549,7 +3562,7 @@ export default function App() {
     );
 
     const dirtyBadge = (
-      <span className="text-[10.5px] flex items-center gap-1 whitespace-nowrap" style={{ color: 'var(--ui-muted)' }} title={isDirty ? '已自動暫存於瀏覽器，建議另存專案檔' : '已儲存'}>
+      <span className="text-[10.5px] hidden lg:flex items-center gap-1 whitespace-nowrap" style={{ color: 'var(--ui-muted)' }} title={isDirty ? '已自動暫存於瀏覽器，建議另存專案檔' : '已儲存'}>
         <span className="w-1.5 h-1.5 rounded-full" style={{ background: isDirty ? '#f59e0b' : '#22c55e' }} />
         {isDirty ? '已自動暫存' : '已儲存'}
       </span>
@@ -3560,7 +3573,7 @@ export default function App() {
         id="project-name-header"
         value={projectName}
         onChange={e => setProjectName(e.target.value)}
-        className="bg-transparent text-xs font-medium outline-none px-1.5 py-1 rounded-md hover:bg-white/5 focus:bg-white/5 w-40 truncate"
+        className="hidden md:block bg-transparent text-xs font-medium outline-none px-1.5 py-1 rounded-md hover:bg-white/5 focus:bg-white/5 w-32 xl:w-40 truncate"
         style={{ color: 'var(--ui-text)' }}
         title="圖名（會用於匯出檔名與圖框）"
       />
@@ -3629,7 +3642,7 @@ export default function App() {
             <div className="relative">{menuBtn('file', '檔案', <FolderOpen className="w-4 h-4" />, 'menu-file-btn')}{popover('file', fileMenu, 'w-64')}</div>
             <div className="relative">{menuBtn('view', '檢視', <Grid className="w-4 h-4" />, 'menu-view-btn')}{popover('view', viewPanel)}</div>
             <div className="relative">
-              <button id="export-dropdown-toggle-btn" onClick={() => setModernMenu(modernMenu === 'export' ? null : 'export')} className="flex items-center gap-1.5 h-8 px-3.5 rounded-full text-xs font-bold whitespace-nowrap cursor-pointer accent-gradient shadow-lg">
+              <button id="export-dropdown-toggle-btn" data-menu-root onClick={() => setModernMenu(modernMenu === 'export' ? null : 'export')} className="flex items-center gap-1.5 h-8 px-3.5 rounded-full text-xs font-bold whitespace-nowrap cursor-pointer accent-gradient shadow-lg">
                 <Download className="w-4 h-4" /> 匯出
               </button>
               {popover('export', exportPanelEl)}
@@ -3690,7 +3703,7 @@ export default function App() {
           )}
           <div className="relative">{menuBtn('view', isGuided ? '鎖點與底圖' : '檢視', <Grid className="w-4 h-4" />, 'menu-view-btn')}{popover('view', viewPanel)}</div>
           <div className="relative">
-            <button id="export-dropdown-toggle-btn" onClick={() => setModernMenu(modernMenu === 'export' ? null : 'export')} className="flex items-center gap-1.5 h-8 px-3 rounded-lg text-xs font-bold whitespace-nowrap cursor-pointer" style={{ background: 'var(--ui-accent)', color: 'var(--ui-accent-text)' }}>
+            <button id="export-dropdown-toggle-btn" data-menu-root onClick={() => setModernMenu(modernMenu === 'export' ? null : 'export')} className="flex items-center gap-1.5 h-8 px-3 rounded-lg text-xs font-bold whitespace-nowrap cursor-pointer" style={{ background: 'var(--ui-accent)', color: 'var(--ui-accent-text)' }}>
               <Download className="w-4 h-4" /> 匯出
             </button>
             {popover('export', exportPanelEl)}

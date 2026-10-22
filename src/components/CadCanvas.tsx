@@ -7521,9 +7521,9 @@ export default function CadCanvas({
       <div id="canvas-status-bar" style={{ bottom: 16 + insets.bottom, left: 16 + insets.left }} className="absolute bottom-4 left-4 flex gap-4 text-[10px] font-mono px-3 py-1.5 rounded-md pointer-events-none backdrop-blur-sm z-10 bg-zinc-900/60 border border-zinc-800/20 text-zinc-500">
         <span className="text-zinc-300">X {mouseWorld.x.toFixed(2)}　Y {mouseWorld.y.toFixed(2)} m</span>
         <span>縮放 {Math.round(viewport.zoom * 10)}%</span>
-        <span>Shift 正交／15°</span>
-        <span>Space 或中鍵 平移</span>
-        <span>Esc 完成／取消</span>
+        <span className="hidden xl:inline">Shift 正交／15°</span>
+        <span className="hidden xl:inline">Space 或中鍵 平移</span>
+        <span className="hidden xl:inline">Esc 完成／取消</span>
       </div>
 
       {/* Dynamic Scale Bar on Right Bottom corner */}
