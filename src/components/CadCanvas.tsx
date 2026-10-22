@@ -41,6 +41,7 @@ import {
   calculateSteeringAngle,
   getWheelbaseForVehicle,
   getMaxSteeringAngleForPath,
+  getMaxSteerForVehicle,
   getRoadArrowOutlinePoints,
   getArcFromThreePoints,
   getLineIntersection,
@@ -51,6 +52,7 @@ import { getElementPrimitives, suggestHeading, getMotoBoxCorners, MARKING_NAMES,
 import { renderPrimitives } from '../renderPrimitives';
 import SimulationLayer from '../simulation/SimulationLayer';
 import { simStore } from '../simulation/store';
+import { cadMinPathRadius } from '../simulation/vehicles';
 import { SimInteraction, SimPointer } from '../simulation/interaction';
 import { Search, Ruler } from 'lucide-react';
 
@@ -2029,7 +2031,7 @@ export default function CadCanvas({
           }
         }
         
-        const limit = designVehicle === 'passenger' ? 4.5 : 12.5;
+        const limit = cadMinPathRadius(designVehicle);
         const isValid = minR >= limit;
 
         onUpdateElement({
@@ -2135,7 +2137,7 @@ export default function CadCanvas({
         const r = getBezierMinRadiusOfCurvature(mergedPts[j], mergedCpR[j], mergedCpL[j + 1], mergedPts[j + 1]);
         if (r < mergedMinR) mergedMinR = r;
       }
-      const limit = designVehicle === 'passenger' ? 4.5 : 12.5;
+      const limit = cadMinPathRadius(designVehicle);
       const isValid = mergedMinR >= limit;
 
       const updatedEl = {
@@ -2166,7 +2168,7 @@ export default function CadCanvas({
       if (r < minR) minR = r;
     }
 
-    const limit = designVehicle === 'passenger' ? 4.5 : 12.5;
+    const limit = cadMinPathRadius(designVehicle);
     const isValid = minR >= limit;
 
     if (finalType === 'yield_line') {
@@ -3918,7 +3920,7 @@ export default function CadCanvas({
             const pNext = wholePath[k + 1];
 
             const angle = calculateSteeringAngle(pPrev, pCurr, pNext, wheelbase);
-            ctx.strokeStyle = angle > 40 ? '#ef4444' : '#06b6d4'; // Red vs Cyan
+            ctx.strokeStyle = angle > getMaxSteerForVehicle(pathVehicle) ? '#ef4444' : '#06b6d4'; // 超過該車種最大轉角為紅色
             ctx.beginPath();
             const s1 = worldToScreen(pCurr.x, pCurr.y);
             const s2 = worldToScreen(pNext.x, pNext.y);
@@ -4771,7 +4773,7 @@ export default function CadCanvas({
           const pNext = wholeActivePath[k + 1];
 
           const angle = calculateSteeringAngle(pPrev, pCurr, pNext, wheelbase);
-          ctx.strokeStyle = angle > 40 ? '#ef4444' : '#06b6d4'; // Red vs Cyan
+          ctx.strokeStyle = angle > getMaxSteerForVehicle(designVehicle) ? '#ef4444' : '#06b6d4'; // 超過該車種最大轉角為紅色
           ctx.beginPath();
           const s1 = worldToScreen(pCurr.x, pCurr.y);
           const s2 = worldToScreen(pNext.x, pNext.y);
@@ -5266,7 +5268,7 @@ export default function CadCanvas({
   const activeVehicle = (selectedElement && selectedElement.type === 'smart_path') 
     ? ((selectedElement as any).designVehicle || designVehicle)
     : designVehicle;
-  const limitRadius = activeVehicle === 'passenger' ? 4.5 : activeVehicle === 'semi_trailer' ? 12.5 : 13.5;
+  const limitRadius = cadMinPathRadius(activeVehicle);
 
   if (isLineOrPathTool(activeTool) && spPoints.length > 1) {
     for (let j = 0; j < spPoints.length - 1; j++) {

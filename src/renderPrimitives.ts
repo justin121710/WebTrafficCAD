@@ -52,7 +52,7 @@ function withAlpha(color: string, alpha: number): string {
 export function renderPrimitives(ctx: CanvasRenderingContext2D, prims: Primitive[], opts: RenderOptions) {
   const pal = PALETTES[opts.palette || 'screen'];
   const { zoom, w2s } = opts;
-  const col = (c: MarkColor) => opts.overrideColor || pal[c];
+  const col = (c: MarkColor, css?: string) => opts.overrideColor || css || pal[c];
   const k = opts.pxScale ?? 1;
   const scaleDash = (d: [number, number]) => [d[0] * k, d[1] * k];
 
@@ -60,7 +60,7 @@ export function renderPrimitives(ctx: CanvasRenderingContext2D, prims: Primitive
     ctx.save();
     if (pr.kind === 'line') {
       if (pr.pts.length < 2) { ctx.restore(); return; }
-      ctx.strokeStyle = col(pr.color);
+      ctx.strokeStyle = col(pr.color, pr.css);
       ctx.lineCap = pr.dash ? 'butt' : 'butt';
       ctx.lineJoin = pr.closed ? 'miter' : 'round';
       ctx.lineWidth = pr.width > 0 ? Math.max((pr.minPx ?? 1) * k, pr.width * zoom) : (pr.minPx ?? 1) * k;
@@ -75,11 +75,11 @@ export function renderPrimitives(ctx: CanvasRenderingContext2D, prims: Primitive
       tracePath(ctx, pr.pts, w2s, true);
       (pr.holes || []).forEach(h => tracePath(ctx, h, w2s, true));
       if (pr.fill) {
-        ctx.fillStyle = opts.overrideColor ? withAlpha(opts.overrideColor, 0.35) : withAlpha(pal[pr.fill], pr.fillAlpha ?? 1);
+        ctx.fillStyle = opts.overrideColor ? withAlpha(opts.overrideColor, 0.35) : withAlpha(pr.css || pal[pr.fill], pr.fillAlpha ?? 1);
         ctx.fill(pr.holes && pr.holes.length ? 'evenodd' : 'nonzero');
       }
       if (pr.stroke) {
-        ctx.strokeStyle = col(pr.stroke);
+        ctx.strokeStyle = col(pr.stroke, pr.css);
         ctx.lineJoin = 'miter';
         ctx.lineWidth = Math.max(1, (pr.strokeWidth ?? 0.1) * zoom);
         ctx.stroke();
@@ -99,11 +99,11 @@ export function renderPrimitives(ctx: CanvasRenderingContext2D, prims: Primitive
         ctx.fillStyle = opts.palette === 'print' ? 'rgba(255,255,255,0.85)' : 'rgba(15,17,21,0.8)';
         ctx.fillRect(-w / 2 - 3 * k, -px / 2 - 2 * k, w + 6 * k, px + 4 * k);
       }
-      ctx.fillStyle = col(pr.color);
+      ctx.fillStyle = col(pr.color, pr.css);
       ctx.fillText(pr.text, 0, 0);
     } else if (pr.kind === 'circle') {
       const s = w2s(pr.c.x, pr.c.y);
-      ctx.strokeStyle = col(pr.color);
+      ctx.strokeStyle = col(pr.color, pr.css);
       ctx.lineWidth = 1.5 * k;
       if (pr.dashPx) ctx.setLineDash(scaleDash(pr.dashPx));
       ctx.beginPath();

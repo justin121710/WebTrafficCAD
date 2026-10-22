@@ -19,7 +19,9 @@ import { simStore, useSimStore } from './simulation/store';
 import { buildObstacles } from './simulation/obstacles';
 import { loadSimulation, serializeSimulation } from './simulation/persist';
 import { emptyDoc } from './simulation/model';
+import { cadMinPathRadius, CAD_VEHICLE_MAP, CadDesignVehicle } from './simulation/vehicles';
 import SimPanel from './simulation/ui/SimPanel';
+import { getSimulationPrimitives, simulationLegend, exportableEntries } from './simulation/exportPrims';
 import SimHud from './simulation/ui/SimHud';
 import SimTour, { simTourSeen } from './simulation/ui/SimTour';
 import { GuidedSimSidebar, MinimalSimRail, PolishedSimDock } from './simulation/ui/SimToolPalette';
@@ -34,7 +36,7 @@ import { saveAutosave, loadAutosave, clearAutosave } from './autosave';
 import { UiStyle, loadUiStyle, saveUiStyle } from './ui/uiStyle';
 import StylePicker from './ui/StylePicker';
 import { MinimalToolRail, GuidedToolSidebar, PolishedDock } from './ui/ToolPalette';
-import { ExportPanel, SettingsPanel, LayerPanel, QuantityPanel, ArrowTypeBar, ConfirmDialog, AutosaveBanner, ViewSettings } from './ui/Panels';
+import { ExportPanel, SettingsPanel, LayerPanel, QuantityPanel, ArrowTypeBar, ConfirmDialog, AutosaveBanner, ViewSettings, Toggle } from './ui/Panels';
 import { PaletteName } from './renderPrimitives';
 import { Compass, Info, CheckCircle2, RotateCcw, RotateCw, Image as ImageIcon, Download, Upload, Trash2, Ruler, X, Grid, ChevronLeft, ChevronRight, Play, Pause, Sliders, Layers, Truck, Lock, Unlock, GitBranch, MapPin, Save, FolderOpen, ChevronDown, PenTool, Paintbrush } from 'lucide-react';
 
@@ -109,11 +111,12 @@ export default function App() {
   const [bgImage, setBgImage] = useState<any>(null);
   const [exportedImage, setExportedImage] = useState<string | null>(null);
   const [projectName, setProjectName] = useState<string>('未命名路口配置');
-  const [exportOptions, setExportOptions] = useState<{ palette: PaletteName; includeConstruction: boolean; includeAnnotations: boolean; titleBlock: boolean }>({
+  const [exportOptions, setExportOptions] = useState<{ palette: PaletteName; includeConstruction: boolean; includeAnnotations: boolean; titleBlock: boolean; includeSimulation: boolean }>({
     palette: 'print',
     includeConstruction: false,
     includeAnnotations: true,
     titleBlock: true,
+    includeSimulation: true,
   });
   const [fitRequest, setFitRequest] = useState<number>(0);
   const [uiStyle, setUiStyleState] = useState<UiStyle>(() => loadUiStyle());
@@ -126,6 +129,7 @@ export default function App() {
   const [confirmDialog, setConfirmDialog] = useState<{ title: string; message: string; confirmLabel: string; onConfirm: () => void } | null>(null);
   const [autosaveOffer, setAutosaveOffer] = useState<{ savedAt: string; project: any } | null>(null);
   const [isDirty, setIsDirty] = useState<boolean>(false);
+  const [autosaveFailed, setAutosaveFailed] = useState<boolean>(false);
   const autosaveReadyRef = useRef<boolean>(false);
   // 載入專案後的第一次內容變更不算「未存檔」
   const skipDirtyRef = useRef<boolean>(false);
@@ -569,8 +573,16 @@ export default function App() {
   };
 
   // 匯出 DXF：與畫布共用同一份幾何（具線寬、精確虛線、完整圖層）
+  /** 匯出時一併輸出的模擬結果（依顯示設定決定要輸出的圖層） */
+  const simExportPrims = () => {
+    if (!exportOptions.includeSimulation) return [];
+    const disp = simStore.doc.settings.display;
+    return getSimulationPrimitives(simStore, { swept: true, buffer: disp.buffer, wheels: disp.wheelTracks, poses: disp.poses, annotations: exportOptions.includeAnnotations });
+  };
+  const hasSimExport = () => exportOptions.includeSimulation && exportableEntries(simStore).length > 0;
+
   const handleExportDXF = () => {
-    if (elements.length === 0) {
+    if (elements.length === 0 && !hasSimExport()) {
       showToast('當前畫布為空，無幾何資料可以匯出為 DXF！', 'error');
       return;
     }
@@ -578,6 +590,7 @@ export default function App() {
       const dxfContent = exportElementsToDXF(visibleElements, {
         includeConstruction: exportOptions.includeConstruction,
         includeAnnotations: exportOptions.includeAnnotations,
+        extraPrims: simExportPrims(),
       });
       downloadBlob(new Blob([dxfContent], { type: 'application/dxf' }), `${projectFileBase()}.dxf`);
       showToast('DXF 已匯出（單位：公尺，圖層依標線類型分層）', 'success');
@@ -589,7 +602,7 @@ export default function App() {
 
   // 匯出 PNG：與畫布共用同一份幾何，可選白底列印與圖框
   const handleExportPNG = async () => {
-    if (elements.length === 0 && !bgImage) {
+    if (elements.length === 0 && !bgImage && !hasSimExport()) {
       showToast('當前畫布為空，無底圖與幾何資料可以匯出為圖片！', 'error');
       return;
     }
@@ -601,6 +614,8 @@ export default function App() {
         titleBlock: exportOptions.titleBlock,
         title: projectName,
         bgImage,
+        extraPrims: simExportPrims(),
+        legend: exportOptions.includeSimulation ? simulationLegend(simStore) : undefined,
       });
       setExportedImage(dataUrl);
       const a = document.createElement('a');
@@ -725,7 +740,7 @@ export default function App() {
     if (skipDirtyRef.current) skipDirtyRef.current = false;
     else setIsDirty(true);
     const t = setTimeout(() => {
-      saveAutosave(buildProjectData());
+      saveAutosave(buildProjectData()).then(ok => setAutosaveFailed(!ok));
     }, 1500);
     return () => clearTimeout(t);
   }, [elements, bgImage, simDocVersion, projectName, hiddenLayers]);
@@ -770,6 +785,26 @@ export default function App() {
   };
 
   // ---------- 介面風格共用 ----------
+  /** CAD 的車輛軌跡標線（貝茲）轉為模擬的鋼筆路徑，切換到軌跡模擬並選取 */
+  const handleSimulateSmartPath = (el: any) => {
+    const pts = el?.points || [];
+    if (pts.length < 2) return;
+    const cpL = el.cpLeft || pts, cpR = el.cpRight || pts;
+    const nodes = pts.map((p: any, i: number) => ({
+      p: { x: p.x, y: p.y },
+      hIn: { x: (cpL[i]?.x ?? p.x) - p.x, y: (cpL[i]?.y ?? p.y) - p.y },
+      hOut: { x: (cpR[i]?.x ?? p.x) - p.x, y: (cpR[i]?.y ?? p.y) - p.y },
+      smooth: true,
+    }));
+    const vid = CAD_VEHICLE_MAP[(el.designVehicle || designVehicle) as CadDesignVehicle];
+    const draft = simStore.newPathFor({ kind: 'pen', nodes });
+    simStore.setDraft({ ...draft, name: `${draft.name}（由 CAD 引導線）`, vehicleIds: [vid] }, false);
+    simStore.finishDraft(true);
+    handleModeChange('simulation');
+    simStore.setUi({ rightTab: 'result' });
+    showToast('已建立模擬軌跡，可在右側查看檢核結果', 'success');
+  };
+
   const handleModeChange = (mode: 'cad' | 'simulation') => {
     if (mode === 'cad') {
       // 離開模擬：繪製中的軌跡若已完整就完成，否則捨棄
@@ -816,6 +851,14 @@ export default function App() {
     isCalibrating: activeTool === 'map_scale',
     onCalibrate: () => setActiveTool(activeTool === 'map_scale' ? 'select' : 'map_scale'),
   };
+
+  // CAD 圖層面板：軌跡模擬結果的唯讀參考圖層
+  const simRefLayerRow = sim.doc.paths.length > 0 ? (
+    <div className="flex items-center justify-between gap-3 px-2 py-1.5 mt-2 rounded-md text-xs" style={{ border: '1px dashed var(--ui-border)' }}>
+      <span>軌跡模擬結果（唯讀參考，{sim.doc.paths.length} 條）</span>
+      <Toggle id="layer-sim-ref" on={sim.doc.settings.display.showInCad} onClick={() => simStore.setDisplay({ showInCad: !sim.doc.settings.display.showInCad })} />
+    </div>
+  ) : null;
 
   const exportPanelEl = (
     <ExportPanel
@@ -1384,6 +1427,7 @@ export default function App() {
                 onUpdateElement={handlePropsUpdateElement}
                 onDeleteElement={handleDeleteElement}
                 onGenerateIslandFromCurve={handleGenerateIslandFromCurve}
+                onSimulatePath={handleSimulateSmartPath}
                 onSaveHistory={handleSaveHistoryBeforeDrag}
                 selectedAnchorIndices={selectedAnchorIndices}
                 activeTool={activeTool}
@@ -1433,7 +1477,7 @@ export default function App() {
                       minR = calcMinR === Infinity ? 999 : calcMinR;
                     }
 
-                    const limit = designVehicle === 'passenger' ? 4.5 : 12.5;
+                    const limit = cadMinPathRadius(designVehicle);
                     const isValid = minR >= limit;
 
                     handleUpdateElement({
@@ -1620,9 +1664,9 @@ export default function App() {
     );
 
     const dirtyBadge = (
-      <span className="text-[10.5px] hidden lg:flex items-center gap-1 whitespace-nowrap" style={{ color: 'var(--ui-muted)' }} title={isDirty ? '已自動暫存於瀏覽器，建議另存專案檔' : '已儲存'}>
-        <span className="w-1.5 h-1.5 rounded-full" style={{ background: isDirty ? '#f59e0b' : '#22c55e' }} />
-        {isDirty ? '已自動暫存' : '已儲存'}
+      <span className="text-[10.5px] hidden lg:flex items-center gap-1 whitespace-nowrap" style={{ color: autosaveFailed ? '#f87171' : 'var(--ui-muted)' }} title={autosaveFailed ? '瀏覽器儲存空間不足或被封鎖，請立即另存專案檔' : isDirty ? '已自動暫存於瀏覽器，建議另存專案檔' : '已儲存'}>
+        <span className="w-1.5 h-1.5 rounded-full" style={{ background: autosaveFailed ? '#ef4444' : isDirty ? '#f59e0b' : '#22c55e' }} />
+        {autosaveFailed ? '自動暫存失敗' : isDirty ? '已自動暫存' : '已儲存'}
       </span>
     );
 
@@ -1642,7 +1686,7 @@ export default function App() {
         <SettingsPanel v={viewSettings} />
         {v === 'minimal' && appMode === 'cad' && (
           <div style={{ borderTop: '1px solid var(--ui-border)' }} className="pt-3">
-            <LayerPanel elements={elements} hidden={hiddenLayers} onToggle={toggleLayer} onShowAll={() => setHiddenLayers([])} />
+            <LayerPanel elements={elements} hidden={hiddenLayers} onToggle={toggleLayer} onShowAll={() => setHiddenLayers([])} extra={simRefLayerRow} />
           </div>
         )}
       </div>
@@ -1669,7 +1713,7 @@ export default function App() {
                   <div className="mt-3 text-[11px] leading-relaxed">小技巧：框選可多選；Delete 刪除；Shift 拖曳鎖定方向；Esc 結束繪製。</div>
                 </div>)
           : rightTab === 'layers'
-            ? <div className="p-3"><LayerPanel elements={elements} hidden={hiddenLayers} onToggle={toggleLayer} onShowAll={() => setHiddenLayers([])} /></div>
+            ? <div className="p-3"><LayerPanel elements={elements} hidden={hiddenLayers} onToggle={toggleLayer} onShowAll={() => setHiddenLayers([])} extra={simRefLayerRow} /></div>
             : <div className="p-3"><QuantityPanel elements={visibleElements} onExport={handleExportQuantities} /></div>)
       : simRightPanelEl;
 

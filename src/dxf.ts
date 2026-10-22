@@ -16,6 +16,8 @@ export interface DxfOptions {
   solidFill?: boolean;
   /** 文字樣式使用的字型檔（AutoCAD 可用 TrueType） */
   fontFile?: string;
+  /** 額外輸出的原語（例如軌跡模擬結果） */
+  extraPrims?: Primitive[];
 }
 
 /** 將非 ASCII 字元轉為 DXF Unicode 跳脫序列 */
@@ -46,12 +48,13 @@ export function exportElementsToDXF(elements: CadElement[], options: DxfOptions 
   const opts = { includeConstruction: true, includeAnnotations: true, solidFill: true, fontFile: 'kaiu.ttf', ...options };
   const prims: Primitive[] = [];
   elements.forEach(el => prims.push(...getElementPrimitives(el, opts)));
+  if (opts.extraPrims) prims.push(...opts.extraPrims);
 
   const usedLayers = new Map<string, number>();
   prims.forEach(p => {
     const def = Object.values(LAYERS).find(l => l.name === p.layer);
-    const color = def ? ACI[def.color] : ACI[(p as any).color as MarkColor] ?? 7;
-    usedLayers.set(p.layer, color);
+    const color = p.aci ?? (def ? ACI[def.color] : ACI[(p as any).color as MarkColor] ?? 7);
+    if (!usedLayers.has(p.layer)) usedLayers.set(p.layer, color);
   });
 
   const b = primitivesBounds(prims);

@@ -286,3 +286,36 @@ test('掃掠凸包相鄰無縫隙：每個凸包都與前一個重疊', () => {
   assert.ok(sweepHulls(r.traj, BUS).length === r.hulls.length);
   assert.ok(checkClearance(r.hulls, [], 0.3).minClearance === null);
 });
+
+test('匯出：DXF 含軌跡模擬圖層（掃掠範圍依車種分層、淨距帶、輪跡、標註），中文以 Unicode 跳脫', async () => {
+  const { SimStore } = await import('../src/simulation/store');
+  const { getSimulationPrimitives } = await import('../src/simulation/exportPrims');
+  const { exportElementsToDXF } = await import('../src/dxf');
+  const st = new SimStore();
+  st.load({
+    version: 2, customVehicles: [], settings: { ...(await import('../src/simulation/model')).DEFAULT_SETTINGS },
+    paths: [{ id: 'a', name: '右轉', color: '#6366f1', source: poly([[-30, 0], [0, 0], [0, -30]], 15), vehicleIds: ['aashto-bus'], drive: DEFAULT_DRIVE, visible: true, locked: false }],
+  });
+  const prims = getSimulationPrimitives(st, { swept: true, buffer: true, wheels: true, poses: true, annotations: true });
+  const layers = new Set(prims.map(p => p.layer));
+  ['SIM-PATH', 'SIM-SWEPT-BUS', 'SIM-BUFFER', 'SIM-WHEEL', 'SIM-POSE', 'SIM-ANNOT'].forEach(l => assert.ok(layers.has(l), l));
+  const dxf = exportElementsToDXF([], { extraPrims: prims });
+  assert.ok(dxf.includes('SIM-SWEPT-BUS'));
+  assert.ok(dxf.includes('\\U+53F3'), '中文跳脫');
+  assert.ok(!/[^\x00-\x7f]/.test(dxf), 'DXF 只含 ASCII');
+});
+
+test('CAD 端掃掠檢核與模擬共用車輛庫（軸距、轉角公式一致）', async () => {
+  const { generateVehicleSweptPath, getWheelbaseForVehicle, calculateSteeringAngle } = await import('../src/geometry');
+  assert.equal(getWheelbaseForVehicle('semi_trailer'), BUS.L);
+  // 前軸半徑 12 m 的三點 → asin(L/12)
+  const R = 12, a = 0.05;
+  const ang = calculateSteeringAngle({ x: R * Math.cos(-a), y: R * Math.sin(-a) }, { x: R, y: 0 }, { x: R * Math.cos(a), y: R * Math.sin(a) }, BUS.L);
+  assert.ok(Math.abs(ang - deg(Math.asin(BUS.L / R))) < 0.1, `${ang}`);
+  const pts = [];
+  for (let x = -20; x <= 20; x += 1) pts.push({ x, y: 0 });
+  const sw = generateVehicleSweptPath(pts, 'articulated');
+  assert.ok(sw.trailerEnvelopes && sw.trailerEnvelopes.length > 0);
+  const q = sw.tractorEnvelopes[sw.tractorEnvelopes.length - 1];
+  assert.ok(Math.abs(dist(q.p1, q.p2) - WB12.W) < 1e-6);
+});

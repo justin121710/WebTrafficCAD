@@ -16,6 +16,10 @@ export interface PngExportOptions {
   titleBlock?: boolean;
   title?: string;
   bgImage?: any;
+  /** 額外輸出的原語（例如軌跡模擬結果） */
+  extraPrims?: Primitive[];
+  /** 圖例（軌跡顏色與說明） */
+  legend?: { color: string; label: string }[];
 }
 
 function niceScaleLength(metersPerPx: number, targetPx: number): number {
@@ -32,6 +36,7 @@ export async function renderElementsToPng(elements: CadElement[], o: PngExportOp
     includeConstruction: o.includeConstruction ?? false,
     includeAnnotations: o.includeAnnotations ?? true,
   })));
+  if (o.extraPrims) prims.push(...o.extraPrims);
 
   let b = primitivesBounds(prims);
   const bg = o.bgImage;
@@ -87,6 +92,32 @@ export async function renderElementsToPng(elements: CadElement[], o: PngExportOp
   ctx.clip();
   renderPrimitives(ctx, prims, { zoom, w2s, palette: o.palette, pxScale: W / 1200 });
   ctx.restore();
+
+  if (o.legend && o.legend.length) {
+    const k = W / 1200;
+    const fs = Math.round(12 * k);
+    const pad = Math.round(8 * k);
+    ctx.font = `${fs}px "Noto Sans TC", "Microsoft JhengHei", sans-serif`;
+    const w = Math.max(...o.legend.map(l => ctx.measureText(l.label).width)) + fs * 2 + pad * 2;
+    const h = o.legend.length * (fs + 6 * k) + pad * 2 + fs;
+    const x0 = margin + pad, y0 = margin + pad;
+    ctx.fillStyle = o.palette === 'print' ? 'rgba(255,255,255,0.9)' : 'rgba(15,17,21,0.85)';
+    ctx.strokeStyle = o.palette === 'print' ? '#888' : '#444';
+    ctx.lineWidth = 1;
+    ctx.fillRect(x0, y0, w, h);
+    ctx.strokeRect(x0, y0, w, h);
+    ctx.fillStyle = o.palette === 'print' ? '#111' : '#e2e8f0';
+    ctx.textBaseline = 'middle';
+    ctx.textAlign = 'left';
+    ctx.fillText('車輛軌跡模擬', x0 + pad, y0 + pad + fs / 2);
+    o.legend.forEach((l, i) => {
+      const y = y0 + pad + fs + (i + 0.5) * (fs + 6 * k) + 4 * k;
+      ctx.fillStyle = l.color;
+      ctx.fillRect(x0 + pad, y - fs / 3, fs * 1.2, (fs * 2) / 3);
+      ctx.fillStyle = o.palette === 'print' ? '#111' : '#e2e8f0';
+      ctx.fillText(l.label, x0 + pad + fs * 1.6, y);
+    });
+  }
 
   if (o.titleBlock) {
     const ink = o.palette === 'print' ? '#111' : '#e2e8f0';
