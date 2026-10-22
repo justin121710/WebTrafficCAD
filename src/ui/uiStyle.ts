@@ -36,7 +36,7 @@ export const UI_STYLES: UiStyleMeta[] = [
 
 const KEY = 'webtrafficcad.uiStyle';
 
-/** 讀取介面風格：網址參數 ?ui= 優先，其次為上次選擇，預設為經典版 */
+/** 讀取介面風格：網址參數 ?ui= 優先，其次為上次選擇，預設為 B・直覺 */
 export function loadUiStyle(): UiStyle {
   try {
     const q = new URLSearchParams(window.location.search).get('ui');
@@ -46,7 +46,7 @@ export function loadUiStyle(): UiStyle {
   } catch {
     // 無法存取 localStorage 時使用預設
   }
-  return 'classic';
+  return 'guided';
 }
 
 export function saveUiStyle(style: UiStyle) {

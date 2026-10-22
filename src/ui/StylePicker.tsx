@@ -99,7 +99,7 @@ export default function StylePicker({ value, onChange, buttonClassName, compact 
               <h2 className="text-base font-bold">選擇介面風格</h2>
               <button onClick={() => setOpen(false)} className="p-1 rounded hover:bg-white/5 cursor-pointer"><X className="w-4 h-4" /></button>
             </div>
-            <p className="text-xs text-slate-400 mb-4">四種版面共用同一套功能與資料，切換不會影響圖面內容；選擇會記在這台電腦的瀏覽器中，隨時可以換回經典版。</p>
+            <p className="text-xs text-slate-400 mb-4">四種版面共用同一套功能與資料，切換不會影響圖面內容；選擇會記在這台電腦的瀏覽器中，隨時可以換回經典版。預設為 B・直覺。</p>
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
               {UI_STYLES.map(s => {
                 const active = s.id === value;
