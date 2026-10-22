@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { CadElement, CadTool, IslandElement, TextElement, Waypoint, VehicleConfig, CornerPoints, SimulationState, ControllerMode, Point, PathPoint } from './types';
+import { CadElement, CadTool, IslandElement, TextElement } from './types';
 import { 
   calculateWidening, 
   generateChannelizingIsland, 
@@ -15,22 +15,14 @@ import {
   getBezierMinRadiusOfCurvature,
   generateParkingZoneSlots
 } from './geometry';
-import {
-  smoothPoints,
-  chaikinSmooth,
-  cubicBezierSpline,
-  filletPath,
-  interpolatePath,
-  findClosestPointIndex,
-  distance as simDistance,
-  calculateIntersectionCurve
-} from './utils/pathInterpolator';
-import {
-  simulateVehicle,
-  calculateCorners,
-  calculateTrailerCorners,
-  normalizeAngle
-} from './utils/vehicleSimulator';
+import { simStore, useSimStore } from './simulation/store';
+import { buildObstacles } from './simulation/obstacles';
+import { loadSimulation, serializeSimulation } from './simulation/persist';
+import { emptyDoc } from './simulation/model';
+import SimPanel from './simulation/ui/SimPanel';
+import SimHud from './simulation/ui/SimHud';
+import SimTour, { simTourSeen } from './simulation/ui/SimTour';
+import { GuidedSimSidebar, MinimalSimRail, PolishedSimDock } from './simulation/ui/SimToolPalette';
 import Toolbar from './components/Toolbar';
 import PropsPanel from './components/PropsPanel';
 import CadCanvas, { transformElement, getElementBoundingBox } from './components/CadCanvas';
@@ -46,270 +38,14 @@ import { ExportPanel, SettingsPanel, LayerPanel, QuantityPanel, ArrowTypeBar, Co
 import { PaletteName } from './renderPrimitives';
 import { Compass, Info, CheckCircle2, RotateCcw, RotateCw, Image as ImageIcon, Download, Upload, Trash2, Ruler, X, Grid, ChevronLeft, ChevronRight, Play, Pause, Sliders, Layers, Truck, Lock, Unlock, GitBranch, MapPin, Save, FolderOpen, ChevronDown, PenTool, Paintbrush } from 'lucide-react';
 
-const normalizeColor = (c: string): string => {
-  if (!c) return '#6366f1';
-  if (c.startsWith('#')) return c;
-  const mapping: Record<string, string> = {
-    indigo: '#6366f1',
-    emerald: '#10b981',
-    amber: '#f59e0b',
-    rose: '#f43f5e',
-    sky: '#0ea5e9'
-  };
-  return mapping[c] || '#6366f1';
-};
-
-const getDarkerColor = (hex: string): string => {
-  const normalized = normalizeColor(hex);
-  let r = parseInt(normalized.slice(1, 3), 16);
-  let g = parseInt(normalized.slice(3, 5), 16);
-  let b = parseInt(normalized.slice(5, 7), 16);
-  r = Math.round(r * 0.7);
-  g = Math.round(g * 0.7);
-  b = Math.round(b * 0.7);
-  return `rgb(${r}, ${g}, ${b})`;
-};
-
 export default function App() {
   // App Mode State: 'cad' | 'simulation' (預設為 'cad')
   const [appMode, setAppMode] = useState<'cad' | 'simulation'>('cad');
 
-  // --- 車流軌跡模擬狀態 (Bicycle Simulator States) ---
-  const [simConfig, setSimConfig] = useState<VehicleConfig>({
-    L: 2.7,        // 標準自小客車預設 2.7m 軸距
-    W: 1.8,        // 寬度 1.8m
-    Of: 0.9,       // 前懸 0.9m
-    Or: 1.0,       // 後懸 1.0m
-    speed: 15 / 3.6,    // 15 km/h default speed (converted to m/s)
-    scale: 25,     // 25 px/m
-    lookahead: 6.0, // 6m lookahead distance for Pure Pursuit
-    maxSteerLimit: 40, // 預設最大前輪轉彎 40 度
-    
-    // Trailer parameters default
-    enableTrailer: false,
-    Lt: 7.5,       // Trailer wheelbase
-    Wt: 2.5,       // Trailer width
-    Oft: 1.0,      // Trailer front overhang
-    Ort: 1.8       // Trailer rear overhang
-  });
-
-  const [simControllerMode, setSimControllerMode] = useState<ControllerMode>(
-    ControllerMode.FRONT_AXLE_DRAG
-  );
-  
-  const [simRawPoints, setSimRawPoints] = useState<Waypoint[]>([]);
-  // 路口引導曲線模式與參數 (Intersection Mode & parameters)
-  const [simIsIntersectionMode, setSimIsIntersectionMode] = useState<boolean>(false);
-  const [simP0X, setSimP0X] = useState<number | null>(null);
-  const [simP0Y, setSimP0Y] = useState<number | null>(null);
-  const [simP0Angle, setSimP0Angle] = useState<number>(0); // degrees
-  const [simP3X, setSimP3X] = useState<number | null>(null);
-  const [simP3Y, setSimP3Y] = useState<number | null>(null);
-  const [simP3Angle, setSimP3Angle] = useState<number>(-90); // degrees (-90 = pointing up)
-  const [simP1RatioPercent, setSimP1RatioPercent] = useState<number>(70);
-  const [simP2RatioPercent, setSimP2RatioPercent] = useState<number>(70);
-  const [simIntersectionPickState, setSimIntersectionPickState] = useState<"none" | "p0" | "p3">("none");
-  const [simShowIntersectionHelpers, setSimShowIntersectionHelpers] = useState<boolean>(true);
-  const [simEnableOutswing, setSimEnableOutswing] = useState<boolean>(false);
-  const [simI1RatioPercent, setSimI1RatioPercent] = useState<number>(100);
-  const [simI1OffsetDistance, setSimI1OffsetDistance] = useState<number>(0.0);
-  const [simI2RatioPercent, setSimI2RatioPercent] = useState<number>(100);
-  const [simI2OffsetDistance, setSimI2OffsetDistance] = useState<number>(0.0);
-  const [simStartExtensionM, setSimStartExtensionM] = useState<number>(0.0);
-  const [simEndExtensionM, setSimEndExtensionM] = useState<number>(10.0);
-  const [simIsDragging, setSimIsDragging] = useState<boolean>(false);
-
-  // 比例尺標定工具開關
-  const [simIsCalibrating, setSimIsCalibrating] = useState<boolean>(false);
-
-  const [simDrawMode, setSimDrawMode] = useState<"select" | "drag" | "click" | "smartpath">("select");
-  const [isSimDrawModeDropdownOpen, setIsSimDrawModeDropdownOpen] = useState<boolean>(false);
-  const [simIsPlaying, setSimIsPlaying] = useState<boolean>(false);
-  const [simPlaybackSpeed, setSimPlaybackSpeed] = useState<number>(1);
-  const [simCurrentStepIndex, setSimCurrentStepIndex] = useState<number>(0);
-  const [simLockedPaths, setSimLockedPaths] = useState<{
-    id: string;
-    rawPoints: Waypoint[];
-    trajectory: SimulationState[];
-    config: VehicleConfig;
-    themeColor: "indigo" | "emerald" | "amber" | "rose" | "sky";
-    drawMode: "smartpath" | "click" | "drag";
-    intersectionParams?: {
-      p0X: number;
-      p0Y: number;
-      p0Angle: number;
-      p3X: number;
-      p3Y: number;
-      p3Angle: number;
-      p1RatioPercent: number;
-      p2RatioPercent: number;
-      enableOutswing: boolean;
-      i1RatioPercent: number;
-      i1OffsetDistance: number;
-      i2RatioPercent: number;
-      i2OffsetDistance: number;
-      startExtensionM: number;
-      endExtensionM: number;
-    };
-  }[]>([]);
-  const [editingPathId, setEditingPathId] = useState<string | null>(null);
-  const [simThemeColor, setSimThemeColor] = useState<"indigo" | "emerald" | "amber" | "rose" | "sky">("indigo");
-  const [simSelectedVehiclePresetId, setSimSelectedVehiclePresetId] = useState<string>("standard-sedan");
-
-  const [simIsPenTrajectory, setSimIsPenTrajectory] = useState<boolean>(false);
-
-  // 當切換繪圖模式/離開繪製功能且僅有一個點時，清除該節點
-  const prevSimDrawMode = useRef(simDrawMode);
-  const prevAppMode = useRef(appMode);
-  const prevSimIsIntersectionMode = useRef(simIsIntersectionMode);
-
-  useEffect(() => {
-    const isModeChanged = prevSimDrawMode.current !== simDrawMode || 
-                          prevAppMode.current !== appMode || 
-                          prevSimIsIntersectionMode.current !== simIsIntersectionMode;
-    if (isModeChanged) {
-      if (simRawPoints.length === 1) {
-        setSimRawPoints([]);
-      }
-      prevSimDrawMode.current = simDrawMode;
-      prevAppMode.current = appMode;
-      prevSimIsIntersectionMode.current = simIsIntersectionMode;
-    }
-  }, [simDrawMode, appMode, simIsIntersectionMode, simRawPoints.length]);
-
-  // 軌跡是否是使用鋼筆(smartpath)繪製的狀態追蹤
-  useEffect(() => {
-    if (simRawPoints.length > 0 && simDrawMode === 'smartpath') {
-      setSimIsPenTrajectory(true);
-    } else if (simRawPoints.length === 0) {
-      setSimIsPenTrajectory(false);
-    }
-  }, [simRawPoints, simDrawMode]);
-
-  // 當編輯中軌跡的幾何點或參數有任何變更時，自動將播放進度重設為 0% 並暫停播放
-  useEffect(() => {
-    setSimCurrentStepIndex(0);
-    simFractionalStepRef.current = 0;
-    setSimIsPlaying(false);
-  }, [
-    simRawPoints,
-    simP0X,
-    simP0Y,
-    simP0Angle,
-    simP3X,
-    simP3Y,
-    simP3Angle,
-    simP1RatioPercent,
-    simP2RatioPercent,
-    simEnableOutswing,
-    simI1RatioPercent,
-    simI1OffsetDistance,
-    simI2RatioPercent,
-    simI2OffsetDistance,
-    simStartExtensionM,
-    simEndExtensionM
-  ]);
-
-  // 顯示選項
-  const [simShowSweptPath, setSimShowSweptPath] = useState<boolean>(true);
-  const [simShowCornerTracks, setSimShowCornerTracks] = useState<boolean>(true);
-  const [simShowAxleTracks, setSimShowAxleTracks] = useState<boolean>(true);
-  const [simShowBodyWireframe, setSimShowBodyWireframe] = useState<boolean>(true);
-  const [simSweptOpacity, setSimSweptOpacity] = useState<number>(0.1);
-
-  // 繪製與拖曳狀態
-  const [simDraggingWaypointIndex, setSimDraggingWaypointIndex] = useState<number | null>(null);
-  const [simDraggingHandleType, setSimDraggingHandleType] = useState<"anchor" | "handleIn" | "handleOut" | null>(null);
-  const [simIsDraggingFirstVec, setSimIsDraggingFirstVec] = useState<boolean>(false);
-  const [simFirstVecStart, setSimFirstVecStart] = useState<Point | null>(null);
-  const [simFirstVecEnd, setSimFirstVecEnd] = useState<Point | null>(null);
-  const simClickStartHeadingRef = useRef<number | null>(null);
-
-  // Animation Timer references
-  const simAnimationFrameId = useRef<number | null>(null);
-  const simFractionalStepRef = useRef<number>(0);
-  const simLastTimeRef = useRef<number>(0);
-
-  // 車型 Presets 定義
-  const SIM_VEHICLE_PRESETS = [
-    {
-      id: "standard-sedan",
-      name: "標準自小客車",
-      L: 2.7,
-      W: 1.8,
-      Of: 0.9,
-      Or: 1.0,
-      enableTrailer: false,
-      maxSteerLimit: 40,
-    },
-    {
-      id: "taiwan-bus",
-      name: "台灣標準大客車",
-      L: 5.8,
-      W: 2.5,
-      Of: 2.2,
-      Or: 3.3,
-      enableTrailer: false,
-      maxSteerLimit: 40,
-    },
-    {
-      id: "taiwan-truck",
-      name: "台灣標準大貨車",
-      L: 5.6,
-      W: 2.5,
-      Of: 1.5,
-      Or: 2.9,
-      enableTrailer: false,
-      maxSteerLimit: 40,
-    },
-    {
-      id: "taiwan-trailer",
-      name: "台灣標準聯結半拖車",
-      L: 3.5,
-      W: 2.5,
-      Of: 1.0,
-      Or: 0.8,
-      enableTrailer: true,
-      Lt: 7.5,
-      Wt: 2.5,
-      Oft: 1.4,
-      Ort: 1.8,
-      maxSteerLimit: 40,
-    },
-    {
-      id: "custom",
-      name: "自定義車體尺寸",
-      L: 5.0,
-      W: 2.5,
-      Of: 1.0,
-      Or: 0.8,
-      enableTrailer: false,
-      maxSteerLimit: 40,
-    }
-  ];
-
-  // Presets 切換
-  const handleSimVehiclePresetChange = (presetId: string) => {
-    setSimSelectedVehiclePresetId(presetId);
-    const p = SIM_VEHICLE_PRESETS.find((preset) => preset.id === presetId);
-    if (p && presetId !== "custom") {
-      setSimConfig((prev) => ({
-        ...prev,
-        L: p.L,
-        W: p.W,
-        Of: p.Of,
-        Or: p.Or,
-        enableTrailer: p.enableTrailer,
-        Lt: p.Lt ?? prev.Lt,
-        Wt: p.Wt ?? prev.Wt,
-        Oft: p.Oft ?? prev.Oft,
-        Ort: p.Ort ?? prev.Ort,
-        maxSteerLimit: p.maxSteerLimit ?? 40
-      }));
-      setSimCurrentStepIndex(0);
-      simFractionalStepRef.current = 0;
-    }
-  };
+  // 軌跡模擬狀態集中在 simStore（src/simulation/store.ts）
+  const sim = useSimStore();
+  const [showSimTour, setShowSimTour] = useState<boolean>(false);
+  const [simDocVersion, setSimDocVersion] = useState<number>(0);
 
   // Central elements state (Geometries Array)
   const [elements, setElements] = useState<CadElement[]>([]);
@@ -367,559 +103,6 @@ export default function App() {
     setSelectedAnchorIndices([]);
   }, [selectedElement?.id]);
 
-  // Automatically calculate and set raw points when intersection mode is active
-  useEffect(() => {
-    if (simIsIntersectionMode) {
-      if (simP0X === null || simP0Y === null || simP3X === null || simP3Y === null || simIsDragging) {
-        setSimRawPoints([]);
-        return;
-      }
-      const p0 = { x: simP0X, y: simP0Y };
-      const p3 = { x: simP3X, y: simP3Y };
-      const res = calculateIntersectionCurve(
-        p0,
-        simP0Angle,
-        p3,
-        simP3Angle,
-        simP1RatioPercent / 100,
-        simP2RatioPercent / 100,
-        simEnableOutswing,
-        simConfig.scale,
-        simI1RatioPercent,
-        simI1OffsetDistance,
-        simI2RatioPercent,
-        simI2OffsetDistance,
-        simStartExtensionM,
-        simEndExtensionM
-      );
-      
-      // Convert Point[] to Waypoint[]
-      const waypoints: Waypoint[] = res.curve.map(pt => ({
-        x: pt.x,
-        y: pt.y,
-        handleIn: { x: 0, y: 0 },
-        handleOut: { x: 0, y: 0 }
-      }));
-      setSimRawPoints(waypoints);
-    }
-  }, [
-    simIsIntersectionMode,
-    simP0X,
-    simP0Y,
-    simP0Angle,
-    simP3X,
-    simP3Y,
-    simP3Angle,
-    simP1RatioPercent,
-    simP2RatioPercent,
-    simEnableOutswing,
-    simConfig.scale,
-    simI1RatioPercent,
-    simI1OffsetDistance,
-    simI2RatioPercent,
-    simI2OffsetDistance,
-    simStartExtensionM,
-    simEndExtensionM,
-    simIsDragging
-  ]);
-
-  // --- 計算引導路徑 (Cubic Bezier / Chaikin) ---
-  const simInterpolatedPath = useMemo<PathPoint[]>(() => {
-    if (simRawPoints.length < 2) return [];
-
-    const scale = simConfig.scale;
-    const hasBezier = simRawPoints.some(wp => 
-      (wp.handleIn && (wp.handleIn.x !== 0 || wp.handleIn.y !== 0)) ||
-      (wp.handleOut && (wp.handleOut.x !== 0 || wp.handleOut.y !== 0))
-    );
-
-    if (simDrawMode === 'click' || simDrawMode === 'drag' || (simDrawMode === 'select' && !simIsPenTrajectory)) {
-      let processed: Point[] = [];
-      const firstPt = simRawPoints[0];
-      const hasFirstHandle = firstPt && firstPt.handleOut && (firstPt.handleOut.x !== 0 || firstPt.handleOut.y !== 0);
-      
-      let controlPoints = [...simRawPoints];
-      if (hasFirstHandle && simRawPoints.length >= 2) {
-        const dx = firstPt.handleOut.x;
-        const dy = firstPt.handleOut.y;
-        const hLen = Math.hypot(dx, dy);
-        const ux = dx / hLen;
-        const uy = dy / hLen;
-        const dist = Math.hypot(simRawPoints[1].x - firstPt.x, simRawPoints[1].y - firstPt.y);
-        const Pv = {
-          x: firstPt.x + ux * dist * 0.35,
-          y: firstPt.y + uy * dist * 0.35
-        };
-        controlPoints = [firstPt, Pv, ...simRawPoints.slice(1)];
-      }
-
-      if (controlPoints.length === 2) {
-        processed = [...controlPoints];
-      } else {
-        processed = chaikinSmooth(controlPoints, 3);
-      }
-      const sampleSpacingPx = 0.08 * scale;
-      const path = interpolatePath(processed, sampleSpacingPx);
-
-      const hStep = 8;
-      for (let i = 0; i < path.length; i++) {
-        const prevIdx = Math.max(0, i - hStep);
-        const nextIdx = Math.min(path.length - 1, i + hStep);
-        if (nextIdx > prevIdx) {
-          path[i].heading = Math.atan2(path[nextIdx].y - path[prevIdx].y, path[nextIdx].x - path[prevIdx].x);
-        }
-      }
-
-      const L = simConfig.L;
-      const maxSteerDeg = simConfig.maxSteerLimit ?? 40;
-      const phi_max = (maxSteerDeg * Math.PI) / 180;
-      const R_min = phi_max > 0.001 ? L / Math.sin(phi_max) : 3.0;
-
-      const step = 8;
-      for (let i = 0; i < path.length; i++) {
-        const prevIdx = Math.max(0, i - step);
-        const nextIdx = Math.min(path.length - 1, i + step);
-        if (nextIdx === prevIdx) {
-          path[i].isCurvatureExceeded = false;
-          path[i].steerAngleDeg = 0;
-          continue;
-        }
-
-        const dHeading = Math.abs(normalizeAngle(path[nextIdx].heading - path[prevIdx].heading));
-        const ds = (path[nextIdx].s - path[prevIdx].s) / scale;
-        let R_curv = Infinity;
-        if (dHeading > 1e-5 && ds > 1e-5) {
-          R_curv = ds / dHeading;
-        }
-
-        path[i].isCurvatureExceeded = R_curv < R_min;
-        let steerAngleDeg = 0;
-        if (R_curv > 0.001 && R_curv !== Infinity) {
-          steerAngleDeg = Math.atan(L / R_curv) * 180 / Math.PI;
-        }
-        path[i].steerAngleDeg = steerAngleDeg;
-      }
-
-      return path;
-    }
-
-    const L = simConfig.L;
-    const maxSteerDeg = simConfig.maxSteerLimit ?? 40;
-    const phi_max = (maxSteerDeg * Math.PI) / 180;
-    const R_min = phi_max > 0.001 ? L / Math.sin(phi_max) : 3.0;
-
-    const samples: PathPoint[] = [];
-
-    for (let i = 0; i < simRawPoints.length - 1; i++) {
-      const pStart = simRawPoints[i];
-      const pEnd = simRawPoints[i + 1];
-
-      const A = { x: pStart.x, y: pStart.y };
-      const B = { x: pStart.x + (pStart.handleOut?.x ?? 0), y: pStart.y + (pStart.handleOut?.y ?? 0) };
-      const C = { x: pEnd.x + (pEnd.handleIn?.x ?? 0), y: pEnd.y + (pEnd.handleIn?.y ?? 0) };
-      const D = { x: pEnd.x, y: pEnd.y };
-
-      const Am = { x: A.x / scale, y: A.y / scale };
-      const Bm = { x: B.x / scale, y: B.y / scale };
-      const Cm = { x: C.x / scale, y: C.y / scale };
-      const Dm = { x: D.x / scale, y: D.y / scale };
-
-      const numSegmentSteps = 150;
-      for (let j = 0; j <= numSegmentSteps; j++) {
-        if (i > 0 && j === 0) continue;
-
-        const t = j / numSegmentSteps;
-        const oneMinusT = 1 - t;
-
-        const pPx = {
-          x: (oneMinusT ** 3) * A.x + 3 * (oneMinusT ** 2) * t * B.x + 3 * oneMinusT * (t ** 2) * C.x + (t ** 3) * D.x,
-          y: (oneMinusT ** 3) * A.y + 3 * (oneMinusT ** 2) * t * B.y + 3 * oneMinusT * (t ** 2) * C.y + (t ** 3) * D.y,
-        };
-
-        const dx = 3 * (oneMinusT ** 2) * (Bm.x - Am.x) + 6 * oneMinusT * t * (Cm.x - Bm.x) + 3 * (t ** 2) * (Dm.x - Cm.x);
-        const dy = 3 * (oneMinusT ** 2) * (Bm.y - Am.y) + 6 * oneMinusT * t * (Cm.y - Bm.y) + 3 * (t ** 2) * (Dm.y - Cm.y);
-
-        const ddx = 6 * oneMinusT * (Cm.x - 2 * Bm.x + Am.x) + 6 * t * (Dm.x - 2 * Cm.x + Bm.x);
-        const ddy = 6 * oneMinusT * (Cm.y - 2 * Bm.y + Am.y) + 6 * t * (Dm.y - 2 * Cm.y + Bm.y);
-
-        let heading = Math.atan2(dy, dx);
-        if (Math.abs(dx) < 1e-6 && Math.abs(dy) < 1e-6) {
-          heading = Math.atan2(Dm.y - Am.y, Dm.x - Am.x);
-        }
-
-        const denominator = (dx ** 2 + dy ** 2) ** 1.5;
-        let k = 0;
-        if (denominator > 0.0001) {
-          k = Math.abs(dx * ddy - dy * ddx) / denominator;
-        }
-
-        const R_curv = k > 0.0001 ? 1 / k : Infinity;
-        const isCurvatureExceeded = R_curv < R_min;
-        let steerAngleDeg = 0;
-        if (R_curv > 0.001 && R_curv !== Infinity) {
-          steerAngleDeg = Math.atan(L / R_curv) * 180 / Math.PI;
-        }
-
-        samples.push({
-          x: pPx.x,
-          y: pPx.y,
-          s: 0,
-          heading: heading,
-          isCurvatureExceeded: isCurvatureExceeded,
-          steerAngleDeg: steerAngleDeg,
-        });
-      }
-    }
-
-    const sampleSpacingPx = 0.08 * scale;
-    const finalPath = interpolatePath(samples, sampleSpacingPx);
-
-    for (let k = 0; k < finalPath.length; k++) {
-      const closestIdx = findClosestPointIndex(samples, finalPath[k]);
-      finalPath[k].isCurvatureExceeded = samples[closestIdx]?.isCurvatureExceeded ?? false;
-      finalPath[k].steerAngleDeg = samples[closestIdx]?.steerAngleDeg ?? 0;
-    }
-
-    // 筆刷繪製時將初始朝向設為起始點與第二個點的向量
-    if (simDrawMode === 'drag' && simRawPoints.length >= 2 && finalPath.length > 0) {
-      const dx = simRawPoints[1].x - simRawPoints[0].x;
-      const dy = simRawPoints[1].y - simRawPoints[0].y;
-      const initHeading = Math.atan2(dy, dx);
-      const numInitPoints = Math.min(finalPath.length, 5);
-      for (let i = 0; i < numInitPoints; i++) {
-        finalPath[i].heading = initHeading;
-      }
-    }
-
-    return finalPath;
-  }, [simRawPoints, simDrawMode, simConfig.scale, simConfig.L, simConfig.maxSteerLimit]);
-
-  // --- 計算車輛運動軌跡 ---
-  const simTrajectory = useMemo<SimulationState[]>(() => {
-    if (simInterpolatedPath.length < 2) return [];
-    if (simIsDragging && simControllerMode === ControllerMode.ACTIVE_PURE_PURSUIT) {
-      return []; // 拖曳時暫停 Pure Pursuit 運動模擬，防止卡頓
-    }
-    return simulateVehicle(simInterpolatedPath, simConfig, simControllerMode);
-  }, [simInterpolatedPath, simConfig, simControllerMode, simIsDragging]);
-
-  // --- 即時模擬指標計算 ---
-  const activeState = simTrajectory[Math.min(simCurrentStepIndex, simTrajectory.length ? simTrajectory.length - 1 : 0)];
-  const currentDeltaDeg = activeState ? (activeState.steering * 180) / Math.PI : 0;
-  const currentThetaDeg = activeState ? (activeState.heading * 180) / Math.PI : 0;
-  const currentTurnRadiusM = useMemo(() => {
-    if (!activeState || Math.abs(activeState.steering) < 0.005) return Infinity;
-    return simConfig.L / Math.tan(Math.abs(activeState.steering));
-  }, [activeState, simConfig.L]);
-  const totalPathLengthM = useMemo(() => {
-    if (simInterpolatedPath.length < 2) return 0;
-    return simInterpolatedPath[simInterpolatedPath.length - 1].s / simConfig.scale;
-  }, [simInterpolatedPath, simConfig.scale]);
-
-  // --- 動畫播放計時器 ---
-  useEffect(() => {
-    if (simTrajectory.length === 0) return;
-
-    if (!simIsPlaying) {
-      if (simAnimationFrameId.current) {
-        cancelAnimationFrame(simAnimationFrameId.current);
-      }
-      return;
-    }
-
-    const playLoop = (timestamp: number) => {
-      if (!simLastTimeRef.current) simLastTimeRef.current = timestamp;
-      const elapsedMs = timestamp - simLastTimeRef.current;
-      simLastTimeRef.current = timestamp;
-
-      const dt = Math.min(0.04, elapsedMs / 1000); 
-
-      const stepDist_px = simControllerMode === ControllerMode.FRONT_AXLE_DRAG 
-        ? 0.08 * simConfig.scale
-        : 1.5; 
-
-      const displacement_px = simConfig.speed * simConfig.scale * dt * simPlaybackSpeed;
-      const stepIncrement = displacement_px / stepDist_px;
-
-      simFractionalStepRef.current += stepIncrement;
-      
-      if (simFractionalStepRef.current >= simTrajectory.length - 1) {
-        simFractionalStepRef.current = 0;
-      }
-
-      const nextIdx = Math.floor(simFractionalStepRef.current);
-      setSimCurrentStepIndex(nextIdx);
-
-      simAnimationFrameId.current = requestAnimationFrame(playLoop);
-    };
-
-    simLastTimeRef.current = 0;
-    simAnimationFrameId.current = requestAnimationFrame(playLoop);
-
-    return () => {
-      if (simAnimationFrameId.current) cancelAnimationFrame(simAnimationFrameId.current);
-    };
-  }, [simTrajectory, simIsPlaying, simConfig.speed, simConfig.scale, simControllerMode, simPlaybackSpeed]);
-
-  const handleSimClear = () => {
-    setSimRawPoints([]);
-    simClickStartHeadingRef.current = null;
-    simFractionalStepRef.current = 0;
-    setSimCurrentStepIndex(0);
-    setSimIsPlaying(false);
-  };
-
-  const handleSimClearAll = () => {
-    setSimLockedPaths([]);
-    setSimRawPoints([]);
-    setEditingPathId(null);
-    simClickStartHeadingRef.current = null;
-    simFractionalStepRef.current = 0;
-    setSimCurrentStepIndex(0);
-    setSimIsPlaying(false);
-  };
-
-  const handleSimUndoLastNode = () => {
-    if (simRawPoints.length > 0) {
-      setSimRawPoints((prev) => {
-        const next = prev.slice(0, prev.length - 1);
-        if (next.length === 0) {
-          setSimIsDraggingFirstVec(false);
-          setSimFirstVecStart(null);
-          setSimFirstVecEnd(null);
-          simClickStartHeadingRef.current = null;
-        }
-        return next;
-      });
-      setSimCurrentStepIndex(0);
-      simFractionalStepRef.current = 0;
-      setSimIsPlaying(false);
-    }
-  };
-
-  const handleSimLockCurrentPath = () => {
-    if (simRawPoints.length > 0) {
-      if (editingPathId) {
-        // 如果目前是解鎖編輯舊的軌跡，將修改儲存回該軌跡，並保持其在陣列中的順序
-        setSimLockedPaths((prev) =>
-          prev.map((path) =>
-            path.id === editingPathId
-              ? {
-                  ...path,
-                  rawPoints: [...simRawPoints],
-                  trajectory: [...simTrajectory],
-                  config: { ...simConfig },
-                  themeColor: simThemeColor,
-                  intersectionParams: simIsIntersectionMode ? {
-                    p0X: simP0X ?? 0,
-                    p0Y: simP0Y ?? 0,
-                    p0Angle: simP0Angle,
-                    p3X: simP3X ?? 0,
-                    p3Y: simP3Y ?? 0,
-                    p3Angle: simP3Angle,
-                    p1RatioPercent: simP1RatioPercent,
-                    p2RatioPercent: simP2RatioPercent,
-                    enableOutswing: simEnableOutswing,
-                    i1RatioPercent: simI1RatioPercent,
-                    i1OffsetDistance: simI1OffsetDistance,
-                    i2RatioPercent: simI2RatioPercent,
-                    i2OffsetDistance: simI2OffsetDistance,
-                    startExtensionM: simStartExtensionM,
-                    endExtensionM: simEndExtensionM,
-                  } : undefined
-                }
-              : path
-          )
-        );
-        setEditingPathId(null);
-      } else {
-        // 否則，新增一條全新的軌跡到陣列末尾
-        const currentMode = simDrawMode === 'select' ? (simIsPenTrajectory ? 'smartpath' : 'click') : simDrawMode;
-        setSimLockedPaths((prev) => [
-          ...prev,
-          {
-            id: `path-${Date.now()}`,
-            rawPoints: [...simRawPoints],
-            trajectory: [...simTrajectory],
-            config: { ...simConfig },
-            themeColor: simThemeColor,
-            drawMode: currentMode === 'select' ? 'smartpath' : currentMode,
-            intersectionParams: simIsIntersectionMode ? {
-              p0X: simP0X ?? 0,
-              p0Y: simP0Y ?? 0,
-              p0Angle: simP0Angle,
-              p3X: simP3X ?? 0,
-              p3Y: simP3Y ?? 0,
-              p3Angle: simP3Angle,
-              p1RatioPercent: simP1RatioPercent,
-              p2RatioPercent: simP2RatioPercent,
-              enableOutswing: simEnableOutswing,
-              i1RatioPercent: simI1RatioPercent,
-              i1OffsetDistance: simI1OffsetDistance,
-              i2RatioPercent: simI2RatioPercent,
-              i2OffsetDistance: simI2OffsetDistance,
-              startExtensionM: simStartExtensionM,
-              endExtensionM: simEndExtensionM,
-            } : undefined
-          },
-        ]);
-      }
-      setSimRawPoints([]);
-      setSimIsIntersectionMode(false);
-      setSimCurrentStepIndex(0);
-      simFractionalStepRef.current = 0;
-      setSimIsPlaying(false);
-      const colorsOption: ("indigo" | "emerald" | "amber" | "rose" | "sky")[] = ["indigo", "emerald", "amber", "rose", "sky"];
-      const nextColor = colorsOption[(colorsOption.indexOf(simThemeColor) + 1) % colorsOption.length];
-      setSimThemeColor(nextColor);
-    }
-  };
-
-  const handleSimUnlockLastPath = () => {
-    if (simLockedPaths.length > 0) {
-      const last = simLockedPaths[simLockedPaths.length - 1];
-      setSimLockedPaths((prev) => prev.slice(0, prev.length - 1));
-      setEditingPathId(last.id);
-      setSimRawPoints([...last.rawPoints]);
-      setSimConfig({ ...last.config });
-      setSimThemeColor(last.themeColor);
-      setSimCurrentStepIndex(0);
-      simFractionalStepRef.current = 0;
-      setSimIsPlaying(true);
-      setSimIsPenTrajectory(last.drawMode === 'smartpath');
-
-      if (last.intersectionParams) {
-        setSimP0X(last.intersectionParams.p0X);
-        setSimP0Y(last.intersectionParams.p0Y);
-        setSimP0Angle(last.intersectionParams.p0Angle);
-        setSimP3X(last.intersectionParams.p3X);
-        setSimP3Y(last.intersectionParams.p3Y);
-        setSimP3Angle(last.intersectionParams.p3Angle);
-        setSimP1RatioPercent(last.intersectionParams.p1RatioPercent);
-        setSimP2RatioPercent(last.intersectionParams.p2RatioPercent);
-        setSimEnableOutswing(last.intersectionParams.enableOutswing);
-        setSimI1RatioPercent(last.intersectionParams.i1RatioPercent);
-        setSimI1OffsetDistance(last.intersectionParams.i1OffsetDistance);
-        setSimI2RatioPercent(last.intersectionParams.i2RatioPercent);
-        setSimI2OffsetDistance(last.intersectionParams.i2OffsetDistance);
-        setSimStartExtensionM(last.intersectionParams.startExtensionM);
-        setSimEndExtensionM(last.intersectionParams.endExtensionM);
-        setSimIsIntersectionMode(true);
-        setSimDrawMode(last.drawMode || 'smartpath');
-      } else {
-        setSimIsIntersectionMode(false);
-        setSimDrawMode('select');
-      }
-    }
-  };
-
-  const handleSelectLockedPath = (pathId: string) => {
-    const targetPath = simLockedPaths.find(x => x.id === pathId);
-    if (!targetPath) return;
-
-    // 先保存當前正在編輯的軌跡（若有）
-    if (simRawPoints.length > 0) {
-      if (editingPathId) {
-        // 原地更新舊的編輯軌跡
-        setSimLockedPaths((prev) =>
-          prev.map((path) =>
-            path.id === editingPathId
-              ? {
-                  ...path,
-                  rawPoints: [...simRawPoints],
-                  trajectory: [...simTrajectory],
-                  config: { ...simConfig },
-                  themeColor: simThemeColor,
-                  intersectionParams: simIsIntersectionMode ? {
-                    p0X: simP0X ?? 0,
-                    p0Y: simP0Y ?? 0,
-                    p0Angle: simP0Angle,
-                    p3X: simP3X ?? 0,
-                    p3Y: simP3Y ?? 0,
-                    p3Angle: simP3Angle,
-                    p1RatioPercent: simP1RatioPercent,
-                    p2RatioPercent: simP2RatioPercent,
-                    enableOutswing: simEnableOutswing,
-                    i1RatioPercent: simI1RatioPercent,
-                    i1OffsetDistance: simI1OffsetDistance,
-                    i2RatioPercent: simI2RatioPercent,
-                    i2OffsetDistance: simI2OffsetDistance,
-                    startExtensionM: simStartExtensionM,
-                    endExtensionM: simEndExtensionM,
-                  } : undefined
-                }
-              : path
-          )
-        );
-      } else {
-        // 全新軌跡則上鎖並新增到末端
-        const currentMode = simDrawMode === 'select' ? (simIsPenTrajectory ? 'smartpath' : 'click') : simDrawMode;
-        setSimLockedPaths((prev) => [
-          ...prev,
-          {
-            id: `path-${Date.now()}`,
-            rawPoints: [...simRawPoints],
-            trajectory: [...simTrajectory],
-            config: { ...simConfig },
-            themeColor: simThemeColor,
-            drawMode: currentMode === 'select' ? 'smartpath' : currentMode,
-            intersectionParams: simIsIntersectionMode ? {
-              p0X: simP0X ?? 0,
-              p0Y: simP0Y ?? 0,
-              p0Angle: simP0Angle,
-              p3X: simP3X ?? 0,
-              p3Y: simP3Y ?? 0,
-              p3Angle: simP3Angle,
-              p1RatioPercent: simP1RatioPercent,
-              p2RatioPercent: simP2RatioPercent,
-              enableOutswing: simEnableOutswing,
-              i1RatioPercent: simI1RatioPercent,
-              i1OffsetDistance: simI1OffsetDistance,
-              i2RatioPercent: simI2RatioPercent,
-              i2OffsetDistance: simI2OffsetDistance,
-              startExtensionM: simStartExtensionM,
-              endExtensionM: simEndExtensionM,
-            } : undefined
-          },
-        ]);
-      }
-    }
-
-    // 載入 targetPath 作為當前編輯
-    setEditingPathId(pathId);
-    setSimRawPoints([...targetPath.rawPoints]);
-    setSimConfig({ ...targetPath.config });
-    setSimThemeColor(targetPath.themeColor);
-    setSimCurrentStepIndex(0);
-    simFractionalStepRef.current = 0;
-    setSimIsPlaying(false);
-    setSimIsPenTrajectory(targetPath.drawMode === 'smartpath');
-    
-    if (targetPath.intersectionParams) {
-      setSimP0X(targetPath.intersectionParams.p0X);
-      setSimP0Y(targetPath.intersectionParams.p0Y);
-      setSimP0Angle(targetPath.intersectionParams.p0Angle);
-      setSimP3X(targetPath.intersectionParams.p3X);
-      setSimP3Y(targetPath.intersectionParams.p3Y);
-      setSimP3Angle(targetPath.intersectionParams.p3Angle);
-      setSimP1RatioPercent(targetPath.intersectionParams.p1RatioPercent);
-      setSimP2RatioPercent(targetPath.intersectionParams.p2RatioPercent);
-      setSimEnableOutswing(targetPath.intersectionParams.enableOutswing);
-      setSimI1RatioPercent(targetPath.intersectionParams.i1RatioPercent);
-      setSimI1OffsetDistance(targetPath.intersectionParams.i1OffsetDistance);
-      setSimI2RatioPercent(targetPath.intersectionParams.i2RatioPercent);
-      setSimI2OffsetDistance(targetPath.intersectionParams.i2OffsetDistance);
-      setSimStartExtensionM(targetPath.intersectionParams.startExtensionM);
-      setSimEndExtensionM(targetPath.intersectionParams.endExtensionM);
-      setSimIsIntersectionMode(true);
-      setSimDrawMode(targetPath.drawMode || 'smartpath');
-    } else {
-      setSimIsIntersectionMode(false);
-      setSimDrawMode('select');
-    }
-  };
-
-
   // Global Engineering settings
   const [R2, setR2] = useState<number>(10.0); // Default 10 meters radius
   const [designVehicle, setDesignVehicle] = useState<'passenger' | 'semi_trailer' | 'articulated'>('semi_trailer');
@@ -966,22 +149,6 @@ export default function App() {
   const [isGridSettingsOpen, setIsGridSettingsOpen] = useState<boolean>(false);
   const [isSnapSettingsOpen, setIsSnapSettingsOpen] = useState<boolean>(false);
 
-  // SIM 面板彈出控制狀態
-  const [activeColorPickerPathId, setActiveColorPickerPathId] = useState<string | null>(null);
-
-  // 更新已鎖定軌跡的顏色
-  const handleUpdatePathColor = (pathId: string, color: string) => {
-    if (pathId === editingPathId) {
-      // 正在編輯的軌跡：更新當前主題色
-      setSimThemeColor(color);
-    }
-    setSimLockedPaths((prev) =>
-      prev.map((path) =>
-        path.id === pathId ? { ...path, themeColor: color } : path
-      )
-    );
-  };
-
   // Register Global Hotkeys (Ctrl+Z, Ctrl+Y, V to select, and Delete/Backspace to delete selected elements)
   useEffect(() => {
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
@@ -991,25 +158,8 @@ export default function App() {
       const isCmdOrCtrl = e.ctrlKey || e.metaKey;
 
       if (appMode === 'simulation') {
-        if (isCmdOrCtrl && e.key.toLowerCase() === 'z') {
-          e.preventDefault();
-          handleSimUndoLastNode();
-        } else if (e.key.toLowerCase() === 'v') {
-          e.preventDefault();
-          if (simRawPoints.length >= 2) {
-            handleSimLockCurrentPath();
-          }
-          setSimDrawMode('select');
-          setSimIsIntersectionMode(false);
-        } else if (e.key === 'Enter') {
-          if (simRawPoints.length >= 2) {
-            e.preventDefault();
-            handleSimLockCurrentPath();
-          }
-        } else if (e.key === 'Delete' || e.key === 'Backspace') {
-          e.preventDefault();
-          handleSimClear();
-        }
+        if (e.target instanceof HTMLSelectElement) return;
+        handleSimKey(e);
         return;
       }
 
@@ -1037,9 +187,72 @@ export default function App() {
     return () => window.removeEventListener('keydown', handleGlobalKeyDown);
   }, [
     elements, historyStack, redoStack, activeTool, selectedElement, selectedElementIds,
-    appMode, simRawPoints, setSimDrawMode, setSimIsIntersectionMode,
-    handleSimUndoLastNode, handleSimLockCurrentPath, handleSimClear
+    appMode,
   ]);
+
+  // ---------- 軌跡模擬：快捷鍵、障礙物同步、提示與確認 ----------
+  /** 模擬模式快捷鍵（與 CAD 一致：V 選取、Enter 完成、Esc 取消、Ctrl+Z／Y 復原重做） */
+  const spaceTapRef = useRef<{ t: number; used: boolean } | null>(null);
+  const handleSimKey = (e: KeyboardEvent) => {
+    const st = simStore;
+    const k = e.key;
+    const ctrl = e.ctrlKey || e.metaKey;
+    if (ctrl && k.toLowerCase() === 'z' && !e.shiftKey) { e.preventDefault(); st.undo(); return; }
+    if (ctrl && (k.toLowerCase() === 'y' || (k.toLowerCase() === 'z' && e.shiftKey))) { e.preventDefault(); st.redo(); return; }
+    if (ctrl) return;
+    if (k === 'Enter') { e.preventDefault(); if (st.draft) st.finishDraft(); return; }
+    if (k === 'Escape') {
+      e.preventDefault();
+      const d = st.draft;
+      const hasContent = d && !(d.source.kind === 'intersection' && !d.source.params.p0);
+      if (hasContent) st.cancelDraft();
+      else if (st.ui.tool !== 'select') st.setTool('select');
+      else st.selectPath(null);
+      return;
+    }
+    if (k === 'Backspace') {
+      e.preventDefault();
+      if (st.draft) st.removeLastDraftNode();
+      else st.deleteSelectedNode();
+      return;
+    }
+    if (k === 'Delete') {
+      e.preventDefault();
+      if (st.draft) st.removeLastDraftNode();
+      else if (!st.deleteSelectedNode() && st.ui.activePathId) st.deletePath(st.ui.activePathId);
+      return;
+    }
+    if (e.code === 'Space') {
+      if (!e.repeat) spaceTapRef.current = { t: performance.now(), used: false };
+      return;
+    }
+    const map: Record<string, 'select' | 'polyline' | 'intersection' | 'pen' | 'freehand'> = { v: 'select', p: 'polyline', i: 'intersection', n: 'pen', b: 'freehand' };
+    const tool = map[k.toLowerCase()];
+    if (tool) { e.preventDefault(); st.setTool(tool); }
+  };
+
+  // 單按 Space（沒有拖曳平移）＝播放／暫停
+  useEffect(() => {
+    if (appMode !== 'simulation') return;
+    const onUp = (e: KeyboardEvent) => {
+      if (e.code !== 'Space' || !spaceTapRef.current) return;
+      const tap = spaceTapRef.current;
+      spaceTapRef.current = null;
+      if (!tap.used && performance.now() - tap.t < 300 && !(e.target instanceof HTMLInputElement)) simStore.togglePlay();
+    };
+    const onDown = () => { if (spaceTapRef.current) spaceTapRef.current.used = true; };
+    window.addEventListener('keyup', onUp);
+    window.addEventListener('pointerdown', onDown, true);
+    return () => { window.removeEventListener('keyup', onUp); window.removeEventListener('pointerdown', onDown, true); };
+  }, [appMode]);
+
+  // 提示、確認對話框與文件變更通知
+  useEffect(() => {
+    simStore.onToast = (m, t) => showToast(m, t ?? 'info');
+    simStore.onConfirm = (title, message, confirmLabel, run) => setConfirmDialog({ title, message, confirmLabel, onConfirm: run });
+    simStore.onDocChange = () => setSimDocVersion(v => v + 1);
+  });
+
 
   // 點擊外部時關閉匯出選單
   useEffect(() => {
@@ -1053,32 +266,6 @@ export default function App() {
     window.addEventListener('click', handleOutsideClick);
     return () => window.removeEventListener('click', handleOutsideClick);
   }, [isExportDropdownOpen]);
-
-  // 點擊外部時關閉繪製模式下拉選單
-  useEffect(() => {
-    if (!isSimDrawModeDropdownOpen) return;
-    const handleOutsideClick = (e: MouseEvent) => {
-      const target = e.target as HTMLElement;
-      if (!target.closest('#sim-draw-mode-dropdown-container')) {
-        setIsSimDrawModeDropdownOpen(false);
-      }
-    };
-    window.addEventListener('click', handleOutsideClick);
-    return () => window.removeEventListener('click', handleOutsideClick);
-  }, [isSimDrawModeDropdownOpen]);
-
-  // 點擊外部時關閉調色盤
-  useEffect(() => {
-    if (!activeColorPickerPathId) return;
-    const handleOutsideClick = (e: MouseEvent) => {
-      const target = e.target as HTMLElement;
-      if (!target.closest(`#color-picker-container-${activeColorPickerPathId === 'new-path' ? 'new-path' : activeColorPickerPathId}`)) {
-        setActiveColorPickerPathId(null);
-      }
-    };
-    window.addEventListener('click', handleOutsideClick);
-    return () => window.removeEventListener('click', handleOutsideClick);
-  }, [activeColorPickerPathId]);
 
   const saveHistory = (currentElements: CadElement[]) => {
 
@@ -1263,7 +450,7 @@ export default function App() {
 
   // 專案快照（存檔、自動儲存共用）
   const buildProjectData = () => ({
-    version: '1.1.0',
+    version: '1.2.0',
     appMode,
     projectName,
     cad: {
@@ -1272,28 +459,8 @@ export default function App() {
       designVehicle,
     },
     bgImage,
-    simulation: {
-      simConfig,
-      simControllerMode,
-      simRawPoints,
-      simIsIntersectionMode,
-      simP0X,
-      simP0Y,
-      simP0Angle,
-      simP3X,
-      simP3Y,
-      simP3Angle,
-      simP1RatioPercent,
-      simP2RatioPercent,
-      simEnableOutswing,
-      simI1RatioPercent,
-      simI1OffsetDistance,
-      simI2RatioPercent,
-      simI2OffsetDistance,
-      simStartExtensionM,
-      simEndExtensionM,
-      simLockedPaths,
-    },
+    // 軌跡模擬：只存來源幾何與參數（version 2），結果載入後重新計算
+    simulation: serializeSimulation(simStore.doc),
     settings: {
       snapToGrid,
       snapToEndpoint,
@@ -1321,30 +488,8 @@ export default function App() {
     if (json.cad.designVehicle) setDesignVehicle(json.cad.designVehicle);
     setBgImage(json.bgImage ?? null);
 
-    // 模擬軌跡狀態
-    if (json.simulation) {
-      const sim = json.simulation;
-      if (sim.simConfig) setSimConfig(sim.simConfig);
-      if (sim.simControllerMode) setSimControllerMode(sim.simControllerMode);
-      if (sim.simRawPoints) setSimRawPoints(sim.simRawPoints);
-      if (typeof sim.simIsIntersectionMode === 'boolean') setSimIsIntersectionMode(sim.simIsIntersectionMode);
-      if (sim.simP0X !== undefined) setSimP0X(sim.simP0X);
-      if (sim.simP0Y !== undefined) setSimP0Y(sim.simP0Y);
-      if (typeof sim.simP0Angle === 'number') setSimP0Angle(sim.simP0Angle);
-      if (sim.simP3X !== undefined) setSimP3X(sim.simP3X);
-      if (sim.simP3Y !== undefined) setSimP3Y(sim.simP3Y);
-      if (typeof sim.simP3Angle === 'number') setSimP3Angle(sim.simP3Angle);
-      if (typeof sim.simP1RatioPercent === 'number') setSimP1RatioPercent(sim.simP1RatioPercent);
-      if (typeof sim.simP2RatioPercent === 'number') setSimP2RatioPercent(sim.simP2RatioPercent);
-      if (typeof sim.simEnableOutswing === 'boolean') setSimEnableOutswing(sim.simEnableOutswing);
-      if (typeof sim.simI1RatioPercent === 'number') setSimI1RatioPercent(sim.simI1RatioPercent);
-      if (typeof sim.simI1OffsetDistance === 'number') setSimI1OffsetDistance(sim.simI1OffsetDistance);
-      if (typeof sim.simI2RatioPercent === 'number') setSimI2RatioPercent(sim.simI2RatioPercent);
-      if (typeof sim.simI2OffsetDistance === 'number') setSimI2OffsetDistance(sim.simI2OffsetDistance);
-      if (typeof sim.simStartExtensionM === 'number') setSimStartExtensionM(sim.simStartExtensionM);
-      if (typeof sim.simEndExtensionM === 'number') setSimEndExtensionM(sim.simEndExtensionM);
-      if (Array.isArray(sim.simLockedPaths)) setSimLockedPaths(sim.simLockedPaths);
-    }
+    // 模擬軌跡：新版直接驗證，舊版（像素座標）自動轉換
+    simStore.load(json.simulation ? loadSimulation(json.simulation) : emptyDoc());
 
     if (json.settings) {
       const st = json.settings;
@@ -1363,10 +508,6 @@ export default function App() {
     setSelectedElement(null);
     setSelectedElementIds([]);
     setSelectedAnchorIndices([]);
-    setEditingPathId(null);
-    setSimCurrentStepIndex(0);
-    simFractionalStepRef.current = 0;
-    setSimIsPlaying(false);
     setFitRequest(n => n + 1);
     return true;
   };
@@ -1570,7 +711,8 @@ export default function App() {
   // 啟動時檢查是否有上次未存檔的自動儲存
   useEffect(() => {
     loadAutosave().then(rec => {
-      if (rec && rec.project && Array.isArray(rec.project?.cad?.elements) && rec.project.cad.elements.length > 0) {
+      const simPaths = rec?.project?.simulation?.paths?.length ?? rec?.project?.simulation?.simLockedPaths?.length ?? 0;
+      if (rec && rec.project && Array.isArray(rec.project?.cad?.elements) && (rec.project.cad.elements.length > 0 || simPaths > 0)) {
         setAutosaveOffer(rec);
       }
       autosaveReadyRef.current = true;
@@ -1586,12 +728,12 @@ export default function App() {
       saveAutosave(buildProjectData());
     }, 1500);
     return () => clearTimeout(t);
-  }, [elements, bgImage, simLockedPaths, projectName, hiddenLayers]);
+  }, [elements, bgImage, simDocVersion, projectName, hiddenLayers]);
 
   // 有未存檔的變更時，關閉或重新整理頁面前提醒
   useEffect(() => {
     const onBeforeUnload = (e: BeforeUnloadEvent) => {
-      if (!isDirty || elements.length === 0) return;
+      if (!isDirty || (elements.length === 0 && simStore.doc.paths.length === 0)) return;
       e.preventDefault();
       e.returnValue = '';
     };
@@ -1615,6 +757,12 @@ export default function App() {
     () => (hiddenLayers.length ? elements.filter(el => !hiddenLayers.includes(layerKeyOf(el))) : elements),
     [elements, hiddenLayers]
   );
+  // 模擬淨距檢核的障礙物：只取畫面上可見的物件
+  const islandIsHard = sim.doc.settings.islandIsHard;
+  useEffect(() => {
+    simStore.setObstacles(buildObstacles(visibleElements, { islandIsHard }));
+  }, [visibleElements, islandIsHard]);
+
   const toggleLayer = (key: string) => {
     setHiddenLayers(prev => (prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key]));
     setSelectedElement(null);
@@ -1624,14 +772,17 @@ export default function App() {
   // ---------- 介面風格共用 ----------
   const handleModeChange = (mode: 'cad' | 'simulation') => {
     if (mode === 'cad') {
+      // 離開模擬：繪製中的軌跡若已完整就完成，否則捨棄
+      simStore.stop();
+      if (simStore.ui.tool !== 'select') simStore.setTool('select');
       setAppMode('cad');
       return;
     }
     setAppMode('simulation');
-    setSimDrawMode('select');
     setActiveTool('select');
     setSelectedElement(null);
     setSelectedElementIds([]);
+    if (!simTourSeen()) setShowSimTour(true);
   };
 
   const handleUploadBg = (file: File) => {
@@ -1685,13 +836,13 @@ export default function App() {
   const minimalPanelVisible = appMode === 'simulation' || hasSelection || hasToolConfig || rightTab !== 'props';
   const polishedPanelVisible = isRightPanelOpen && (appMode === 'simulation' || hasSelection || hasToolConfig || rightTab !== 'props');
   const canvasInsets = uiStyle === 'polished'
-    ? { top: 64, right: polishedPanelVisible ? 352 : 0, bottom: 112, left: appMode === 'simulation' ? 140 : 0 }
+    ? { top: 64, right: polishedPanelVisible ? 352 : 0, bottom: 112, left: 0 }
     : { top: 0, right: 0, bottom: 0, left: 0 };
 
   const modeSwitchEl = (
           <div className="flex items-center bg-[#0a0b0e] border border-[#2d3039] rounded-lg p-0.5 select-none shrink-0">
             <button
-              onClick={() => setAppMode('cad')}
+              onClick={() => handleModeChange('cad')}
               className={`px-4 py-1 text-xs font-bold rounded-md transition-all cursor-pointer ${
                 appMode === 'cad'
                   ? 'bg-blue-600 text-white shadow-sm font-extrabold'
@@ -1701,20 +852,14 @@ export default function App() {
               CAD 繪圖
             </button>
             <button
-              onClick={() => {
-                setAppMode('simulation');
-                setSimDrawMode('select');
-                setActiveTool('select'); // 預設進去為選擇或無操作狀態
-                setSelectedElement(null);
-                setSelectedElementIds([]);
-              }}
+              onClick={() => handleModeChange('simulation')}
               className={`px-4 py-1 text-xs font-bold rounded-md transition-all cursor-pointer ${
                 appMode === 'simulation'
                   ? 'bg-blue-600 text-white shadow-sm font-extrabold'
                   : 'text-slate-400 hover:text-slate-200'
               }`}
             >
-              車流軌跡模擬
+              軌跡模擬
             </button>
           </div>
   );
@@ -1726,10 +871,10 @@ export default function App() {
               if (appMode === 'cad') {
                 handleClearCanvas();
               } else {
-                handleSimClearAll();
+                simStore.clearAll();
               }
             }}
-            disabled={appMode === 'cad' ? elements.length === 0 : (simLockedPaths.length === 0 && simRawPoints.length === 0)}
+            disabled={appMode === 'cad' ? elements.length === 0 : (sim.doc.paths.length === 0 && !sim.draft)}
             className="flex items-center justify-center w-8 h-8 rounded bg-[#1f2229] border border-[#2d3039] hover:bg-slate-800 disabled:opacity-30 disabled:hover:bg-[#1f2229] disabled:cursor-not-allowed transition-all text-slate-350 cursor-pointer"
             title={appMode === 'cad' ? "清空 CAD 標線畫布" : "一次清除所有軌跡"}
           >
@@ -1738,8 +883,8 @@ export default function App() {
 
           {/* Undo Button (Symbol Only) */}
           <button
-            onClick={appMode === 'cad' ? handleUndo : handleSimUndoLastNode}
-            disabled={appMode === 'cad' ? historyStack.length === 0 : simRawPoints.length === 0}
+            onClick={appMode === 'cad' ? handleUndo : () => simStore.undo()}
+            disabled={appMode === 'cad' ? historyStack.length === 0 : !sim.canUndo()}
             className="flex items-center justify-center w-8 h-8 rounded bg-[#1f2229] border border-[#2d3039] hover:bg-slate-800 disabled:opacity-30 disabled:hover:bg-[#1f2229] disabled:cursor-not-allowed transition-all text-slate-300 cursor-pointer"
             title="撤銷 (Ctrl+Z)"
           >
@@ -1748,8 +893,8 @@ export default function App() {
 
           {/* Redo Button (Symbol Only) */}
           <button
-            onClick={handleRedo}
-            disabled={redoStack.length === 0}
+            onClick={appMode === 'cad' ? handleRedo : () => simStore.redo()}
+            disabled={appMode === 'cad' ? redoStack.length === 0 : !sim.canRedo()}
             className="flex items-center justify-center w-8 h-8 rounded bg-[#1f2229] border border-[#2d3039] hover:bg-slate-800 disabled:opacity-30 disabled:hover:bg-[#1f2229] disabled:cursor-not-allowed transition-all text-slate-300 cursor-pointer"
             title="重做 (Ctrl+Y)"
           >
@@ -2183,236 +1328,8 @@ export default function App() {
             )}
           </>
   );
-  const simLeftPanelEl = (
-          <div 
-            id="left-sim-panel" 
-            className="flex flex-col bg-[#14161c] border-r border-[#2d3039] w-[110px] h-full p-2 justify-between select-none overflow-y-auto shrink-0 space-y-4"
-          >
-            <div className="space-y-4">
-              {/* SIM Brand Mini Header */}
-              <div className="flex flex-col items-center justify-center py-2 border-b border-[#2d3039]/40 mb-1 text-center">
-                <div className="w-[42px] h-[42px] rounded-lg bg-gradient-to-br from-indigo-500 to-purple-500 flex items-center justify-center font-black text-white text-base shadow-lg shadow-indigo-500/20 mb-1.5 border border-indigo-400/20">
-                  SIM
-                </div>
-                <span className="text-xs font-black text-indigo-400 tracking-widest uppercase">軌跡模擬</span>
-              </div>
- 
-              {/* 選擇按鈕 */}
-              <div className="space-y-1">
-                <div className="flex justify-center">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSimDrawMode('select');
-                      setSimIsIntersectionMode(false);
-                    }}
-                    className={`w-full py-2.5 rounded-lg flex flex-col items-center justify-center gap-1.5 transition-all border cursor-pointer text-[11px] font-black ${
-                      simDrawMode === 'select' && !simIsIntersectionMode
-                        ? 'bg-indigo-950/60 text-[#00FFFF] border-[#00FFFF]/80 shadow-[0_0_8px_rgba(0,255,255,0.25)]'
-                        : 'text-slate-400 bg-[#0f1115]/40 border-[#2d3039]/20 hover:border-[#3b4252] hover:bg-[#1f2229] hover:text-slate-200'
-                    }`}
-                  >
-                    <svg viewBox="0 0 24 24" className="w-[18px] h-[18px]" fill="none" stroke="currentColor" strokeWidth="1.5">
-                      <path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z" fill="currentColor" />
-                      <path d="M13 13l6 6" />
-                    </svg>
-                    <span>選擇與編輯</span>
-                  </button>
-                </div>
-              </div>
- 
-              {/* 軌跡路徑模式 */}
-              <div className="space-y-1">
-                <div className="text-[10px] font-black text-slate-500 uppercase tracking-wider text-center border-b border-[#2d3039]/30 pb-0.5">
-                  軌跡路徑
-                </div>
-                <div className="flex flex-col gap-1.5 items-center">
-                  {/* 1. 鋼筆繪製 (SmartPath) */}
-                  <button
-                    type="button"
-                    disabled={(simRawPoints.length > 0 && (simDrawMode !== 'smartpath' || simIsIntersectionMode)) || (editingPathId !== null && simDrawMode !== 'smartpath')}
-                    onClick={() => {
-                      setSimDrawMode('smartpath');
-                      setSimIsIntersectionMode(false);
-                    }}
-                    className={`w-full py-2.5 rounded-lg flex flex-col items-center justify-center gap-1.5 transition-all border text-[11px] font-black ${
-                      (simRawPoints.length > 0 && (simDrawMode !== 'smartpath' || simIsIntersectionMode)) || (editingPathId !== null && simDrawMode !== 'smartpath')
-                        ? 'opacity-30 cursor-not-allowed text-slate-500 bg-[#0f1115]/20 border-transparent'
-                        : !simIsIntersectionMode && simDrawMode === 'smartpath'
-                        ? 'bg-indigo-950/60 text-[#00FFFF] border-[#00FFFF]/80 shadow-[0_0_8px_rgba(0,255,255,0.25)] cursor-pointer'
-                        : 'text-slate-400 bg-[#0f1115]/40 border-[#2d3039]/20 hover:border-[#3b4252] hover:bg-[#1f2229] hover:text-slate-200 cursor-pointer'
-                    }`}
-                    title="使用鋼筆繪製貝茲曲線軌跡"
-                  >
-                    <PenTool className="w-[18px] h-[18px]" />
-                    <span>鋼筆繪製</span>
-                  </button>
-
-                  {/* 2. 點選繪製 (Click) */}
-                  <button
-                    type="button"
-                    disabled={(simRawPoints.length > 0 && (simDrawMode !== 'click' || simIsIntersectionMode)) || (editingPathId !== null && simDrawMode !== 'click')}
-                    onClick={() => {
-                      setSimDrawMode('click');
-                      setSimIsIntersectionMode(false);
-                    }}
-                    className={`w-full py-2.5 rounded-lg flex flex-col items-center justify-center gap-1.5 transition-all border text-[11px] font-black ${
-                      (simRawPoints.length > 0 && (simDrawMode !== 'click' || simIsIntersectionMode)) || (editingPathId !== null && simDrawMode !== 'click')
-                        ? 'opacity-30 cursor-not-allowed text-slate-500 bg-[#0f1115]/20 border-transparent'
-                        : !simIsIntersectionMode && simDrawMode === 'click'
-                        ? 'bg-indigo-950/60 text-[#00FFFF] border-[#00FFFF]/80 shadow-[0_0_8px_rgba(0,255,255,0.25)] cursor-pointer'
-                        : 'text-slate-400 bg-[#0f1115]/40 border-[#2d3039]/20 hover:border-[#3b4252] hover:bg-[#1f2229] hover:text-slate-200 cursor-pointer'
-                    }`}
-                    title="自由點擊繪製折線軌跡"
-                  >
-                    <svg viewBox="0 0 24 24" className="w-[18px] h-[18px]" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <circle cx="6" cy="18" r="2.5" fill="currentColor" stroke="none" />
-                      <circle cx="18" cy="6" r="2.5" fill="currentColor" stroke="none" />
-                      <line x1="8" y1="16" x2="16" y2="8" strokeDasharray="3 3" />
-                    </svg>
-                    <span>點選繪製</span>
-                  </button>
-
-                  {/* 3. 筆刷繪製 (Drag) */}
-                  <button
-                    type="button"
-                    disabled={(simRawPoints.length > 0 && (simDrawMode !== 'drag' || simIsIntersectionMode)) || (editingPathId !== null && simDrawMode !== 'drag')}
-                    onClick={() => {
-                      setSimDrawMode('drag');
-                      setSimIsIntersectionMode(false);
-                    }}
-                    className={`w-full py-2.5 rounded-lg flex flex-col items-center justify-center gap-1.5 transition-all border text-[11px] font-black ${
-                      (simRawPoints.length > 0 && (simDrawMode !== 'drag' || simIsIntersectionMode)) || (editingPathId !== null && simDrawMode !== 'drag')
-                        ? 'opacity-30 cursor-not-allowed text-slate-500 bg-[#0f1115]/20 border-transparent'
-                        : !simIsIntersectionMode && simDrawMode === 'drag'
-                        ? 'bg-indigo-950/60 text-[#00FFFF] border-[#00FFFF]/80 shadow-[0_0_8px_rgba(0,255,255,0.25)] cursor-pointer'
-                        : 'text-slate-400 bg-[#0f1115]/40 border-[#2d3039]/20 hover:border-[#3b4252] hover:bg-[#1f2229] hover:text-slate-200 cursor-pointer'
-                    }`}
-                    title="拖曳筆刷自由手繪軌跡"
-                  >
-                    <Paintbrush className="w-[18px] h-[18px]" />
-                    <span>筆刷繪製</span>
-                  </button>
-
-                  {/* 4. 路口轉彎軌跡 (Intersection) */}
-                  <button
-                    type="button"
-                    disabled={(simRawPoints.length > 0 && !simIsIntersectionMode) || (editingPathId !== null && !simIsIntersectionMode)}
-                    onClick={() => {
-                      setSimIsIntersectionMode(true);
-                      setSimP0X(null);
-                      setSimP0Y(null);
-                      setSimP3X(null);
-                      setSimP3Y(null);
-                      setSimIntersectionPickState("p0");
-                    }}
-                    className={`w-full py-2.5 rounded-lg flex flex-col items-center justify-center gap-1.5 transition-all border text-[11px] font-black ${
-                      (simRawPoints.length > 0 && !simIsIntersectionMode) || (editingPathId !== null && !simIsIntersectionMode)
-                        ? 'opacity-30 cursor-not-allowed text-slate-500 bg-[#0f1115]/20 border-transparent'
-                        : simIsIntersectionMode
-                        ? 'bg-indigo-950/60 text-[#00FFFF] border-[#00FFFF]/80 shadow-[0_0_8px_rgba(0,255,255,0.25)] cursor-pointer'
-                        : 'text-slate-400 bg-[#0f1115]/40 border-[#2d3039]/20 hover:border-[#3b4252] hover:bg-[#1f2229] hover:text-slate-200 cursor-pointer'
-                    }`}
-                    title="在路口依照切線比率與偏移距離生成引導軌跡"
-                  >
-                    <svg viewBox="0 0 24 24" className="w-[18px] h-[18px]" fill="none" stroke="currentColor" strokeWidth="1.5">
-                      <path d="M2 9Q9 9 9 2" strokeLinecap="round" strokeLinejoin="round" />
-                      <path d="M15 2Q15 9 22 9" strokeLinecap="round" strokeLinejoin="round" />
-                      <path d="M22 15Q15 15 15 22" strokeLinecap="round" strokeLinejoin="round" />
-                      <path d="M9 22Q9 15 2 15" strokeLinecap="round" strokeLinejoin="round" />
-                    </svg>
-                    <span>路口轉彎軌跡</span>
-                  </button>
-                </div>
-              </div>
-            </div>
- 
-            {/* 圖層顯示偏好區塊放在左側面板最下方 */}
-            <div className="space-y-1.5 pt-2 border-t border-[#2d3039]/40 mt-auto select-none w-full">
-              <div className="text-[10px] font-black text-slate-500 uppercase tracking-wider text-center pb-0.5">
-                圖層顯示偏好
-              </div>
-              <div className="flex flex-col gap-1.5 w-full">
-                {/* 1. 車流包絡線軌跡設定 */}
-                <button
-                  type="button"
-                  onClick={() => setSimShowSweptPath(!simShowSweptPath)}
-                  className={`w-full h-10 rounded-lg flex items-center justify-center transition-all border cursor-pointer ${
-                    simShowSweptPath
-                      ? 'bg-indigo-950/60 text-[#00FFFF] border-[#00FFFF]/80 shadow-[0_0_6px_rgba(0,255,255,0.25)]'
-                      : 'text-slate-400 bg-[#0f1115]/40 border-[#2d3039]/20 hover:border-[#3b4252] hover:bg-[#1f2229]'
-                  }`}
-                  title="車流包絡線"
-                >
-                  <svg viewBox="0 0 24 24" className="w-[22px] h-[22px] shrink-0" fill="none" stroke="currentColor" strokeWidth="1.5">
-                    <path d="M10 4v16M14 4v16" strokeDasharray="2 2" />
-                    <rect x="8" y="6" width="8" height="12" opacity="0.3" fill="currentColor" />
-                    <line x1="8" y1="6" x2="8" y2="18" />
-                    <line x1="16" y1="6" x2="16" y2="18" />
-                  </svg>
-                </button>
-
-                {/* 2. 前後軸中心軌跡 */}
-                <button
-                  type="button"
-                  onClick={() => setSimShowAxleTracks(!simShowAxleTracks)}
-                  className={`w-full h-10 rounded-lg flex items-center justify-center transition-all border cursor-pointer ${
-                    simShowAxleTracks
-                      ? 'bg-indigo-950/60 text-[#00FFFF] border-[#00FFFF]/80 shadow-[0_0_6px_rgba(0,255,255,0.2)]'
-                      : 'text-slate-400 bg-[#0f1115]/40 border-[#2d3039]/20 hover:border-[#3b4252] hover:bg-[#1f2229]'
-                  }`}
-                  title="前後軸中心軌跡"
-                >
-                  <svg viewBox="0 0 24 24" className="w-5.5 h-5.5 shrink-0" fill="none" stroke="currentColor" strokeWidth="1.5">
-                    <line x1="12" y1="4" x2="12" y2="20" />
-                    <circle cx="12" cy="7" r="2" fill="currentColor" />
-                    <circle cx="12" cy="17" r="2" fill="currentColor" />
-                  </svg>
-                </button>
-
-                {/* 3. 連續骨架投影 */}
-                <button
-                  type="button"
-                  onClick={() => setSimShowBodyWireframe(!simShowBodyWireframe)}
-                  className={`w-full h-10 rounded-lg flex items-center justify-center transition-all border cursor-pointer ${
-                    simShowBodyWireframe
-                      ? 'bg-indigo-950/60 text-[#00FFFF] border-[#00FFFF]/80 shadow-[0_0_6px_rgba(0,255,255,0.25)]'
-                      : 'text-slate-400 bg-[#0f1115]/40 border-[#2d3039]/20 hover:border-[#3b4252] hover:bg-[#1f2229]'
-                  }`}
-                  title="連續骨架投影"
-                >
-                  <svg viewBox="0 0 24 24" className="w-[22px] h-[22px] shrink-0" fill="none" stroke="currentColor" strokeWidth="1.5">
-                    <rect x="6" y="4" width="12" height="16" rx="1" />
-                    <line x1="12" y1="4" x2="12" y2="20" strokeDasharray="2 2" />
-                    <line x1="6" y1="10" x2="18" y2="10" />
-                    <line x1="6" y1="14" x2="18" y2="14" />
-                  </svg>
-                </button>
-
-                {/* 4. 路口輔助線 或 佔位格 */}
-                {simIsIntersectionMode ? (
-                  <button
-                    type="button"
-                    onClick={() => setSimShowIntersectionHelpers(!simShowIntersectionHelpers)}
-                    className={`w-full h-10 rounded-lg flex items-center justify-center transition-all border cursor-pointer ${
-                      simShowIntersectionHelpers
-                        ? 'bg-indigo-950/60 text-[#00FFFF] border-[#00FFFF]/80 shadow-[0_0_6px_rgba(0,255,255,0.25)]'
-                        : 'text-slate-400 bg-[#0f1115]/40 border-[#2d3039]/20 hover:border-[#3b4252] hover:bg-[#1f2229]'
-                    }`}
-                    title="路口輔助線"
-                  >
-                    <svg viewBox="0 0 24 24" className="w-5.5 h-5.5 shrink-0" fill="none" stroke="currentColor" strokeWidth="1.5">
-                      <path d="M4 12h16M12 4v16" strokeDasharray="2 2" />
-                      <path d="M8 8l8 8M16 8l-8 8" />
-                    </svg>
-                  </button>
-                ) : (
-                  <div className="w-full h-10 rounded-lg border border-dashed border-[#2d3039]/20 bg-[#0f1115]/10" />
-                )}
-              </div>
-            </div>
-          </div>
-  );
+  // 軌跡模擬左側工具（依介面風格與 CAD 工具列一致）
+  const simLeftPanelEl = uiStyle === 'minimal' ? <MinimalSimRail /> : <GuidedSimSidebar />;
   const canvasAreaEl = (
         <div className="flex-1 h-full min-w-0 relative flex flex-col">
           <CadCanvas 
@@ -2451,172 +1368,10 @@ export default function App() {
           showGrid={showGrid}
           minorGridInterval={minorGridInterval}
           majorGridInterval={majorGridInterval}
-          onSelectLockedPath={handleSelectLockedPath}
-          
-           // Simulation Props
-           appMode={appMode}
-           simConfig={simConfig}
-           setSimConfig={setSimConfig}
-           simControllerMode={simControllerMode}
-           simRawPoints={simRawPoints}
-           setSimRawPoints={setSimRawPoints}
-             simDrawMode={simDrawMode}
-             setSimDrawMode={setSimDrawMode}
-             simIsPlaying={simIsPlaying}
-             setSimIsPlaying={setSimIsPlaying}
-             simCurrentStepIndex={simCurrentStepIndex}
-             setSimCurrentStepIndex={setSimCurrentStepIndex}
-             simTrajectory={simTrajectory}
-           simInterpolatedPath={simInterpolatedPath}
-           simLockedPaths={simLockedPaths}
-           setSimLockedPaths={setSimLockedPaths}
-           simThemeColor={simThemeColor}
-           simShowSweptPath={simShowSweptPath}
-           simShowCornerTracks={simShowCornerTracks}
-           simShowAxleTracks={simShowAxleTracks}
-           simShowBodyWireframe={simShowBodyWireframe}
-           editingPathId={editingPathId}
-           setSimIsDragging={setSimIsDragging}
-          simSweptOpacity={simSweptOpacity}
-          simDraggingWaypointIndex={simDraggingWaypointIndex}
-          setSimDraggingWaypointIndex={setSimDraggingWaypointIndex}
-          simDraggingHandleType={simDraggingHandleType}
-          setSimDraggingHandleType={setSimDraggingHandleType}
-          simIsDraggingFirstVec={simIsDraggingFirstVec}
-          setSimIsDraggingFirstVec={setSimIsDraggingFirstVec}
-          simFirstVecStart={simFirstVecStart}
-          setSimFirstVecStart={setSimFirstVecStart}
-          simFirstVecEnd={simFirstVecEnd}
-          setSimFirstVecEnd={setSimFirstVecEnd}
-          simClickStartHeadingRef={simClickStartHeadingRef}
-          simFractionalStepRef={simFractionalStepRef}
-
-          // Intersection Props
-          simIsIntersectionMode={simIsIntersectionMode}
-          simP0X={simP0X}
-          setSimP0X={setSimP0X}
-          simP0Y={simP0Y}
-          setSimP0Y={setSimP0Y}
-          simP0Angle={simP0Angle}
-          setSimP0Angle={setSimP0Angle}
-          simP3X={simP3X}
-          setSimP3X={setSimP3X}
-          simP3Y={simP3Y}
-          setSimP3Y={setSimP3Y}
-          simP3Angle={simP3Angle}
-          setSimP3Angle={setSimP3Angle}
-          simP1RatioPercent={simP1RatioPercent}
-          simP2RatioPercent={simP2RatioPercent}
-          simIntersectionPickState={simIntersectionPickState}
-          setSimIntersectionPickState={setSimIntersectionPickState}
-          simShowIntersectionHelpers={simShowIntersectionHelpers}
-          simEnableOutswing={simEnableOutswing}
-          simI1RatioPercent={simI1RatioPercent}
-          simI1OffsetDistance={simI1OffsetDistance}
-          simI2RatioPercent={simI2RatioPercent}
-          simI2OffsetDistance={simI2OffsetDistance}
-          simStartExtensionM={simStartExtensionM}
-            simEndExtensionM={simEndExtensionM}
-            simIsCalibrating={simIsCalibrating}
-            setSimIsCalibrating={setSimIsCalibrating}
+          appMode={appMode}
+          focusRequest={sim.focus}
           />
-           {/* Telemetry HUD - 4 個 80x80px 圓角卡片，左側中心排列 */}
-          {appMode === 'simulation' && simTrajectory.length > 0 && (() => {
-            const isSteerExceeded = Math.abs(currentDeltaDeg) > (simConfig.maxSteerLimit ?? 40);
-            const cardBase = "w-[80px] h-[80px] rounded-xl flex flex-col items-center justify-center text-center p-1.5 border backdrop-blur-sm transition-all duration-300";
-            const cardNormal = "bg-[#14161c]/80 border-[#2d3039]";
-            const cardAlert = "bg-red-950/40 border-red-500 shadow-[0_0_10px_rgba(239,68,68,0.45)] animate-pulse";
-            const cardCls = isSteerExceeded ? `${cardBase} ${cardAlert}` : `${cardBase} ${cardNormal}`;
-            const labelCls = "text-[8px] font-bold text-slate-400 leading-tight text-center mb-0.5";
-            const valueCls = "text-sm font-black text-slate-100 font-mono leading-none";
-            return (
-              <div className="absolute left-3 top-1/2 -translate-y-1/2 flex flex-col gap-2 z-20 pointer-events-none">
-                {/* 卡片1：總行駛長度 */}
-                <div className={cardCls}>
-                  <span className={labelCls}>總行駛<br/>長度 (m)</span>
-                  <span className={valueCls}>{totalPathLengthM.toFixed(1)}</span>
-                </div>
-                {/* 卡片2：即時前輪轉角 */}
-                <div className={cardCls}>
-                  <span className={labelCls}>即時前輪<br/>轉角 (deg)</span>
-                  <span className={`text-sm font-black font-mono leading-none ${isSteerExceeded ? 'text-red-500' : 'text-slate-100'}`}>
-                    {currentDeltaDeg.toFixed(1)}°
-                  </span>
-                </div>
-                {/* 卡片3：即時轉彎半徑 */}
-                <div className={cardCls}>
-                  <span className={labelCls}>即時轉彎<br/>半徑 (m)</span>
-                  <span className={valueCls}>
-                    {currentTurnRadiusM === Infinity ? '∞' : currentTurnRadiusM.toFixed(1)}
-                  </span>
-                </div>
-                {/* 卡片4：即時車身朝向角 */}
-                <div className={cardCls}>
-                  <span className={labelCls}>即時車身<br/>朝向角 (deg)</span>
-                  <span className={valueCls}>
-                    {((currentThetaDeg % 360 + 360) % 360).toFixed(0)}°
-                  </span>
-                </div>
-              </div>
-            );
-          })()}
-
-          {/* 底部懸浮播放控制列 */}
-          {appMode === 'simulation' && simTrajectory.length > 0 && (
-            <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-30 flex items-center gap-3 px-4 py-2 rounded-2xl bg-[#14161c]/90 border border-[#2d3039] backdrop-blur-md shadow-2xl">
-              {/* 播放/暫停按鈕 */}
-              <button
-                onClick={() => setSimIsPlaying(!simIsPlaying)}
-                className={`flex items-center justify-center w-8 h-8 rounded-full transition-all cursor-pointer border focus:outline-none ${
-                  simIsPlaying
-                    ? 'bg-indigo-600 border-indigo-500 hover:bg-indigo-500 text-white'
-                    : 'bg-[#1f2229] border-[#2d3039] hover:bg-slate-700 text-indigo-400'
-                }`}
-                title={simIsPlaying ? '暫停模擬' : '播放模擬'}
-              >
-                {simIsPlaying ? (
-                  <Pause className="w-3.5 h-3.5" />
-                ) : (
-                  <Play className="w-3.5 h-3.5" />
-                )}
-              </button>
-
-              {/* 進度滑桿 */}
-              <div className="flex items-center gap-2 w-48">
-                <span className="text-[9px] font-mono text-slate-500 w-6 text-right shrink-0">
-                  {simTrajectory.length > 0 ? Math.round((simCurrentStepIndex / Math.max(1, simTrajectory.length - 1)) * 100) : 0}%
-                </span>
-                <input
-                  type="range"
-                  min="0"
-                  max={Math.max(0, simTrajectory.length - 1)}
-                  value={simCurrentStepIndex}
-                  onChange={(e) => {
-                    const idx = parseInt(e.target.value);
-                    setSimCurrentStepIndex(idx);
-                    simFractionalStepRef.current = idx;
-                    setSimIsPlaying(false);
-                  }}
-                  className="flex-1 h-1 accent-indigo-500 cursor-pointer focus:outline-none focus:ring-0 select-none"
-                />
-              </div>
-
-              {/* 播放倍速選擇 */}
-              <div className="flex items-center gap-1">
-                <span className="text-[9px] text-slate-500 shrink-0">倍速</span>
-                <select
-                  value={simPlaybackSpeed}
-                  onChange={(e) => setSimPlaybackSpeed(parseFloat(e.target.value))}
-                  className="bg-[#0a0b0e] border border-[#2d3039] text-[10px] text-white rounded px-1 py-0.5 focus:outline-none focus:border-indigo-500 cursor-pointer"
-                >
-                  <option value="0.5">0.5x</option>
-                  <option value="1">1.0x</option>
-                  <option value="2">2.0x</option>
-                  <option value="4">4.0x</option>
-                </select>
-              </div>
-            </div>
-          )}
+          {appMode === 'simulation' && <SimHud bottom={canvasInsets.bottom} polished={uiStyle === 'polished'} />}
         </div>
   );
   const propsPanelEl = (
@@ -2693,709 +1448,12 @@ export default function App() {
                 }}
               />
   );
-  const simRightPanelEl = (
-              <div 
-                id="right-sim-panel" 
-                className="flex flex-col h-full bg-[#14161c] text-slate-350 p-4 space-y-4 select-none overflow-y-auto"
-              >
-                <div className="flex items-center justify-between border-b border-[#2d3039] pb-2 mb-1">
-                  <span className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
-                    <Sliders className="w-4 h-4 text-indigo-400" />
-                    <span>車流模擬控制台</span>
-                  </span>
-                </div>
-
-
-
-                {/* Road Tracing sub-panels */}
-                {simIsIntersectionMode ? (
-                  <div className="p-3 bg-[#1f2229]/40 rounded-lg border border-[#2d3039] space-y-3">
-                    <h4 className="text-xs font-bold text-slate-200 flex items-center gap-1.5 border-b border-[#2d3039]/40 pb-1">
-                      <GitBranch className="w-3.5 h-3.5 text-indigo-400" />
-                      <span>路口導引參數</span>
-                    </h4>
-
-                    {/* Step Pickers */}
-                    <div className="grid grid-cols-2 gap-2">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (simIntersectionPickState !== 'p0') {
-                            setSimP0X(null);
-                            setSimP0Y(null);
-                            setSimIntersectionPickState('p0');
-                          } else {
-                            setSimIntersectionPickState('none');
-                          }
-                        }}
-                        className={`py-1.5 px-2 rounded border text-[10px] font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
-                          simIntersectionPickState === 'p0'
-                            ? 'bg-indigo-600 border-indigo-400 text-white shadow-[0_0_10px_rgba(99,102,241,0.5)]'
-                            : 'bg-[#0a0b0e] border-[#2d3039] text-indigo-400 hover:text-indigo-300'
-                        }`}
-                      >
-                        {simIntersectionPickState === 'p0' ? (
-                          <>
-                            <span className="relative flex h-2 w-2">
-                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-white opacity-75"></span>
-                              <span className="relative inline-flex rounded-full h-2 w-2 bg-white"></span>
-                            </span>
-                            <MapPin className="w-3.5 h-3.5" />
-                            <span>正在點選 P0</span>
-                          </>
-                        ) : (
-                          <>
-                            <MapPin className="w-3.5 h-3.5" />
-                            <span>定位起點 P0</span>
-                          </>
-                        )}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (simIntersectionPickState !== 'p3') {
-                            setSimP3X(null);
-                            setSimP3Y(null);
-                            setSimIntersectionPickState('p3');
-                          } else {
-                            setSimIntersectionPickState('none');
-                          }
-                        }}
-                        className={`py-1.5 px-2 rounded border text-[10px] font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
-                          simIntersectionPickState === 'p3'
-                            ? 'bg-pink-600 border-pink-400 text-white shadow-[0_0_10px_rgba(236,72,153,0.5)]'
-                            : 'bg-[#0a0b0e] border-[#2d3039] text-pink-400 hover:text-pink-300'
-                        }`}
-                      >
-                        {simIntersectionPickState === 'p3' ? (
-                          <>
-                            <span className="relative flex h-2 w-2">
-                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-white opacity-75"></span>
-                              <span className="relative inline-flex rounded-full h-2 w-2 bg-white"></span>
-                            </span>
-                            <MapPin className="w-3.5 h-3.5" />
-                            <span>正在點選 P3</span>
-                          </>
-                        ) : (
-                          <>
-                            <MapPin className="w-3.5 h-3.5" />
-                            <span>定位終點 P3</span>
-                          </>
-                        )}
-                      </button>
-                    </div>
-
-                    {/* Road heading angles */}
-                    <div className="grid grid-cols-2 gap-2 text-[10px]">
-                      <div>
-                        <span className="text-slate-400 block mb-0.5">P0 起點角度 ({simP0Angle}°)</span>
-                        <input
-                          type="range"
-                          min="-180"
-                          max="180"
-                          value={simP0Angle}
-                          onChange={(e) => setSimP0Angle(parseInt(e.target.value))}
-                          className="w-full accent-indigo-500 cursor-pointer h-1"
-                        />
-                      </div>
-                      <div>
-                        <span className="text-slate-400 block mb-0.5">P3 終點角度 ({simP3Angle}°)</span>
-                        <input
-                          type="range"
-                          min="-180"
-                          max="180"
-                          value={simP3Angle}
-                          onChange={(e) => setSimP3Angle(parseInt(e.target.value))}
-                          className="w-full accent-pink-500 cursor-pointer h-1"
-                        />
-                      </div>
-                    </div>
-
-                    {/* Ratio parameters */}
-                    <div className="grid grid-cols-2 gap-2 text-[10px]">
-                      <div>
-                        <div className="flex justify-between text-slate-400">
-                          <span>起點切線比例 P1</span>
-                          <span className="font-mono text-indigo-400">{simP1RatioPercent}%</span>
-                        </div>
-                        <input
-                          type="range"
-                          min="10"
-                          max="200"
-                          value={simP1RatioPercent}
-                          onChange={(e) => setSimP1RatioPercent(parseInt(e.target.value))}
-                          className="w-full accent-indigo-500 cursor-pointer h-1"
-                        />
-                      </div>
-                      <div>
-                        <div className="flex justify-between text-slate-400">
-                          <span>終點切線比例 P2</span>
-                          <span className="font-mono text-pink-400">{simP2RatioPercent}%</span>
-                        </div>
-                        <input
-                          type="range"
-                          min="10"
-                          max="200"
-                          value={simP2RatioPercent}
-                          onChange={(e) => setSimP2RatioPercent(parseInt(e.target.value))}
-                          className="w-full accent-pink-500 cursor-pointer h-1"
-                        />
-                      </div>
-                    </div>
-
-                    {/* Extension parameters */}
-                    <div className="space-y-2 text-[10px] pt-1.5 border-t border-[#2d3039]/40">
-                      <div className="grid grid-cols-2 gap-2">
-                        <div>
-                          <span className="text-slate-400 block mb-0.5">起點直路延伸 ({simStartExtensionM}m)</span>
-                          <input
-                            type="range"
-                            min="0"
-                            max="30"
-                            step="0.5"
-                            value={simStartExtensionM}
-                            onChange={(e) => setSimStartExtensionM(parseFloat(e.target.value))}
-                            className="w-full accent-indigo-500 cursor-pointer h-1"
-                          />
-                        </div>
-                        <div>
-                          <span className="text-slate-400 block mb-0.5">終點直路延伸 ({simEndExtensionM}m)</span>
-                          <input
-                            type="range"
-                            min="0"
-                            max="30"
-                            step="0.5"
-                            value={simEndExtensionM}
-                            onChange={(e) => setSimEndExtensionM(parseFloat(e.target.value))}
-                            className="w-full accent-pink-500 cursor-pointer h-1"
-                          />
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Outswing configurations */}
-                    <div className="pt-2 border-t border-[#2d3039]/40 space-y-2 text-[10px]">
-                      <label className="flex items-center gap-2 cursor-pointer font-bold text-slate-350">
-                        <input
-                          type="checkbox"
-                          checked={simEnableOutswing}
-                          onChange={(e) => setSimEnableOutswing(e.target.checked)}
-                          className="accent-indigo-500 rounded cursor-pointer"
-                        />
-                        <span>啟用車頭偏移 (Offset)</span>
-                      </label>
-
-                      {simEnableOutswing && (
-                        <div className="grid grid-cols-2 gap-2 pl-3 border-l border-indigo-500/20 bg-indigo-950/5 p-2 rounded-r-lg">
-                          <div className="space-y-2">
-                            <div>
-                              <div className="flex justify-between text-slate-400">
-                                <span>I1 偏移點位置 ({simI1RatioPercent}%)</span>
-                              </div>
-                              <input
-                                type="range"
-                                min="50"
-                                max="150"
-                                value={simI1RatioPercent}
-                                onChange={(e) => setSimI1RatioPercent(parseInt(e.target.value))}
-                                className="w-full accent-indigo-500 cursor-pointer h-1"
-                              />
-                            </div>
-                            <div>
-                              <div className="flex justify-between text-slate-400">
-                                <span>I1 偏移距離 ({simI1OffsetDistance}m)</span>
-                              </div>
-                              <input
-                                type="range"
-                                min="-5.0"
-                                max="5.0"
-                                step="0.1"
-                                value={simI1OffsetDistance}
-                                onChange={(e) => setSimI1OffsetDistance(parseFloat(e.target.value))}
-                                className="w-full accent-indigo-500 cursor-pointer h-1"
-                              />
-                            </div>
-                          </div>
-                          
-                          <div className="space-y-2">
-                            <div>
-                              <div className="flex justify-between text-slate-400">
-                                <span>I2 偏移點位置 ({simI2RatioPercent}%)</span>
-                              </div>
-                              <input
-                                type="range"
-                                min="50"
-                                max="150"
-                                value={simI2RatioPercent}
-                                onChange={(e) => setSimI2RatioPercent(parseInt(e.target.value))}
-                                className="w-full accent-pink-500 cursor-pointer h-1"
-                              />
-                            </div>
-                            <div>
-                              <div className="flex justify-between text-slate-400">
-                                <span>I2 偏移距離 ({simI2OffsetDistance}m)</span>
-                              </div>
-                              <input
-                                type="range"
-                                min="-5.0"
-                                max="5.0"
-                                step="0.1"
-                                value={simI2OffsetDistance}
-                                onChange={(e) => setSimI2OffsetDistance(parseFloat(e.target.value))}
-                                className="w-full accent-pink-500 cursor-pointer h-1"
-                              />
-                            </div>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                ) : null}
-
-                {/* 1. Vehicle Presets Specs */}
-                <div className="p-3 bg-[#1f2229]/40 rounded-lg border border-[#2d3039] space-y-3">
-                  <h4 className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
-                    <Truck className="w-3.5 h-3.5 text-indigo-400" />
-                    <span>設計車輛規格預設</span>
-                  </h4>
-                  <select
-                    value={simSelectedVehiclePresetId}
-                    onChange={(e) => handleSimVehiclePresetChange(e.target.value)}
-                    className="w-full bg-[#0a0b0e] border border-[#2d3039] px-2.5 py-1.5 rounded-lg text-xs text-white focus:outline-none focus:border-indigo-500 cursor-pointer"
-                  >
-                    {SIM_VEHICLE_PRESETS.map((preset) => (
-                      <option key={preset.id} value={preset.id} className="bg-[#14161c]">
-                        {preset.name}
-                      </option>
-                    ))}
-                  </select>
-
-                  {/* Params Controls */}
-                  <div className="space-y-2.5 pt-1">
-                    <div>
-                      <div className="flex justify-between text-[11px] text-slate-400">
-                        <span>軸距 L</span>
-                        <span className="font-mono text-indigo-400 font-bold">{simConfig.L.toFixed(2)} m</span>
-                      </div>
-                      <input
-                        type="range"
-                        min="1.5"
-                        max="8.0"
-                        step="0.05"
-                        value={simConfig.L}
-                        disabled={simSelectedVehiclePresetId !== 'custom'}
-                        onChange={(e) => {
-                          const val = parseFloat(e.target.value);
-                          setSimConfig(prev => ({ ...prev, L: val }));
-                          setSimCurrentStepIndex(0);
-                          simFractionalStepRef.current = 0;
-                        }}
-                        className="w-full accent-indigo-500 cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed"
-                      />
-                    </div>
-
-                    <div>
-                      <div className="flex justify-between text-[11px] text-slate-400">
-                        <span>車寬 W</span>
-                        <span className="font-mono text-indigo-400 font-bold">{simConfig.W.toFixed(2)} m</span>
-                      </div>
-                      <input
-                        type="range"
-                        min="1.2"
-                        max="3.0"
-                        step="0.05"
-                        value={simConfig.W}
-                        disabled={simSelectedVehiclePresetId !== 'custom'}
-                        onChange={(e) => {
-                          const val = parseFloat(e.target.value);
-                          setSimConfig(prev => ({ ...prev, W: val }));
-                        }}
-                        className="w-full accent-indigo-500 cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed"
-                      />
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-2">
-                      <div>
-                        <div className="flex justify-between text-[10px] text-slate-400">
-                          <span>前懸 Of</span>
-                          <span className="font-mono text-indigo-400">{simConfig.Of.toFixed(1)}m</span>
-                        </div>
-                        <input
-                          type="range"
-                          min="0.3"
-                          max="3.5"
-                          step="0.1"
-                          value={simConfig.Of}
-                          disabled={simSelectedVehiclePresetId !== 'custom'}
-                          onChange={(e) => {
-                            const val = parseFloat(e.target.value);
-                            setSimConfig(prev => ({ ...prev, Of: val }));
-                          }}
-                          className="w-full accent-indigo-500 cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed"
-                        />
-                      </div>
-                      <div>
-                        <div className="flex justify-between text-[10px] text-slate-400">
-                          <span>後懸 Or</span>
-                          <span className="font-mono text-indigo-400">{simConfig.Or.toFixed(1)}m</span>
-                        </div>
-                        <input
-                          type="range"
-                          min="0.3"
-                          max="4.0"
-                          step="0.1"
-                          value={simConfig.Or}
-                          disabled={simSelectedVehiclePresetId !== 'custom'}
-                          onChange={(e) => {
-                            const val = parseFloat(e.target.value);
-                            setSimConfig(prev => ({ ...prev, Or: val }));
-                          }}
-                          className="w-full accent-indigo-500 cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed"
-                        />
-                      </div>
-                    </div>
-
-                    {/* Maximum Steer Angle Limit */}
-                    <div>
-                      <div className="flex justify-between text-[11px] text-slate-400">
-                        <span>最大前輪轉角</span>
-                        <span className="font-mono text-indigo-400 font-bold">{simConfig.maxSteerLimit ?? 40}°</span>
-                      </div>
-                      <input
-                        type="range"
-                        min="20"
-                        max="55"
-                        step="1"
-                        value={simConfig.maxSteerLimit ?? 40}
-                        disabled={simSelectedVehiclePresetId !== 'custom'}
-                        onChange={(e) => {
-                          const val = parseInt(e.target.value);
-                          setSimConfig(prev => ({ ...prev, maxSteerLimit: val }));
-                          setSimCurrentStepIndex(0);
-                          simFractionalStepRef.current = 0;
-                        }}
-                        className="w-full accent-indigo-500 cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed"
-                      />
-                    </div>
-
-                    {/* Trailer Settings Checkbox */}
-                    <div className="pt-1.5 border-t border-[#2d3039]/40">
-                      <label className="flex items-center gap-2 text-xs font-bold text-slate-350 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={simConfig.enableTrailer || false}
-                          disabled={simSelectedVehiclePresetId !== 'custom'}
-                          onChange={(e) => {
-                            const checked = e.target.checked;
-                            setSimConfig(prev => ({ ...prev, enableTrailer: checked }));
-                            setSimCurrentStepIndex(0);
-                            simFractionalStepRef.current = 0;
-                          }}
-                          className="w-3.5 h-3.5 accent-indigo-500 rounded cursor-pointer"
-                        />
-                        <span>啟用半拖車</span>
-                      </label>
-                    </div>
-
-                    {simConfig.enableTrailer && (
-                      <div className="space-y-2.5 pt-2 pl-3 border-l border-indigo-500/20 bg-indigo-950/5 p-2 rounded-r-lg">
-                        <div>
-                          <div className="flex justify-between text-[10px] text-slate-400">
-                            <span>拖車軸距 Lt</span>
-                            <span className="font-mono text-indigo-400 font-bold">{(simConfig.Lt ?? 7.5).toFixed(1)} m</span>
-                          </div>
-                          <input
-                            type="range"
-                            min="3.0"
-                            max="11.0"
-                            step="0.1"
-                            value={simConfig.Lt ?? 7.5}
-                            disabled={simSelectedVehiclePresetId !== 'custom'}
-                            onChange={(e) => {
-                              const val = parseFloat(e.target.value);
-                              setSimConfig(prev => ({ ...prev, Lt: val }));
-                              setSimCurrentStepIndex(0);
-                              simFractionalStepRef.current = 0;
-                            }}
-                            className="w-full accent-indigo-500 cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed"
-                          />
-                        </div>
-                        <div className="grid grid-cols-2 gap-2">
-                          <div>
-                            <div className="flex justify-between text-[9px] text-slate-400">
-                              <span>前懸 Oft</span>
-                              <span className="font-mono text-indigo-400">{(simConfig.Oft ?? 1.0).toFixed(1)}m</span>
-                            </div>
-                            <input
-                              type="range"
-                              min="0.2"
-                              max="2.5"
-                              step="0.1"
-                              value={simConfig.Oft ?? 1.0}
-                              disabled={simSelectedVehiclePresetId !== 'custom'}
-                              onChange={(e) => {
-                                const val = parseFloat(e.target.value);
-                                setSimConfig(prev => ({ ...prev, Oft: val }));
-                              }}
-                              className="w-full accent-indigo-500 cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed"
-                            />
-                          </div>
-                          <div>
-                            <div className="flex justify-between text-[9px] text-slate-400">
-                              <span>後懸 Ort</span>
-                              <span className="font-mono text-indigo-400">{(simConfig.Ort ?? 1.8).toFixed(1)}m</span>
-                            </div>
-                            <input
-                              type="range"
-                              min="0.2"
-                              max="4.0"
-                              step="0.1"
-                              value={simConfig.Ort ?? 1.8}
-                              disabled={simSelectedVehiclePresetId !== 'custom'}
-                              onChange={(e) => {
-                                const val = parseFloat(e.target.value);
-                                setSimConfig(prev => ({ ...prev, Ort: val }));
-                              }}
-                              className="w-full accent-indigo-500 cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed"
-                            />
-                          </div>
-                        </div>
-                        <div>
-                          <div className="flex justify-between text-[9px] text-slate-400">
-                            <span>拖車寬度 Wt</span>
-                            <span className="font-mono text-indigo-400">{(simConfig.Wt ?? 2.5).toFixed(1)}m</span>
-                          </div>
-                          <input
-                            type="range"
-                            min="1.5"
-                            max="3.0"
-                            step="0.1"
-                            value={simConfig.Wt ?? 2.5}
-                            disabled={simSelectedVehiclePresetId !== 'custom'}
-                            onChange={(e) => {
-                              const val = parseFloat(e.target.value);
-                              setSimConfig(prev => ({ ...prev, Wt: val }));
-                            }}
-                            className="w-full accent-indigo-500 cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed"
-                          />
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                {/* 3. Speed Config */}
-                <div className="p-3 bg-[#1f2229]/40 rounded-lg border border-[#2d3039] space-y-2 text-xs">
-                  <div className="flex justify-between text-[10px] text-slate-400 mb-0.5">
-                    <span>行駛速度</span>
-                    <span className="font-mono text-indigo-400">{(simConfig.speed * 3.6).toFixed(1)} km/h</span>
-                  </div>
-                  <input
-                    type="range"
-                    min="2"
-                    max="45"
-                    step="0.5"
-                    value={parseFloat((simConfig.speed * 3.6).toFixed(1))}
-                    onChange={(e) => {
-                      const val = parseFloat(e.target.value);
-                      const speedMps = parseFloat((val / 3.6).toFixed(3));
-                      setSimConfig(prev => ({ ...prev, speed: speedMps }));
-                    }}
-                    className="w-full accent-indigo-500 cursor-pointer h-1"
-                  />
-                </div>
-
-                {/* 5. Trajectory Layers List */}
-                <div className="p-3 bg-[#1f2229]/40 rounded-lg border border-[#2d3039] space-y-2">
-                  <h4 className="text-xs font-bold text-slate-200 flex items-center gap-1.5 border-b border-[#2d3039]/40 pb-1 mb-1 justify-between">
-                    <div className="flex items-center gap-1.5">
-                      <Layers className="w-3.5 h-3.5 text-indigo-400" />
-                      <span>軌跡圖層 ({simLockedPaths.length + (editingPathId === null && simRawPoints.length > 0 ? 1 : 0)})</span>
-                    </div>
-                  </h4>
-                  <div className="space-y-1.5 max-h-64 overflow-y-auto pr-1">
-                    {/* 當前全新編輯中軌跡（僅在未載入舊軌跡且有畫點時顯示） */}
-                    {editingPathId === null && simRawPoints.length > 0 && (
-                      <div 
-                        className="sim-trajectory-card flex items-center justify-between p-2 rounded-lg text-[10px] transition-all"
-                        style={{
-                          '--card-border-color': '#ef4444',
-                          '--card-bg-color': `${normalizeColor(simThemeColor)}0d`,
-                          '--card-text-color': normalizeColor(simThemeColor)
-                        } as React.CSSProperties}
-                      >
-                        <div className="flex flex-col gap-0.5 truncate">
-                          <span className="font-bold truncate flex items-center gap-1.5">
-                            <span className="inline-block w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse"></span>
-                            新軌跡 (編輯中)
-                          </span>
-                          <span className="text-[8px] text-slate-400 font-mono">
-                            {simRawPoints.length} 節點 | {simConfig.enableTrailer ? "帶掛車" : "單體車"}
-                          </span>
-                        </div>
-                        <div className="flex items-center gap-1.5">
-                          {/* 新軌跡的調色盤 */}
-                          <div className="relative flex items-center" id="color-picker-container-new-path">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                const inputEl = document.getElementById('color-input-new-path');
-                                if (inputEl) inputEl.click();
-                              }}
-                              className="sim-color-picker-btn w-4 h-4 rounded-full border transition-all cursor-pointer hover:scale-110 flex-shrink-0"
-                              style={{
-                                borderColor: '#3f3f46',
-                                boxShadow: 'none'
-                              }}
-                              title="變更軌跡顏色"
-                            />
-                            <input
-                              id="color-input-new-path"
-                              type="color"
-                              value={normalizeColor(simThemeColor)}
-                              onChange={(e) => handleUpdatePathColor('new-path', e.target.value)}
-                              className="absolute inset-0 opacity-0 w-0 h-0 pointer-events-none"
-                            />
-                          </div>
-
-                          <button
-                            onClick={handleSimLockCurrentPath}
-                            className="p-1 hover:bg-white/10 rounded transition-all cursor-pointer"
-                            title="鎖定當前新軌跡"
-                          >
-                            <Unlock className="w-3.5 h-3.5 text-red-400" />
-                          </button>
-                          <button
-                            onClick={() => {
-                              setSimRawPoints([]);
-                              setSimCurrentStepIndex(0);
-                              simFractionalStepRef.current = 0;
-                            }}
-                            className="p-1 hover:bg-red-500/20 text-slate-400 hover:text-red-400 rounded transition-all cursor-pointer"
-                            title="清除當前新軌跡"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* 已鎖定與載入編輯中的軌跡 */}
-                    {simLockedPaths.map((lp, idx) => {
-                      const isEditingThis = lp.id === editingPathId;
-                      const presetName = SIM_VEHICLE_PRESETS.find(p => p.L === lp.config.L && p.W === lp.config.W)?.name.split(' ')[0] || "車輛";
-                      
-                      const pointsCount = isEditingThis ? simRawPoints.length : lp.rawPoints.length;
-                      const isTrailer = isEditingThis ? simConfig.enableTrailer : lp.config.enableTrailer;
-                      const activeThemeColor = isEditingThis ? simThemeColor : lp.themeColor;
-
-                      const themeColors: Record<string, string> = {
-                        indigo: 'border-indigo-500/20 text-indigo-400 bg-indigo-500/5 hover:bg-indigo-500/10',
-                        emerald: 'border-emerald-500/20 text-emerald-400 bg-emerald-500/5 hover:bg-emerald-500/10',
-                        amber: 'border-amber-500/20 text-amber-400 bg-amber-500/5 hover:bg-amber-500/10',
-                        rose: 'border-rose-500/20 text-rose-400 bg-rose-500/5 hover:bg-rose-500/10',
-                        sky: 'border-sky-500/20 text-sky-400 bg-sky-500/5 hover:bg-sky-500/10'
-                      };
-
-                      const borderClass = isEditingThis ? 'border-red-500' : (themeColors[activeThemeColor] ? themeColors[activeThemeColor].split(' ')[0] : 'border-indigo-500/20');
-                      const bgTextClass = themeColors[activeThemeColor] ? themeColors[activeThemeColor].split(' ').slice(1).join(' ') : 'text-indigo-400 bg-indigo-500/5';
-
-                      const normColor = normalizeColor(activeThemeColor);
-
-                      return (
-                        <div 
-                          key={lp.id} 
-                          className="sim-trajectory-card flex items-center justify-between p-2 rounded-lg text-[10px] transition-all"
-                          style={{
-                            '--card-border-color': isEditingThis ? '#ef4444' : `${normColor}40`,
-                            '--card-bg-color': `${normColor}0d`,
-                            '--card-text-color': normColor
-                          } as React.CSSProperties}
-                        >
-                          <div className="flex flex-col gap-0.5 truncate">
-                            <span className="font-bold truncate flex items-center gap-1.5">
-                              {isEditingThis && <span className="inline-block w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse"></span>}
-                              軌跡 #{idx + 1} - {presetName}
-                            </span>
-                            <span className="text-[8px] text-slate-500 font-mono">
-                              {pointsCount} 節點 | {isTrailer ? "帶掛車" : "單體車"}
-                            </span>
-                          </div>
-                          <div className="flex items-center gap-1.5">
-                            {/* 調色盤圓圈 */}
-                            <div className="relative flex items-center" id={`color-picker-container-${lp.id}`}>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  const inputEl = document.getElementById(`color-input-${lp.id}`);
-                                  if (inputEl) inputEl.click();
-                                }}
-                                className="sim-color-picker-btn w-4 h-4 rounded-full border transition-all cursor-pointer hover:scale-110 flex-shrink-0"
-                                style={{
-                                  borderColor: '#3f3f46',
-                                  boxShadow: 'none'
-                                }}
-                                title="變更軌跡顏色"
-                              />
-                              <input
-                                id={`color-input-${lp.id}`}
-                                type="color"
-                                value={normalizeColor(lp.themeColor)}
-                                onChange={(e) => handleUpdatePathColor(lp.id, e.target.value)}
-                                className="absolute inset-0 opacity-0 w-0 h-0 pointer-events-none"
-                              />
-                            </div>
-
-                            {isEditingThis ? (
-                              <button
-                                onClick={handleSimLockCurrentPath}
-                                className="p-1 hover:bg-white/10 rounded transition-all cursor-pointer"
-                                title="鎖定編輯並回存此軌跡"
-                              >
-                                <Unlock className="w-3.5 h-3.5 text-red-400" />
-                              </button>
-                            ) : (
-                              <button
-                                onClick={() => handleSelectLockedPath(lp.id)}
-                                className="p-1 hover:bg-white/10 text-slate-400 hover:text-white rounded transition-all cursor-pointer"
-                                title="解鎖此軌跡進行編輯"
-                              >
-                                <Lock className="w-3.5 h-3.5" />
-                              </button>
-                            )}
-                            <button
-                              onClick={() => {
-                                setSimLockedPaths(prev => prev.filter(x => x.id !== lp.id));
-                                if (isEditingThis) {
-                                  setEditingPathId(null);
-                                  setSimRawPoints([]);
-                                  setSimCurrentStepIndex(0);
-                                  simFractionalStepRef.current = 0;
-                                }
-                              }}
-                              className="p-1 hover:bg-red-500/20 text-slate-400 hover:text-red-400 rounded transition-all cursor-pointer"
-                              title="刪除此軌跡"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          </div>
-                        </div>
-                      );
-                    })}
-
-                    {editingPathId === null && simRawPoints.length === 0 && simLockedPaths.length === 0 && (
-                      <div className="text-center py-6 text-slate-500 text-[10px] italic">
-                        尚未繪製任何車流軌跡段
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-  );
+  const simRightPanelEl = <SimPanel polished={uiStyle === 'polished'} projectName={projectName} />;
 
   const sharedOverlaysEl = (
     <>
       <ConfirmDialog dialog={confirmDialog} onClose={() => setConfirmDialog(null)} />
+      {appMode === 'simulation' && showSimTour && <SimTour onClose={() => setShowSimTour(false)} />}
       <AutosaveBanner offer={autosaveOffer} onRestore={handleRestoreAutosave} onDiscard={handleDiscardAutosave} />
 
       {exportedImage && (
@@ -3452,7 +1510,7 @@ export default function App() {
 
       {/* Embedded Elegant Toast notification */}
       {toast && (
-        <div id="app-toast" className={`fixed ${uiStyle === 'classic' ? 'bottom-6' : 'top-16'} left-1/2 -translate-x-1/2 z-[250] max-w-sm w-full bg-[#14161c] border border-zinc-800 text-zinc-100 px-4 py-3 rounded-2xl shadow-2xl flex items-center gap-3 animate-slide-up duration-350`}>
+        <div id="app-toast" className={`fixed ${uiStyle === 'classic' && appMode !== 'simulation' ? 'bottom-6' : 'top-16'} left-1/2 -translate-x-1/2 z-[250] max-w-sm w-full bg-[#14161c] border border-zinc-800 text-zinc-100 px-4 py-3 rounded-2xl shadow-2xl flex items-center gap-3 animate-slide-up duration-350`}>
           <span className="text-base flex-shrink-0">
             {toast.type === 'success' ? '🎯' : toast.type === 'error' ? '⚠️' : 'ℹ️'}
           </span>
@@ -3523,7 +1581,7 @@ export default function App() {
           { id: 'save-project-btn', label: '儲存專案（JSON）', icon: <Save className="w-4 h-4" />, onClick: handleSaveProject },
           { id: 'load-project-btn', label: '開啟專案…', icon: <FolderOpen className="w-4 h-4" />, onClick: () => fileInputRef.current?.click() },
           { id: 'menu-template-btn', label: '載入十字路口範本', icon: <MapPin className="w-4 h-4" />, onClick: handleLoadDemo },
-          { id: 'menu-clear-btn', label: appMode === 'cad' ? '清空畫布…' : '清除所有軌跡', icon: <Trash2 className="w-4 h-4 text-red-400" />, onClick: () => (appMode === 'cad' ? handleClearCanvas() : handleSimClearAll()) },
+          { id: 'menu-clear-btn', label: appMode === 'cad' ? '清空畫布…' : '清除所有軌跡', icon: <Trash2 className="w-4 h-4 text-red-400" />, onClick: () => (appMode === 'cad' ? handleClearCanvas() : simStore.clearAll()) },
         ].map(item => (
           <button key={item.id} id={item.id} onClick={() => { item.onClick(); setModernMenu(null); }} className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg cursor-pointer hover:bg-white/10 text-left">
             {item.icon}<span>{item.label}</span>
@@ -3556,8 +1614,8 @@ export default function App() {
 
     const history = (
       <>
-        {iconBtn('undo-btn', '復原（Ctrl+Z）', <RotateCcw className="w-4 h-4" />, appMode === 'cad' ? handleUndo : handleSimUndoLastNode, appMode === 'cad' ? historyStack.length === 0 : simRawPoints.length === 0, isGuided ? '復原' : undefined)}
-        {iconBtn('redo-btn', '重做（Ctrl+Y）', <RotateCw className="w-4 h-4" />, handleRedo, redoStack.length === 0, isGuided ? '重做' : undefined)}
+        {iconBtn('undo-btn', '復原（Ctrl+Z）', <RotateCcw className="w-4 h-4" />, appMode === 'cad' ? handleUndo : () => simStore.undo(), appMode === 'cad' ? historyStack.length === 0 : !sim.canUndo(), isGuided ? '復原' : undefined)}
+        {iconBtn('redo-btn', '重做（Ctrl+Y）', <RotateCw className="w-4 h-4" />, appMode === 'cad' ? handleRedo : () => simStore.redo(), appMode === 'cad' ? redoStack.length === 0 : !sim.canRedo(), isGuided ? '重做' : undefined)}
       </>
     );
 
@@ -3651,9 +1709,7 @@ export default function App() {
           </div>
 
           {/* 模擬模式左側面板 */}
-          {appMode === 'simulation' && (
-            <div className="absolute left-3 top-20 bottom-28 z-30 glass rounded-2xl overflow-hidden">{simLeftPanelEl}</div>
-          )}
+          {appMode === 'simulation' && <PolishedSimDock />}
 
           {/* 右側浮動屬性卡 */}
           {polishedPanelVisible ? (
@@ -3696,7 +1752,7 @@ export default function App() {
             <>
               {iconBtn('save-project-btn', '儲存專案（JSON）', <Save className="w-4 h-4" />, handleSaveProject, false, '儲存')}
               {iconBtn('load-project-btn', '開啟專案（JSON）', <FolderOpen className="w-4 h-4" />, () => fileInputRef.current?.click(), false, '開啟')}
-              {iconBtn('clear-btn', appMode === 'cad' ? '清空畫布' : '清除所有軌跡', <Trash2 className="w-4 h-4 text-red-400" />, () => (appMode === 'cad' ? handleClearCanvas() : handleSimClearAll()), appMode === 'cad' ? elements.length === 0 : false, '清空')}
+              {iconBtn('clear-btn', appMode === 'cad' ? '清空畫布' : '清除所有軌跡', <Trash2 className="w-4 h-4 text-red-400" />, () => (appMode === 'cad' ? handleClearCanvas() : simStore.clearAll()), appMode === 'cad' ? elements.length === 0 : (sim.doc.paths.length === 0 && !sim.draft), '清空')}
             </>
           ) : (
             <div className="relative">{menuBtn('file', '檔案', <FolderOpen className="w-4 h-4" />, 'menu-file-btn')}{popover('file', fileMenu, 'w-64')}</div>
@@ -3755,7 +1811,7 @@ export default function App() {
   }
 
   return (
-    <div id="webtrafficcad-app-root" className="flex flex-col h-screen w-screen bg-[#0a0b0e] text-slate-300 overflow-hidden font-sans">
+    <div id="webtrafficcad-app-root" className="ui-classic flex flex-col h-screen w-screen bg-[#0a0b0e] text-slate-300 overflow-hidden font-sans">
       {/* CAD App Elegant Top Header */}
       <header className="flex items-center justify-between px-4 xl:px-6 py-3 bg-[#14161c] border-b border-[#2d3039] shrink-0 select-none h-12 z-20">
         <div className="flex items-center gap-6 shrink-0">

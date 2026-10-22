@@ -377,7 +377,8 @@ function polylineSegs(pts: Pt[]): [Pt, Pt][] {
   return segs;
 }
 
-export function computeMetrics(path: BuiltPath, traj: Trajectory, v: VehicleSpec, hulls: Hull[], tracks: Tracks): Omit<SimMetrics, 'minClearance'> {
+/** light = true 時略過較耗時的偏移量與掃掠寬度（拖曳中使用），以 NaN 表示未計算 */
+export function computeMetrics(path: BuiltPath, traj: Trajectory, v: VehicleSpec, hulls: Hull[], tracks: Tracks, light = false): Omit<SimMetrics, 'minClearance'> {
   const poses = traj.poses;
   let maxAbs = 0, maxI = -1, infeasible = 0, maxDev = 0, maxArt = 0, jack = false;
   poses.forEach((p, i) => {
@@ -402,6 +403,14 @@ export function computeMetrics(path: BuiltPath, traj: Trajectory, v: VehicleSpec
     // 穩態時拖車與牽引車共用瞬心，內側半徑取所有非轉向輪的最小值
     const rearWheels = wheelPositions(p, v).filter(w => !w.steered);
     inner = Math.min(...rearWheels.map(w => dist(icr, w.c)));
+  }
+  if (light) {
+    return {
+      length: path.length, maxSteerDeg: (maxAbs * 180) / Math.PI, maxSteerAt: maxI >= 0 ? poses[maxI].front : null,
+      steerLimitDeg: v.maxSteerDeg, infeasibleLength: infeasible, minFrontRadius: Rf, minRearRadius: Rr,
+      outerCornerRadius: outer, innerRearRadius: inner, offtracking: NaN, wheelOfftracking: NaN, sweptWidth: NaN,
+      sweptWidthAt: null, maxDeviation: maxDev, maxArticulationDeg: (maxArt * 180) / Math.PI, jackknife: jack,
+    };
   }
   // 最後一軸相對前軸軌跡（前軸軌跡往起點後方延伸，避免把起始位置的軸距誤算為偏移）
   const reachBack = v.L + (v.trailer ? v.trailer.Lt + Math.abs(v.trailer.hitchOffset) : 0) + 2;

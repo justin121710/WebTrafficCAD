@@ -7,6 +7,7 @@ export default defineConfig(() => {
   return {
     base: '/WebTrafficCAD/',
     plugins: [react(), tailwindcss()],
+    worker: { format: 'es' as const },
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),

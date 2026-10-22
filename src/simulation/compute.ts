@@ -34,12 +34,13 @@ export const VERDICT_LABEL: Record<Verdict, string> = {
   infeasible: '不可行',
 };
 
-export function computeFromBuilt(built: BuiltPath, vehicle: VehicleSpec, drive: DriveSettings, obstacles: Obstacle[], bufferM: number): SimResult {
+/** partial = true：拖曳中的快速計算，略過偏移量、掃掠寬度與淨距檢核 */
+export function computeFromBuilt(built: BuiltPath, vehicle: VehicleSpec, drive: DriveSettings, obstacles: Obstacle[], bufferM: number, partial = false): SimResult {
   const traj = simulate(built, vehicle, drive);
   const hulls = sweepHulls(traj, vehicle, 0.25);
   const tracks = buildTracks(traj, vehicle);
-  const base = computeMetrics(built, traj, vehicle, hulls, tracks);
-  const { conflicts, minClearance } = checkClearance(hulls, obstacles, bufferM);
+  const base = computeMetrics(built, traj, vehicle, hulls, tracks, partial);
+  const { conflicts, minClearance } = partial ? { conflicts: [], minClearance: null } : checkClearance(hulls, obstacles, bufferM);
   return {
     vehicle,
     built,
