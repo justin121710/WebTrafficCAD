@@ -112,8 +112,23 @@ export function sanitizeDoc(json: any): SimDoc {
       drive: sanitizeDrive(p.drive),
       visible: bool(p.visible, true),
       locked: bool(p.locked, false),
+      chainFrom: typeof p.chainFrom === 'string' ? p.chainFrom : null,
     };
   }).filter(Boolean) as SimPath[];
+  // 接續關係：參照不存在或形成循環者移除
+  const ids = new Set(doc.paths.map(p => p.id));
+  doc.paths.forEach(p => {
+    if (p.chainFrom && !ids.has(p.chainFrom)) p.chainFrom = null;
+  });
+  doc.paths.forEach(p => {
+    const seen = new Set<string>([p.id]);
+    let cur = p.chainFrom;
+    while (cur) {
+      if (seen.has(cur)) { p.chainFrom = null; break; }
+      seen.add(cur);
+      cur = doc.paths.find(x => x.id === cur)?.chainFrom ?? null;
+    }
+  });
   return doc;
 }
 
@@ -215,6 +230,7 @@ export function migrateLegacy(sim: any): SimDoc {
       drive: drive(lp.config),
       visible: true,
       locked: false,
+      chainFrom: null,
     });
   });
   // 舊版「編輯中」的軌跡
@@ -230,7 +246,7 @@ export function migrateLegacy(sim: any): SimDoc {
   if (current) {
     doc.paths.push({
       id: newId(), name: `軌跡 ${doc.paths.length + 1}（舊檔編輯中）`, color: PATH_COLORS[doc.paths.length % PATH_COLORS.length],
-      source: current, vehicleIds: [legacyVehicle(cfg, doc.customVehicles)], drive: drive(cfg), visible: true, locked: false,
+      source: current, vehicleIds: [legacyVehicle(cfg, doc.customVehicles)], drive: drive(cfg), visible: true, locked: false, chainFrom: null,
     });
   }
   if (isNum(cfg.speed)) doc.settings.animKmh = Math.min(120, Math.max(1, cfg.speed * 3.6));

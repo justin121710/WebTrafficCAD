@@ -12,7 +12,7 @@
  */
 import { Primitive } from '../markings';
 import { DRAFT_ID, SimStore, ResultEntry } from './store';
-import { bodyOutline, expandConvex, trailerOutline, unionPolygons } from './analysis';
+import { bodyOutline, expandConvex, trailerOutlines, unionPolygons } from './analysis';
 import { outlineService } from './outlines';
 import { PATH_COLORS } from './model';
 
@@ -75,8 +75,7 @@ export function getSimulationPrimitives(store: SimStore, opts: SimExportOptions)
       for (let i = 0; i < r.traj.poses.length; i += every) {
         const p = r.traj.poses[i];
         prims.push({ kind: 'line', pts: bodyOutline(p, r.vehicle), closed: true, width: 0, minPx: 0.8, color: 'guide', css, aci, layer: 'SIM-POSE' });
-        const tr = trailerOutline(p, r.vehicle);
-        if (tr) prims.push({ kind: 'line', pts: tr, closed: true, width: 0, minPx: 0.8, color: 'guide', css, aci, layer: 'SIM-POSE' });
+        trailerOutlines(p, r.vehicle).forEach(tr => prims.push({ kind: 'line', pts: tr, closed: true, width: 0, minPx: 0.8, color: 'guide', css, aci, layer: 'SIM-POSE' }));
       }
     }
     prims.push({ kind: 'line', pts: r.built.pts, width: 0, minPx: 1.6, color: 'curve', css, aci, layer: 'SIM-PATH' });

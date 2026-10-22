@@ -15,6 +15,7 @@ import {
 import { SimResult, computeFromBuilt } from './compute';
 import { buildPath, BuiltPath } from './pathBuilder';
 import { Obstacle } from './analysis';
+import { InitialState } from './kinematics';
 import { VEHICLE_LIBRARY, VehicleSpec, findVehicle } from './vehicles';
 
 export type SimTool = 'select' | PathKind;
@@ -46,7 +47,7 @@ export interface ResultEntry {
   partial: boolean;
 }
 
-interface CacheItem { source: PathSource; drive: SimPath['drive']; vehicle: VehicleSpec; obstacles: Obstacle[]; bufferM: number; partial: boolean; result: SimResult }
+interface CacheItem { source: PathSource; drive: SimPath['drive']; vehicle: VehicleSpec; obstacles: Obstacle[]; bufferM: number; partial: boolean; result: SimResult; initKey: string; chainMsg: string | null }
 
 const HISTORY_LIMIT = 100;
 const COALESCE_MS = 800;
@@ -270,6 +271,7 @@ export class SimStore {
       drive: { ...DEFAULT_DRIVE },
       visible: true,
       locked: false,
+      chainFrom: null,
     };
   }
 
@@ -358,7 +360,10 @@ export class SimStore {
     if (!p) return;
     if (p.locked) { this.onToast(`「${p.name}」已鎖定，請先解除鎖定再刪除`, 'info'); return; }
     this.onConfirm('刪除軌跡', `確定要刪除「${p.name}」嗎？刪除後可以用 Ctrl+Z 復原。`, '刪除', () => {
-      this.commit(d => { d.paths = d.paths.filter(x => x.id !== id); });
+      this.commit(d => {
+        d.paths = d.paths.filter(x => x.id !== id);
+        d.paths.forEach(x => { if (x.chainFrom === id) x.chainFrom = p.chainFrom ?? null; });
+      });
       if (this.ui.activePathId === id) this.ui = { ...this.ui, activePathId: null, selectedNode: null };
       this.emit();
     });
@@ -466,35 +471,97 @@ export class SimStore {
     if (this.draft) paths.push(this.draft);
     const bufferM = this.doc.settings.bufferM;
     const live = new Set<string>();
-    for (const p of paths) {
-      if (!p.visible || !sourceIsBuildable(p.source)) continue;
+    const byId = new Map(paths.map(p => [p.id, p]));
+    // 接續關係需先算前一段：依相依順序排序（循環在載入時已排除，這裡再以 visited 防護）
+    const ordered: SimPath[] = [];
+    const state = new Map<string, 0 | 1 | 2>();
+    const visit = (p: SimPath) => {
+      const st = state.get(p.id);
+      if (st === 2 || st === 1) return;
+      state.set(p.id, 1);
+      const parent = p.chainFrom ? byId.get(p.chainFrom) : undefined;
+      if (parent) visit(parent);
+      state.set(p.id, 2);
+      ordered.push(p);
+    };
+    paths.forEach(visit);
+    const computed = new Map<string, SimResult>();
+    for (const p of ordered) {
+      if (!sourceIsBuildable(p.source)) continue;
       const built = this.built(p.id, p.source);
       if (!built) continue;
       // 拖曳中只有正在編輯的路徑用快速計算
       const partial = this.ui.dragging && (p.id === DRAFT_ID || p.id === this.ui.activePathId);
+      const parent = p.chainFrom ? byId.get(p.chainFrom) : undefined;
       for (const vid of p.vehicleIds) {
         const vehicle = this.vehicle(vid);
         const key = `${p.id}|${vid}`;
-        live.add(key);
+        // 接續：取前一段同車種（沒有則第一個車種）的終點狀態
+        let init: InitialState | undefined;
+        let chainMsg: string | null = null;
+        if (parent) {
+          const pr = computed.get(`${parent.id}|${vid}`) ?? computed.get(`${parent.id}|${parent.vehicleIds[0]}`);
+          const last = pr?.traj.poses[pr.traj.poses.length - 1];
+          if (last) {
+            init = { heading: last.heading, trailerHeadings: [last.trailer?.heading, last.trailer2?.heading].filter((x): x is number => x !== undefined) };
+            const guideRear = p.drive.guide === 'rear' || p.drive.direction === 'reverse';
+            const endPt = guideRear ? last.rear : last.front;
+            const gap = Math.hypot(built.pts[0].x - endPt.x, built.pts[0].y - endPt.y);
+            if (gap > 0.3) chainMsg = `起點與「${parent.name}」終點的${guideRear ? '後軸' : '前軸'}位置相距 ${gap.toFixed(2)} m，接續不連續`;
+          } else {
+            chainMsg = `接續的「${parent.name}」沒有可用結果，改以路徑起點方向開始`;
+          }
+        }
+        const initKey = init ? JSON.stringify(init) : '';
         const c = this.cache.get(key);
         let result: SimResult;
         let isPartial = partial;
-        if (c && c.source === p.source && c.drive === p.drive && c.vehicle === vehicle && c.obstacles === this.obstacles && c.bufferM === bufferM && (!c.partial || partial)) {
+        if (c && c.source === p.source && c.drive === p.drive && c.vehicle === vehicle && c.obstacles === this.obstacles && c.bufferM === bufferM && c.initKey === initKey && c.chainMsg === chainMsg && (!c.partial || partial)) {
           result = c.result;
           isPartial = c.partial;
         } else {
-          result = computeFromBuilt(built, vehicle, p.drive, partial ? [] : this.obstacles, bufferM, partial);
-          this.cache.set(key, { source: p.source, drive: p.drive, vehicle, obstacles: this.obstacles, bufferM, partial, result });
+          result = computeFromBuilt(built, vehicle, p.drive, partial ? [] : this.obstacles, bufferM, partial, init);
+          if (chainMsg) result = { ...result, messages: [chainMsg, ...result.messages] };
+          this.cache.set(key, { source: p.source, drive: p.drive, vehicle, obstacles: this.obstacles, bufferM, partial, result, initKey, chainMsg });
         }
+        computed.set(key, result);
+        if (!p.visible) continue;
+        live.add(key);
         out.push({ key, pathId: p.id, vehicleId: vid, path: p, result, partial: isPartial });
       }
     }
-    for (const k of Array.from(this.cache.keys())) if (!live.has(k)) this.cache.delete(k);
+    for (const k of Array.from(this.cache.keys())) if (!computed.has(k)) this.cache.delete(k);
     for (const k of Array.from(this.builtCache.keys())) if (!paths.some(p => p.id === k)) this.builtCache.delete(k);
+    void live;
     this.resultsVersion = this.version;
     this.resultsSnapshot = out;
     return out;
   };
+
+  /** 從某條軌跡的終點接續新的操作（前進或倒車），以點選＋半徑繪製 */
+  continueFrom(pathId: string, direction: 'forward' | 'reverse') {
+    const parent = this.getPath(pathId);
+    const r = this.getResults().find(e => e.pathId === pathId);
+    const last = r?.result.traj.poses[r.result.traj.poses.length - 1];
+    if (!parent || !last) { this.onToast('這條軌跡還沒有結果，無法接續', 'error'); return; }
+    if (this.draft) this.finishDraft(true);
+    const reverse = direction === 'reverse';
+    const start = reverse ? last.rear : last.front;
+    const h = reverse ? last.heading + Math.PI : last.heading;
+    const lead = { x: start.x + 3 * Math.cos(h), y: start.y + 3 * Math.sin(h) };
+    const R = this.doc.settings.defaultRadius;
+    const d = this.newPathFor({ kind: 'polyline', nodes: [{ p: start, R, Ls: 0 }, { p: lead, R, Ls: 0 }] });
+    this.ui = { ...this.ui, tool: 'polyline', hover: null, selectedNode: null };
+    this.setDraft({
+      ...d,
+      name: `${parent.name}－${reverse ? '倒車' : '前進'}`,
+      color: parent.color,
+      vehicleIds: [...parent.vehicleIds],
+      chainFrom: parent.id,
+      drive: { ...d.drive, guide: reverse ? 'rear' : 'front', direction, controller: reverse ? 'exact' : parent.drive.controller },
+    }, false);
+    this.onToast(`已從「${parent.name}」終點接續${reverse ? '倒車' : '前進'}：起點已沿車身方向延伸 3 m，繼續點擊後續節點，Enter 完成`, 'info');
+  }
 
   /** HUD／播放使用的結果 */
   activeResult(): ResultEntry | null {
@@ -531,6 +598,17 @@ export class SimStore {
       const end = cur.result.traj.poses[cur.result.traj.poses.length - 1]?.s ?? 0;
       this.playS += (this.doc.settings.animKmh / 3.6) * dt;
       if (this.playS >= end) {
+        // 多段操作：接續的下一段自動播放
+        const next = this.doc.paths.find(x => x.chainFrom === cur.pathId && x.visible);
+        if (next && !this.draft) {
+          const vid = cur.vehicleId;
+          this.ui = { ...this.ui, activePathId: next.id, selectedNode: null, activeVehicleId: next.vehicleIds.includes(vid) ? vid : next.vehicleIds[0] };
+          this.playS = 0;
+          this.emit();
+          this.emitPlay();
+          this.raf = requestAnimationFrame(tick);
+          return;
+        }
         this.playS = end;
         this.emitPlay();
         this.stop();

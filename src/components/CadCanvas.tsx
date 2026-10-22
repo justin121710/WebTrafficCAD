@@ -5464,7 +5464,7 @@ export default function CadCanvas({
         onDoubleClick={handleDoubleClick}
         onWheel={handleWheel}
         onContextMenu={(e) => e.preventDefault()}
-        className="w-full h-full block"
+        className="w-full h-full block touch-none"
       />
 
       {/* 軌跡模擬覆蓋層（不攔截滑鼠；CAD 模式下可作為唯讀參考圖層） */}

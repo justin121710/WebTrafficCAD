@@ -11,6 +11,8 @@
  *   hitchOffset：聯結點（第五輪）相對牽引車後軸的位置，往前為正
  *   Lt ：聯結點到拖車後軸中心的距離
  *   Oft：拖車在聯結點前方的長度；Ort：拖車後軸到車尾
+ * 第二節拖車（雙節聯結車、拖桿式全拖車的後車）：
+ *   trailer2.hitchOffset 為聯結點相對「第一節拖車後軸」的位置，往前為正（拖桿式通常為負值，即在後軸後方）
  *
  * 數值來源寫在每一筆的 source 欄位；送審前請依交通部《公路路線設計規範》等主管機關最新公告版本核對。
  */
@@ -25,7 +27,7 @@ export interface TrailerSpec {
   maxArticulationDeg: number;
 }
 
-export type VehicleCategory = 'passenger' | 'truck' | 'bus' | 'articulated' | 'custom' | 'legacy';
+export type VehicleCategory = 'motorcycle' | 'passenger' | 'truck' | 'bus' | 'articulated' | 'custom' | 'legacy';
 
 export interface VehicleSpec {
   id: string;
@@ -45,6 +47,8 @@ export interface VehicleSpec {
   /** 後軸數（僅影響繪圖；運動學採等效軸距） */
   rearAxles?: number;
   trailer?: TrailerSpec;
+  /** 第二節拖車（需先有第一節） */
+  trailer2?: TrailerSpec;
   /** 自訂車種的原始車種 id */
   baseId?: string;
 }
@@ -82,7 +86,12 @@ export function overallLength(v: VehicleSpec): number {
   const t = v.trailer;
   // 以牽引車後軸為原點，往前為正
   const front = Math.max(v.L + v.Of, t.hitchOffset + t.Oft);
-  const rear = Math.max(v.Or, t.Lt + t.Ort - t.hitchOffset);
+  let rear = Math.max(v.Or, t.Lt + t.Ort - t.hitchOffset);
+  if (v.trailer2) {
+    const t2 = v.trailer2;
+    const axle1 = t.Lt - t.hitchOffset; // 第一節後軸在牽引車後軸後方的距離
+    rear = Math.max(rear, axle1 - t2.hitchOffset + t2.Lt + t2.Ort);
+  }
   return front + rear;
 }
 
@@ -111,6 +120,12 @@ export const VEHICLE_LIBRARY: VehicleSpec[] = [
     trailer: { hitchOffset: 0, Lt: 8.4, W: 2.4, Oft: 0.9, Ort: 0.8, maxArticulationDeg: 70 },
     rearAxles: 2,
   }),
+  {
+    id: 'ref-scooter', name: '機車（125 cc 速克達參考值）', short: '機車', category: 'motorcycle',
+    L: 1.3, W: 0.75, Of: 0.3, Or: 0.35, maxSteerDeg: 40, mirror: 0.05,
+    source: '一般 125 cc 速克達常見尺寸之參考值，非規範數值；請依實際車型修改',
+    note: '單軌運動學不考慮車身傾斜，僅適用於低速轉彎、迴轉與停等區進出的空間檢核',
+  },
   // 舊版預設：保留以相容舊專案檔，未標示出處
   {
     id: 'standard-sedan', name: '標準自小客車（舊版預設）', short: '舊版小客車', category: 'legacy',
@@ -135,7 +150,14 @@ export const VEHICLE_LIBRARY: VehicleSpec[] = [
   },
 ];
 
+/** 依連結順序列出拖車單元 */
+export function trailerUnits(v: VehicleSpec): TrailerSpec[] {
+  if (!v.trailer) return [];
+  return v.trailer2 ? [v.trailer, v.trailer2] : [v.trailer];
+}
+
 export const CATEGORY_LABEL: Record<VehicleCategory, string> = {
+  motorcycle: '機車',
   passenger: '小型車',
   truck: '大貨車',
   bus: '大客車',
@@ -185,16 +207,17 @@ export function sanitizeVehicle(v: any): VehicleSpec | null {
     rearAxles: v.rearAxles === 2 ? 2 : 1,
     baseId: typeof v.baseId === 'string' ? v.baseId : undefined,
   };
+  const unit = (t: any): TrailerSpec => ({
+    hitchOffset: num(t.hitchOffset, -5, 3, 0),
+    Lt: num(t.Lt, 1, 20, 7.5),
+    W: num(t.W, 0.5, 4, 2.5),
+    Oft: num(t.Oft, 0, 5, 1),
+    Ort: num(t.Ort, 0, 8, 1.5),
+    maxArticulationDeg: num(t.maxArticulationDeg, 20, 90, 70),
+  });
   if (v.trailer && typeof v.trailer === 'object') {
-    const t = v.trailer;
-    out.trailer = {
-      hitchOffset: num(t.hitchOffset, -3, 3, 0),
-      Lt: num(t.Lt, 1, 20, 7.5),
-      W: num(t.W, 0.5, 4, 2.5),
-      Oft: num(t.Oft, 0, 5, 1),
-      Ort: num(t.Ort, 0, 8, 1.5),
-      maxArticulationDeg: num(t.maxArticulationDeg, 20, 90, 70),
-    };
+    out.trailer = unit(v.trailer);
+    if (v.trailer2 && typeof v.trailer2 === 'object') out.trailer2 = unit(v.trailer2);
   }
   return out;
 }

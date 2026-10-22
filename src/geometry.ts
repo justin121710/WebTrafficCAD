@@ -2,7 +2,7 @@ import { Point2D, ThreeCenterCurveElement, IslandElement, CadElement, CrosswalkE
 import { CadDesignVehicle, cadVehicle } from './simulation/vehicles';
 import { resample } from './simulation/pathBuilder';
 import { simulate } from './simulation/kinematics';
-import { bodyOutline, trailerOutline } from './simulation/analysis';
+import { bodyOutline, trailerOutlines } from './simulation/analysis';
 import { DEFAULT_DRIVE } from './simulation/model';
 import { arrowData } from './arrowData';
 
@@ -1200,12 +1200,15 @@ export function generateVehicleSweptPath(
     const p = traj.poses[i];
     const [fl, fr, rr, rl] = bodyOutline(p, v);
     tractorEnvelopes.push({ p1: fl, p2: fr, p3: rr, p4: rl });
-    const tr = trailerOutline(p, v);
-    if (tr) {
-      const [tfl, tfr, trr, trl] = tr;
-      trailerEnvelopes.push({ p1: tfl, p2: tfr, p3: trr, p4: trl });
-      leftRibbon.push(fl, tfl, trl);
-      rightRibbon.push(fr, tfr, trr);
+    const units = trailerOutlines(p, v);
+    if (units.length) {
+      leftRibbon.push(fl);
+      rightRibbon.push(fr);
+      units.forEach(([tfl, tfr, trr, trl]) => {
+        trailerEnvelopes.push({ p1: tfl, p2: tfr, p3: trr, p4: trl });
+        leftRibbon.push(tfl, trl);
+        rightRibbon.push(tfr, trr);
+      });
     } else {
       leftRibbon.push(fl, rl);
       rightRibbon.push(fr, rr);

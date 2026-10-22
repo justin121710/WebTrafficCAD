@@ -15,7 +15,7 @@
  */
 import { DriveSettings, Pt } from './model';
 import { BuiltPath, pointAtS } from './pathBuilder';
-import { VehicleSpec } from './vehicles';
+import { VehicleSpec, trailerUnits } from './vehicles';
 import { add, dir, dist, mul, normAngle, sub, unit } from './geom';
 
 export interface TrailerPose {
@@ -38,7 +38,15 @@ export interface Pose {
   /** 引導點偏離路徑的距離（m，轉角受限模式） */
   dev: number;
   trailer?: TrailerPose;
+  /** 第二節拖車 */
+  trailer2?: TrailerPose;
   jackknife?: boolean;
+}
+
+/** 接續前一段操作時的初始狀態（車身與各節拖車方向） */
+export interface InitialState {
+  heading?: number;
+  trailerHeadings?: number[];
 }
 
 export type SimStatus = 'ok' | 'infeasible' | 'truncated' | 'diverged';
@@ -81,27 +89,35 @@ export function tractrixStep(heading: number, A: Pt, B: Pt, L: number): number {
   return normAngle(e + a1);
 }
 
-function attachTrailers(poses: Pose[], v: VehicleSpec) {
-  const t = v.trailer;
-  if (!t) return;
-  const maxArt = (t.maxArticulationDeg * Math.PI) / 180;
-  let prevHitch: Pt | null = null;
-  let heading = 0;
+function attachTrailers(poses: Pose[], v: VehicleSpec, init?: InitialState) {
+  const units = trailerUnits(v);
+  if (!units.length) return;
+  const prevHitch: (Pt | null)[] = units.map(() => null);
+  const headings = units.map((_, k) => init?.trailerHeadings?.[k]);
   for (const p of poses) {
-    const hitch = add(p.rear, mul(dir(p.heading), t.hitchOffset));
-    heading = prevHitch ? tractrixStep(heading, prevHitch, hitch, t.Lt) : p.heading;
-    const axle = add(hitch, mul(dir(heading), -t.Lt));
-    const articulation = normAngle(p.heading - heading);
-    p.trailer = { hitch, axle, heading, articulation };
-    p.jackknife = Math.abs(articulation) > maxArt;
-    prevHitch = hitch;
+    let parentAxle = p.rear, parentHeading = p.heading;
+    p.jackknife = false;
+    units.forEach((t, k) => {
+      const hitch = add(parentAxle, mul(dir(parentHeading), t.hitchOffset));
+      const prev = prevHitch[k];
+      const h: number = prev ? tractrixStep(headings[k]!, prev, hitch, t.Lt) : (headings[k] ?? parentHeading);
+      headings[k] = h;
+      const axle = add(hitch, mul(dir(h), -t.Lt));
+      const articulation = normAngle(parentHeading - h);
+      const tp: TrailerPose = { hitch, axle, heading: h, articulation };
+      if (k === 0) p.trailer = tp; else p.trailer2 = tp;
+      if (Math.abs(articulation) > (t.maxArticulationDeg * Math.PI) / 180) p.jackknife = true;
+      prevHitch[k] = hitch;
+      parentAxle = axle;
+      parentHeading = h;
+    });
   }
 }
 
-function simulateFrontExact(path: BuiltPath, v: VehicleSpec, maxSteer: number): Pose[] {
+function simulateFrontExact(path: BuiltPath, v: VehicleSpec, maxSteer: number, init?: InitialState): Pose[] {
   const poses: Pose[] = [];
   const L = v.L;
-  let heading = path.heading[0];
+  let heading = init?.heading ?? path.heading[0];
   for (let k = 0; k < path.pts.length; k++) {
     const F = path.pts[k];
     if (k > 0) heading = tractrixStep(heading, path.pts[k - 1], F, L);
@@ -127,7 +143,7 @@ function simulateRear(path: BuiltPath, v: VehicleSpec, maxSteer: number, reverse
   return poses;
 }
 
-function simulateFrontLimited(path: BuiltPath, v: VehicleSpec, drive: DriveSettings, maxSteer: number): { poses: Pose[]; status: SimStatus } {
+function simulateFrontLimited(path: BuiltPath, v: VehicleSpec, drive: DriveSettings, maxSteer: number, init?: InitialState): { poses: Pose[]; status: SimStatus } {
   const L = v.L;
   const ds = Math.max(0.02, path.length / Math.max(1, path.pts.length - 1));
   const ld = Math.max(0.3, drive.lookahead);
@@ -138,7 +154,7 @@ function simulateFrontLimited(path: BuiltPath, v: VehicleSpec, drive: DriveSetti
   const target = (s: number): Pt => (s <= path.length ? pointAtS(path, s).p : add(endP, mul(dir(endH), s - path.length)));
 
   let F = { ...path.pts[0] };
-  let heading = path.heading[0];
+  let heading = init?.heading ?? path.heading[0];
   let steer = 0;
   let idx = 0;
   const poses: Pose[] = [{ s: 0, rear: add(F, mul(dir(heading), -L)), front: F, heading, steer: 0, feasible: true, dev: 0 }];
@@ -176,7 +192,7 @@ function simulateFrontLimited(path: BuiltPath, v: VehicleSpec, drive: DriveSetti
   return { poses, status };
 }
 
-export function simulate(path: BuiltPath, v: VehicleSpec, drive: DriveSettings): Trajectory {
+export function simulate(path: BuiltPath, v: VehicleSpec, drive: DriveSettings, init?: InitialState): Trajectory {
   const maxSteer = (v.maxSteerDeg * Math.PI) / 180;
   const messages: string[] = [];
   let poses: Pose[];
@@ -184,23 +200,26 @@ export function simulate(path: BuiltPath, v: VehicleSpec, drive: DriveSettings):
   const reverse = drive.direction === 'reverse';
   if (reverse || drive.guide === 'rear') {
     poses = simulateRear(path, v, maxSteer, reverse);
+    if (init?.heading !== undefined && poses.length && Math.abs(normAngle(poses[0].heading - init.heading)) > (5 * Math.PI) / 180) {
+      messages.push(`起點車身方向與前一段終點相差 ${Math.abs((normAngle(poses[0].heading - init.heading) * 180) / Math.PI).toFixed(0)}°，後軸引導時車身方向由路徑切線決定，請讓路徑起點切線與前一段車身方向一致`);
+    }
     if (drive.controller === 'limited') messages.push('後軸引導／倒車採精確跟隨；轉角受限模式只適用於前軸引導前進');
   } else if (drive.controller === 'limited') {
-    const r = simulateFrontLimited(path, v, drive, maxSteer);
+    const r = simulateFrontLimited(path, v, drive, maxSteer, init);
     poses = r.poses;
     status = r.status;
     if (status === 'diverged') messages.push('轉角受限下車輛已偏離路徑超過 4 m，模擬中止：此路徑對該車種過急');
     if (status === 'truncated') messages.push('模擬步數超過上限，結果不完整');
   } else {
-    poses = simulateFrontExact(path, v, maxSteer);
+    poses = simulateFrontExact(path, v, maxSteer, init);
   }
-  attachTrailers(poses, v);
+  attachTrailers(poses, v, init);
   const step = path.length / Math.max(1, path.pts.length - 1);
   if (status === 'ok' && poses.some(p => !p.feasible)) {
     status = 'infeasible';
     const bad = poses.filter(p => !p.feasible).length * step;
     messages.push(`有 ${bad.toFixed(1)} m 路段需要超過最大轉角 ${v.maxSteerDeg}°，實際無法依此路徑行駛`);
   }
-  if (poses.some(p => p.jackknife)) messages.push(`拖車折角超過 ${v.trailer?.maxArticulationDeg}°（可能折疊）`);
+  if (poses.some(p => p.jackknife)) messages.push('拖車折角超過該節的最大折角（可能折疊）');
   return { poses, status, messages, step };
 }

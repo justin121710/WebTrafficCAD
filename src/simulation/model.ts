@@ -82,6 +82,8 @@ export interface SimPath {
   visible: boolean;
   /** 防止誤改（鎖定後不可拖曳節點、不可刪除節點） */
   locked: boolean;
+  /** 接續另一條軌跡的終點（多段前進／倒車操作），以其終點的車身與拖車方向為初始狀態 */
+  chainFrom?: string | null;
 }
 
 export interface SimDisplay {

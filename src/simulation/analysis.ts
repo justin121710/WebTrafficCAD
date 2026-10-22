@@ -6,9 +6,9 @@
  */
 import * as pcNs from 'polygon-clipping';
 import { Pt } from './model';
-import { Pose, Trajectory, radiiFromSteer } from './kinematics';
+import { Pose, TrailerPose, Trajectory, radiiFromSteer } from './kinematics';
 import { BuiltPath } from './pathBuilder';
-import { VehicleSpec, overallLength } from './vehicles';
+import { TrailerSpec, VehicleSpec, overallLength, trailerUnits } from './vehicles';
 import {
   BBox, SegmentGrid, add, bboxOf, bboxOverlap, closestOnSegment, convexHull, cross, dir, dist,
   distanceToPolygonEdges, leftNormal, mul, pointInPolygon, segmentsIntersect, sub,
@@ -53,14 +53,29 @@ export function mirrorOutlines(p: Pose, v: VehicleSpec): Pt[][] {
   ]);
 }
 
-export function trailerOutline(p: Pose, v: VehicleSpec): Pt[] | null {
-  if (!p.trailer || !v.trailer) return null;
-  const t = v.trailer;
-  const w = t.W / 2;
-  const xf = t.Lt + t.Oft, xr = -t.Ort;
-  const a = p.trailer.axle, h = p.trailer.heading;
-  return [local(a, h, xf, w), local(a, h, xf, -w), local(a, h, xr, -w), local(a, h, xr, w)];
+/** 各節拖車的姿態與規格（依連結順序） */
+export function trailerPairs(p: Pose, v: VehicleSpec): { spec: TrailerSpec; pose: TrailerPose }[] {
+  const units = trailerUnits(v);
+  const poses = [p.trailer, p.trailer2];
+  return units.map((spec, k) => ({ spec, pose: poses[k]! })).filter(u => !!u.pose);
 }
+
+/** 各節拖車外框 */
+export function trailerOutlines(p: Pose, v: VehicleSpec): Pt[][] {
+  return trailerPairs(p, v).map(({ spec: t, pose }) => {
+    const w = t.W / 2;
+    const xf = t.Lt + t.Oft, xr = -t.Ort;
+    const a = pose.axle, h = pose.heading;
+    return [local(a, h, xf, w), local(a, h, xf, -w), local(a, h, xr, -w), local(a, h, xr, w)];
+  });
+}
+
+/** 第一節拖車外框（相容舊呼叫） */
+export function trailerOutline(p: Pose, v: VehicleSpec): Pt[] | null {
+  return trailerOutlines(p, v)[0] ?? null;
+}
+
+const UNIT_PREFIX = ['拖車', '第二節拖車'];
 
 export function wheelPositions(p: Pose, v: VehicleSpec): { name: string; c: Pt; h: number; steered: boolean }[] {
   const w = Math.max(0.3, v.W / 2 - TIRE_INSET);
@@ -70,13 +85,13 @@ export function wheelPositions(p: Pose, v: VehicleSpec): { name: string; c: Pt; 
     { name: '左後輪', c: local(p.rear, p.heading, 0, w), h: p.heading, steered: false },
     { name: '右後輪', c: local(p.rear, p.heading, 0, -w), h: p.heading, steered: false },
   ];
-  if (p.trailer && v.trailer) {
-    const tw = Math.max(0.3, v.trailer.W / 2 - TIRE_INSET);
+  trailerPairs(p, v).forEach(({ spec, pose }, k) => {
+    const tw = Math.max(0.3, spec.W / 2 - TIRE_INSET);
     out.push(
-      { name: '拖車左輪', c: local(p.trailer.axle, p.trailer.heading, 0, tw), h: p.trailer.heading, steered: false },
-      { name: '拖車右輪', c: local(p.trailer.axle, p.trailer.heading, 0, -tw), h: p.trailer.heading, steered: false },
+      { name: `${UNIT_PREFIX[k]}左輪`, c: local(pose.axle, pose.heading, 0, tw), h: pose.heading, steered: false },
+      { name: `${UNIT_PREFIX[k]}右輪`, c: local(pose.axle, pose.heading, 0, -tw), h: pose.heading, steered: false },
     );
-  }
+  });
   return out;
 }
 
@@ -98,8 +113,7 @@ export function sweepHulls(traj: Trajectory, v: VehicleSpec, intervalM = 0.25): 
   const comps = (p: Pose): { comp: HullComp; pts: Pt[] }[] => {
     const list: { comp: HullComp; pts: Pt[] }[] = [{ comp: 'body', pts: bodyOutline(p, v) }];
     mirrorOutlines(p, v).forEach(m => list.push({ comp: 'mirror', pts: m }));
-    const tr = trailerOutline(p, v);
-    if (tr) list.push({ comp: 'trailer', pts: tr });
+    trailerOutlines(p, v).forEach(tr => list.push({ comp: 'trailer', pts: tr }));
     return list;
   };
   if (idx.length === 1) {
@@ -126,17 +140,17 @@ export function buildTracks(traj: Trajectory, v: VehicleSpec): Tracks {
   const wheelNames = poses.length ? wheelPositions(poses[0], v).map(w => w.name) : [];
   const wheels = wheelNames.map(name => ({ name, pts: [] as Pt[] }));
   const corners: { name: string; pts: Pt[] }[] = ['左前角', '右前角', '右後角', '左後角'].map(name => ({ name, pts: [] }));
-  if (v.trailer) ['拖車左前角', '拖車右前角', '拖車右後角', '拖車左後角'].forEach(name => corners.push({ name, pts: [] }));
+  trailerUnits(v).forEach((_, k) => ['左前角', '右前角', '右後角', '左後角'].forEach(name => corners.push({ name: `${UNIT_PREFIX[k]}${name}`, pts: [] })));
   for (const p of poses) {
-    wheelPositions(p, v).forEach((w, k) => wheels[k].pts.push(w.c));
+    wheelPositions(p, v).forEach((w, k) => wheels[k]?.pts.push(w.c));
     bodyOutline(p, v).forEach((c, k) => corners[k].pts.push(c));
-    const tr = trailerOutline(p, v);
-    if (tr) tr.forEach((c, k) => corners[4 + k].pts.push(c));
+    trailerOutlines(p, v).forEach((tr, u) => tr.forEach((c, k) => corners[4 + u * 4 + k]?.pts.push(c)));
   }
+  const last = (p: Pose) => (p.trailer2 ?? p.trailer)!.axle;
   return {
     frontAxle: poses.map(p => p.front),
     rearAxle: poses.map(p => p.rear),
-    trailerAxle: v.trailer ? poses.map(p => p.trailer!.axle) : undefined,
+    trailerAxle: v.trailer ? poses.map(last) : undefined,
     wheels,
     corners,
   };
@@ -386,10 +400,9 @@ export function computeMetrics(path: BuiltPath, traj: Trajectory, v: VehicleSpec
     if (a > maxAbs) { maxAbs = a; maxI = i; }
     if (!p.feasible) infeasible += traj.step;
     if (p.dev > maxDev) maxDev = p.dev;
-    if (p.trailer) {
-      const art = Math.abs(p.trailer.articulation);
-      if (art > maxArt) maxArt = art;
-    }
+    [p.trailer, p.trailer2].forEach(t => {
+      if (t && Math.abs(t.articulation) > maxArt) maxArt = Math.abs(t.articulation);
+    });
     if (p.jackknife) jack = true;
   });
   const { Rf, Rr } = radiiFromSteer(maxAbs, v.L);
@@ -413,14 +426,15 @@ export function computeMetrics(path: BuiltPath, traj: Trajectory, v: VehicleSpec
     };
   }
   // 最後一軸相對前軸軌跡（前軸軌跡往起點後方延伸，避免把起始位置的軸距誤算為偏移）
-  const reachBack = v.L + (v.trailer ? v.trailer.Lt + Math.abs(v.trailer.hitchOffset) : 0) + 2;
+  const reachBack = v.L + trailerUnits(v).reduce((a, t) => a + t.Lt + Math.abs(t.hitchOffset), 0) + 2;
   const frontGrid = new SegmentGrid(polylineSegs(extendBack(tracks.frontAxle, reachBack)), 2);
   const lastAxle = tracks.trailerAxle ?? tracks.rearAxle;
   let off = 0;
   for (let i = 0; i < lastAxle.length; i += 2) off = Math.max(off, frontGrid.nearest(lastAxle[i]));
   // 同側前後輪
   let wheelOff = 0;
-  const pairs: [string, string][] = v.trailer ? [['左前輪', '拖車左輪'], ['右前輪', '拖車右輪']] : [['左前輪', '左後輪'], ['右前輪', '右後輪']];
+  const lastUnit = trailerUnits(v).length;
+  const pairs: [string, string][] = lastUnit ? [['左前輪', `${UNIT_PREFIX[lastUnit - 1]}左輪`], ['右前輪', `${UNIT_PREFIX[lastUnit - 1]}右輪`]] : [['左前輪', '左後輪'], ['右前輪', '右後輪']];
   pairs.forEach(([f, r]) => {
     const ft = tracks.wheels.find(w => w.name === f);
     const rt = tracks.wheels.find(w => w.name === r);

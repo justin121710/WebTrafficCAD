@@ -47,6 +47,12 @@ export default function App() {
   // 軌跡模擬狀態集中在 simStore（src/simulation/store.ts）
   const sim = useSimStore();
   const [showSimTour, setShowSimTour] = useState<boolean>(false);
+  const [windowWidth, setWindowWidth] = useState<number>(() => (typeof window !== 'undefined' ? window.innerWidth : 1440));
+  useEffect(() => {
+    const onResize = () => setWindowWidth(window.innerWidth);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
   const [simDocVersion, setSimDocVersion] = useState<number>(0);
 
   // Central elements state (Geometries Array)
@@ -1372,7 +1378,8 @@ export default function App() {
           </>
   );
   // 軌跡模擬左側工具（依介面風格與 CAD 工具列一致）
-  const simLeftPanelEl = uiStyle === 'minimal' ? <MinimalSimRail /> : <GuidedSimSidebar />;
+  // 視窗較窄時改用細窄圖示列，讓出畫布空間
+  const simLeftPanelEl = uiStyle === 'minimal' || windowWidth < 1180 ? <MinimalSimRail /> : <GuidedSimSidebar />;
   const canvasAreaEl = (
         <div className="flex-1 h-full min-w-0 relative flex flex-col">
           <CadCanvas 

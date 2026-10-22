@@ -66,6 +66,11 @@ function VehicleDiagram({ v, color }: { v: VehicleSpec; color: string }) {
   );
   return (
     <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H} aria-label="車輛尺寸示意">
+      {v.trailer && v.trailer2 && (() => {
+        const a1 = v.trailer.hitchOffset - v.trailer.Lt; // 第一節後軸位置
+        const h2 = a1 + v.trailer2.hitchOffset;
+        return <>{rect(h2 - v.trailer2.Lt - v.trailer2.Ort, h2 + v.trailer2.Oft, v.trailer2.W, 'transparent', 'var(--ui-muted)')}{wheel(h2 - v.trailer2.Lt, v.trailer2.W - 0.3)}</>;
+      })()}
       {v.trailer && rect(v.trailer.hitchOffset - v.trailer.Lt - v.trailer.Ort, v.trailer.hitchOffset + v.trailer.Oft, v.trailer.W, 'transparent', 'var(--ui-muted)')}
       {rect(-v.Or, v.L + v.Of, v.W, `${color}22`, color)}
       {wheel(v.L, v.W - 0.3)}
@@ -87,7 +92,8 @@ function VehicleTab({ store }: { store: SimStore }) {
   const focus = store.vehicle(focusId);
   const all = store.vehicles();
   const groups: [string, VehicleSpec[]][] = [
-    ['設計車種', all.filter(v => v.category !== 'legacy' && v.category !== 'custom')],
+    ['設計車種', all.filter(v => v.category !== 'legacy' && v.category !== 'custom' && v.category !== 'motorcycle')],
+    ['參考車種（非規範值）', all.filter(v => v.category === 'motorcycle')],
     ['自訂車種', all.filter(v => v.category === 'custom')],
   ];
   const legacy = all.filter(v => v.category === 'legacy');
@@ -145,7 +151,7 @@ function VehicleTab({ store }: { store: SimStore }) {
           )}
         </div>
         <div className="text-[10.5px] font-mono mt-0.5" style={{ color: 'var(--ui-muted)' }}>
-          全長 {overallLength(v).toFixed(1)}・寬 {v.W.toFixed(1)}・軸距 {v.L.toFixed(1)}{v.trailer ? `＋${v.trailer.Lt.toFixed(1)}` : ''} m・δmax {v.maxSteerDeg.toFixed(1)}°
+          全長 {overallLength(v).toFixed(1)}・寬 {v.W.toFixed(1)}・軸距 {v.L.toFixed(1)}{v.trailer ? `＋${v.trailer.Lt.toFixed(1)}` : ''}{v.trailer2 ? `＋${v.trailer2.Lt.toFixed(1)}` : ''} m・δmax {v.maxSteerDeg.toFixed(1)}°
         </div>
       </div>
     );
@@ -197,7 +203,7 @@ function VehicleTab({ store }: { store: SimStore }) {
         </div>
         <div className={rowCls + ' mt-2'}>
           <span>半聯結車（拖車）</span>
-          <Toggle on={!!focus.trailer} onClick={() => editVehicle({ trailer: focus.trailer ? undefined : { hitchOffset: 0, Lt: 8.4, W: focus.W, Oft: 0.9, Ort: 0.8, maxArticulationDeg: 70 } }, 'trailer')} />
+          <Toggle on={!!focus.trailer} onClick={() => editVehicle(focus.trailer ? { trailer: undefined, trailer2: undefined } : { trailer: { hitchOffset: 0, Lt: 8.4, W: focus.W, Oft: 0.9, Ort: 0.8, maxArticulationDeg: 70 } }, 'trailer')} />
         </div>
         {focus.trailer && (
           <div className="pl-2" style={{ borderLeft: '2px solid var(--ui-border)' }}>
@@ -207,6 +213,23 @@ function VehicleTab({ store }: { store: SimStore }) {
             <NumberField label="拖車前懸（聯結點前）" unit="m" value={focus.trailer.Oft} min={0} max={5} onChange={v => editVehicle({ trailer: { ...focus.trailer!, Oft: v } }, 'tOft')} />
             <NumberField label="拖車後懸" unit="m" value={focus.trailer.Ort} min={0} max={8} onChange={v => editVehicle({ trailer: { ...focus.trailer!, Ort: v } }, 'tOrt')} />
             <NumberField label="最大折角" unit="°" value={focus.trailer.maxArticulationDeg} min={20} max={90} digits={0} onChange={v => editVehicle({ trailer: { ...focus.trailer!, maxArticulationDeg: v } }, 'tArt')} />
+          </div>
+        )}
+        {focus.trailer && (
+          <div className={rowCls + ' mt-1'}>
+            <span title="雙節聯結車或拖桿式全拖車的後車">第二節拖車</span>
+            <Toggle id="veh-trailer2" on={!!focus.trailer2} onClick={() => editVehicle({ trailer2: focus.trailer2 ? undefined : { hitchOffset: -0.9, Lt: 7.0, W: focus.trailer!.W, Oft: 0.6, Ort: 0.9, maxArticulationDeg: 70 } }, 'trailer2')} />
+          </div>
+        )}
+        {focus.trailer && focus.trailer2 && (
+          <div className="pl-2" style={{ borderLeft: '2px solid var(--ui-border)' }}>
+            <NumberField label="聯結點位置（第一節後軸前為正）" unit="m" value={focus.trailer2.hitchOffset} min={-5} max={3} onChange={v => editVehicle({ trailer2: { ...focus.trailer2!, hitchOffset: v } }, 't2Hitch')} title="拖桿式的聯結點通常在第一節後軸後方（負值）" />
+            <NumberField label="聯結點至後軸" unit="m" value={focus.trailer2.Lt} min={1} max={20} onChange={v => editVehicle({ trailer2: { ...focus.trailer2!, Lt: v } }, 't2Lt')} />
+            <NumberField label="車寬" unit="m" value={focus.trailer2.W} min={0.5} max={4} onChange={v => editVehicle({ trailer2: { ...focus.trailer2!, W: v } }, 't2W')} />
+            <NumberField label="前懸（聯結點前）" unit="m" value={focus.trailer2.Oft} min={0} max={5} onChange={v => editVehicle({ trailer2: { ...focus.trailer2!, Oft: v } }, 't2Oft')} />
+            <NumberField label="後懸" unit="m" value={focus.trailer2.Ort} min={0} max={8} onChange={v => editVehicle({ trailer2: { ...focus.trailer2!, Ort: v } }, 't2Ort')} />
+            <NumberField label="最大折角" unit="°" value={focus.trailer2.maxArticulationDeg} min={20} max={90} digits={0} onChange={v => editVehicle({ trailer2: { ...focus.trailer2!, maxArticulationDeg: v } }, 't2Art')} />
+            <Hint>預設值僅為示意，請依實際車型輸入。</Hint>
           </div>
         )}
         <details className="mt-2">
@@ -248,7 +271,7 @@ function PathRow({ store, p, active }: { store: SimStore; p: SimPath; active: bo
           <div className="text-[12.5px] truncate" onDoubleClick={e => { e.stopPropagation(); setEditing(true); }} title="雙擊改名">{p.name}</div>
         )}
         <div className="text-[10.5px] truncate" style={{ color: 'var(--ui-muted)' }}>
-          {PATH_KIND_LABEL[p.source.kind]}・{p.vehicleIds.map(id => store.vehicle(id).short).join('、')}
+          {p.chainFrom ? `↳ 接續「${store.getPath(p.chainFrom)?.name ?? '?'}」・` : ''}{PATH_KIND_LABEL[p.source.kind]}・{p.vehicleIds.map(id => store.vehicle(id).short).join('、')}
         </div>
       </div>
       {worst && <VerdictBadge v={worst} />}
@@ -342,6 +365,8 @@ function PathEditor({ store, path, polished }: { store: SimStore; path: SimPath;
         </div>
       </Card>
 
+      <ChainCard store={store} path={path} />
+
       <Card>
         <div className="flex items-center justify-between">
           <SectionTitle>{PATH_KIND_LABEL[path.source.kind]}幾何</SectionTitle>
@@ -353,6 +378,40 @@ function PathEditor({ store, path, polished }: { store: SimStore; path: SimPath;
         {warnings.map((w, i) => <React.Fragment key={i}><Hint tone="warn">⚠ {w}</Hint></React.Fragment>)}
       </Card>
     </>
+  );
+}
+
+/** 多段操作：接續前一段終點（例如前進進場後倒車入位） */
+function ChainCard({ store, path }: { store: SimStore; path: SimPath }) {
+  const isDraft = path.id === DRAFT_ID;
+  const others = store.doc.paths.filter(p => p.id !== path.id);
+  // 排除自己的後續段，避免循環
+  const descendants = new Set<string>();
+  const collect = (id: string) => store.doc.paths.filter(p => p.chainFrom === id).forEach(c => { if (!descendants.has(c.id)) { descendants.add(c.id); collect(c.id); } });
+  collect(path.id);
+  const options = others.filter(p => !descendants.has(p.id));
+  const children = store.doc.paths.filter(p => p.chainFrom === path.id);
+  return (
+    <Card>
+      <SectionTitle>多段操作</SectionTitle>
+      <label className={rowCls}>
+        <span>接續自</span>
+        <select id="sim-chain-from" value={path.chainFrom ?? ''} onChange={e => store.updatePath(path.id, p => ({ ...p, chainFrom: e.target.value || null }))}
+          className="max-w-[60%] text-[12px] rounded-md px-1.5 py-1 outline-none cursor-pointer" style={{ background: 'var(--ui-surface)', color: 'var(--ui-text)', border: '1px solid var(--ui-border)' }}>
+          <option value="">（獨立軌跡）</option>
+          {options.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+        </select>
+      </label>
+      {path.chainFrom && <Hint>以「{store.getPath(path.chainFrom)?.name}」終點的車身與拖車方向作為起始狀態；播放到該段終點會自動接著播放這一段。</Hint>}
+      {children.length > 0 && <Hint>後續：{children.map(c => c.name).join('、')}</Hint>}
+      {!isDraft && (
+        <div className="flex gap-2 mt-2">
+          <button id="sim-continue-forward" onClick={() => store.continueFrom(path.id, 'forward')} className="flex-1 py-1.5 text-[11.5px] rounded-md cursor-pointer" style={{ background: 'var(--ui-accent-soft)', color: 'var(--ui-accent)', border: '1px solid var(--ui-border)' }}>從終點接續前進</button>
+          <button id="sim-continue-reverse" onClick={() => store.continueFrom(path.id, 'reverse')} className="flex-1 py-1.5 text-[11.5px] rounded-md cursor-pointer" style={{ background: 'var(--ui-accent-soft)', color: 'var(--ui-accent)', border: '1px solid var(--ui-border)' }}>從終點接續倒車</button>
+        </div>
+      )}
+      <Hint>例：大貨車前進進入裝卸區後倒車入位、停車場出入口的前進＋倒車調整。倒車段以後軸沿路徑計算。</Hint>
+    </Card>
   );
 }
 

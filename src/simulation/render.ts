@@ -6,7 +6,7 @@
  */
 import { Pt } from './model';
 import { ResultEntry, SimStore, DRAFT_ID } from './store';
-import { bodyOutline, mirrorOutlines, trailerOutline, wheelPositions } from './analysis';
+import { bodyOutline, mirrorOutlines, trailerOutlines, wheelPositions } from './analysis';
 import { Pose } from './kinematics';
 import { getHandles } from './handles';
 import { outlineService } from './outlines';
@@ -79,18 +79,20 @@ export function drawVehicle(ctx: CanvasRenderingContext2D, v: RenderView, pose: 
   const stroke = opts.alert ? '#ef4444' : '#ffffff';
   ctx.save();
   ctx.globalAlpha = opts.ghost ? 0.55 : 1;
-  const tr = trailerOutline(pose, veh);
-  if (tr) {
+  // 由最後一節往前畫，讓前一節壓在上面
+  const units = trailerOutlines(pose, veh);
+  const hitches = [pose.trailer, pose.trailer2];
+  for (let k = units.length - 1; k >= 0; k--) {
     ctx.beginPath();
-    tracePoly(ctx, tr, v);
+    tracePoly(ctx, units[k], v);
     ctx.fillStyle = 'rgba(51, 65, 85, 0.88)';
     ctx.fill();
     ctx.strokeStyle = opts.alert ? '#ef4444' : rgba(color, 1);
     ctx.lineWidth = 2;
     ctx.stroke();
-    // 聯結點
-    if (pose.trailer) {
-      const h = v.w2s(pose.trailer.hitch.x, pose.trailer.hitch.y);
+    const tp = hitches[k];
+    if (tp) {
+      const h = v.w2s(tp.hitch.x, tp.hitch.y);
       ctx.beginPath();
       ctx.arc(h.x, h.y, 3, 0, Math.PI * 2);
       ctx.fillStyle = '#fbbf24';
@@ -252,8 +254,7 @@ export function drawSimulation(v: RenderView, store: SimStore, results: ResultEn
         ctx.beginPath();
         tracePoly(ctx, bodyOutline(p, r.vehicle), v);
         ctx.stroke();
-        const tr = trailerOutline(p, r.vehicle);
-        if (tr) { ctx.beginPath(); tracePoly(ctx, tr, v); ctx.stroke(); }
+        trailerOutlines(p, r.vehicle).forEach(tr => { ctx.beginPath(); tracePoly(ctx, tr, v); ctx.stroke(); });
       }
       ctx.restore();
     }

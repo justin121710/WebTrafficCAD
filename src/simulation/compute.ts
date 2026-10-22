@@ -1,7 +1,7 @@
 /** 單一路徑 × 單一車種的完整模擬結果（純函式，可快取） */
 import { DriveSettings, PathSource } from './model';
 import { BuiltPath, buildPath } from './pathBuilder';
-import { SimStatus, Trajectory, simulate } from './kinematics';
+import { InitialState, SimStatus, Trajectory, simulate } from './kinematics';
 import { Conflict, Hull, Obstacle, SimMetrics, Tracks, buildTracks, checkClearance, computeMetrics, sweepHulls } from './analysis';
 import { VehicleSpec } from './vehicles';
 
@@ -35,8 +35,8 @@ export const VERDICT_LABEL: Record<Verdict, string> = {
 };
 
 /** partial = true：拖曳中的快速計算，略過偏移量、掃掠寬度與淨距檢核 */
-export function computeFromBuilt(built: BuiltPath, vehicle: VehicleSpec, drive: DriveSettings, obstacles: Obstacle[], bufferM: number, partial = false): SimResult {
-  const traj = simulate(built, vehicle, drive);
+export function computeFromBuilt(built: BuiltPath, vehicle: VehicleSpec, drive: DriveSettings, obstacles: Obstacle[], bufferM: number, partial = false, init?: InitialState): SimResult {
+  const traj = simulate(built, vehicle, drive, init);
   const hulls = sweepHulls(traj, vehicle, 0.25);
   const tracks = buildTracks(traj, vehicle);
   const base = computeMetrics(built, traj, vehicle, hulls, tracks, partial);

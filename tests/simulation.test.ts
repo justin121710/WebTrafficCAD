@@ -319,3 +319,67 @@ test('CAD 端掃掠檢核與模擬共用車輛庫（軸距、轉角公式一致�
   const q = sw.tractorEnvelopes[sw.tractorEnvelopes.length - 1];
   assert.ok(Math.abs(dist(q.p1, q.p2) - WB12.W) < 1e-6);
 });
+
+test('雙節拖車：第二節依第一節後軸拖曳，偏移更大、折角各自檢核、外框與輪跡都納入', () => {
+  const src = poly([[-40, 0], [0, 0], [0, 40]], 14);
+  const doubles: VehicleSpec = { ...WB12, trailer2: { hitchOffset: -0.9, Lt: 7, W: 2.4, Oft: 0.6, Ort: 0.9, maxArticulationDeg: 70 } };
+  const one = computeResult(src, WB12, DEFAULT_DRIVE, [], 0)!;
+  const two = computeResult(src, doubles, DEFAULT_DRIVE, [], 0)!;
+  assert.ok(two.metrics.offtracking > one.metrics.offtracking + 0.3, `${two.metrics.offtracking} vs ${one.metrics.offtracking}`);
+  assert.ok(two.hulls.filter(h => h.comp === 'trailer').length > one.hulls.filter(h => h.comp === 'trailer').length);
+  assert.ok(two.tracks.wheels.some(w => w.name === '第二節拖車左輪'));
+  const p = two.traj.poses[two.traj.poses.length - 1];
+  // 第二節聯結點在第一節後軸後方 0.9 m，車身長度保持 Lt
+  assert.ok(Math.abs(dist(p.trailer2!.hitch, p.trailer2!.axle) - 7) < 1e-6);
+  assert.ok(Math.abs(dist(p.trailer!.axle, p.trailer2!.hitch) - 0.9) < 1e-6);
+  assert.ok(Math.abs(overallLength(doubles) - (overallLength(WB12) - WB12.trailer!.Ort + Math.max(WB12.trailer!.Ort, 0.9 + 7 + 0.9))) < 1e-9);
+  const strict: VehicleSpec = { ...doubles, trailer2: { ...doubles.trailer2!, maxArticulationDeg: 5 } };
+  assert.equal(computeResult(src, strict, DEFAULT_DRIVE, [], 0)!.metrics.jackknife, true);
+});
+
+test('接續操作：以前一段終點的車身與拖車方向作為初始狀態', () => {
+  const first = computeResult(poly([[-40, 0], [0, 0], [0, 40]], 14), WB12, DEFAULT_DRIVE, [], 0)!;
+  const last = first.traj.poses[first.traj.poses.length - 1];
+  const built = buildPath(poly([[last.front.x, last.front.y], [last.front.x, last.front.y + 20]]))!;
+  const cont = simulate(built, WB12, DEFAULT_DRIVE, { heading: last.heading, trailerHeadings: [last.trailer!.heading] });
+  assert.ok(Math.abs(cont.poses[0].heading - last.heading) < 1e-9);
+  assert.ok(Math.abs(cont.poses[0].trailer!.heading - last.trailer!.heading) < 1e-9);
+  const fresh = simulate(built, WB12, DEFAULT_DRIVE);
+  // 未給初始狀態時拖車與路徑起點切線對齊；接續時保留前一段尚未拉直的拖車角度
+  assert.ok(Math.abs(fresh.poses[0].trailer!.heading - Math.PI / 2) < 1e-9);
+  assert.ok(Math.abs(last.trailer!.heading - Math.PI / 2) > 1e-4);
+});
+
+test('多段操作：倒車段接續前進段（store 依相依順序計算、起點連續、刪除前段時改接續更前一段）', async () => {
+  const { SimStore } = await import('../src/simulation/store');
+  const { DEFAULT_SETTINGS } = await import('../src/simulation/model');
+  const st = new SimStore();
+  st.onConfirm = (_t, _m, _l, run) => run();
+  st.load({ version: 2, customVehicles: [], settings: { ...DEFAULT_SETTINGS }, paths: [
+    { id: 'a', name: '進場', color: '#6366f1', source: poly([[-40, 0], [0, 0], [0, 30]], 14), vehicleIds: ['aashto-wb12'], drive: DEFAULT_DRIVE, visible: true, locked: false },
+  ] });
+  st.continueFrom('a', 'reverse');
+  assert.ok(st.draft && st.draft.chainFrom === 'a');
+  st.updateDraftSource(s => (s.kind === 'polyline' ? { ...s, nodes: [...s.nodes, { p: { x: 12, y: 15 }, R: 14, Ls: 0 }] } : s));
+  assert.ok(st.finishDraft(true));
+  const res = st.getResults();
+  const a = res.find(r => r.pathId === 'a')!;
+  const b = res.find(r => r.pathId !== 'a')!;
+  const lastA = a.result.traj.poses[a.result.traj.poses.length - 1];
+  const firstB = b.result.traj.poses[0];
+  assert.ok(dist(firstB.rear, lastA.rear) < 1e-6, '倒車段從前一段後軸位置開始');
+  assert.ok(Math.abs(firstB.trailer!.heading - lastA.trailer!.heading) < 1e-9, '拖車方向連續');
+  assert.ok(!b.result.messages.some(m => m.includes('不連續')));
+  // 匯出／存檔往返保留接續關係
+  const again = sanitizeDoc(JSON.parse(JSON.stringify(st.doc)));
+  assert.equal(again.paths[1].chainFrom, 'a');
+  st.deletePath('a');
+  assert.equal(st.doc.paths[0].chainFrom, null);
+});
+
+test('機車參考車種：可模擬小半徑迴轉', () => {
+  const moto = findVehicle('ref-scooter')!;
+  assert.equal(moto.category, 'motorcycle');
+  const r = computeResult(poly([[-10, 0], [0, 0], [0, 10]], 2.5), moto, DEFAULT_DRIVE, [], 0)!;
+  assert.equal(r.status, 'ok');
+});
