@@ -1,4 +1,12 @@
 import { useState } from 'react';
+import { MARKING_SPEC, MARKING_NAMES, getMotoBoxCorners } from '../markings';
+
+/** 設計車種名稱（全介面統一） */
+export const DESIGN_VEHICLE_LABELS: Record<string, string> = {
+  passenger: '小型車',
+  semi_trailer: '大型車（大客車／大貨車）',
+  articulated: '聯結車',
+};
 import { CadElement, ThreeCenterCurveElement, IslandElement, TextElement, Point2D } from '../types';
 import { calculateWidening, distance, sampleCubicBezier, getMaxSteeringAngleForPath, generateParkingZoneSlots, offsetSegment, getPathOffsetCurves } from '../geometry';
 import { 
@@ -1032,24 +1040,76 @@ export default function PropsPanel({
       case 'stop_line':
       case 'crossing_dashed':
       case 'Sidewalk':
+      case 'red_solid':
+      case 'yellow_solid':
       case 'BuildingLine': {
         const line = selectedElement as any;
         const lineLen = getLineElementLength(line);
         
         const typeLabels: Record<string, string> = {
-          guideline: '輔助切線',
-          yellow_double: '分向限制黃雙線',
-          white_dashed: '車道白虛線',
-          yellow_dashed: '車道黃虛線',
-          white_solid: '白色邊線',
-          white_double: '白色雙實線',
-          reversible_lane: '調撥車道線 (雙白虛線)',
-          yield_line: '讓路標線組 (台灣法規式)',
-          stop_line: '停止線 (白色實線：30-40cm寬)',
-          crossing_dashed: '附加車道虛線/穿越線：30cm寬',
-          Sidewalk: '人行道/紅磚步道鋪面',
-          BuildingLine: '建築線 / 地界紅線'
+          guideline: '輔助線',
+          yellow_double: '分向限制線',
+          white_dashed: '車道線',
+          yellow_dashed: '分向線',
+          white_solid: '路面邊線',
+          white_double: '雙白實線',
+          reversible_lane: '調撥車道線',
+          yield_line: '讓路線',
+          stop_line: '停止線',
+          crossing_dashed: '穿越虛線',
+          Sidewalk: '人行道鋪面',
+          BuildingLine: '建築線',
+          red_solid: '禁止臨時停車線',
+          yellow_solid: '禁止停車線'
         };
+
+        // 移動節點時一併平移其控制把手，保持曲線形狀
+        const moveAnchor = (idx: number, axis: 'x' | 'y', value: number) => {
+          if (!line.points || isNaN(value)) return;
+          const d = value - line.points[idx][axis];
+          const shift = (arr: any[] | undefined) => arr ? arr.map((p: any, i: number) => i === idx ? { ...p, [axis]: p[axis] + d } : p) : arr;
+          onSaveHistory?.();
+          onUpdateElement({
+            ...line,
+            points: shift(line.points),
+            cpLeft: shift(line.cpLeft),
+            cpRight: shift(line.cpRight),
+          });
+        };
+        const coordInput = (idx: number, axis: 'x' | 'y') => (
+          <input
+            key={`${line.id}-${idx}-${axis}-${line.points[idx][axis]}`}
+            type="number"
+            step="0.01"
+            defaultValue={Number(line.points[idx][axis].toFixed(3))}
+            onBlur={(e) => moveAnchor(idx, axis, parseFloat(e.target.value))}
+            onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+            className="w-full bg-[#1f2229] border border-[#2d3039] px-1 py-0.5 rounded text-white text-right font-mono text-[10px] focus:outline-none focus:border-blue-500"
+          />
+        );
+        const widthDefaults: Record<string, number> = {
+          white_solid: MARKING_SPEC.edgeLineWidth, stop_line: MARKING_SPEC.stopLineWidth,
+          red_solid: MARKING_SPEC.curbLineWidth, yellow_solid: MARKING_SPEC.curbLineWidth,
+          white_dashed: MARKING_SPEC.lineWidth, yellow_dashed: MARKING_SPEC.lineWidth,
+        };
+        const hasWidth = selectedElement.type in widthDefaults && !line.isLeftTurnGuide;
+        const isDashed = (selectedElement.type === 'white_dashed' || selectedElement.type === 'yellow_dashed') && !line.isLeftTurnGuide;
+        const numField = (label: string, value: number, onChange: (v: number) => void, step = 0.05, unit = 'm') => (
+          <label className="flex items-center justify-between gap-2 text-[10.5px] text-slate-400">
+            <span>{label}</span>
+            <span className="flex items-center gap-1">
+              <input
+                type="number"
+                step={step}
+                min={0.01}
+                value={value}
+                onChange={(e) => { const v = parseFloat(e.target.value); if (!isNaN(v) && v > 0) onChange(v); }}
+                className="w-16 bg-[#1f2229] border border-[#2d3039] px-1.5 py-0.5 rounded text-white text-right font-mono text-xs focus:outline-none focus:border-blue-500"
+              />
+              <span className="text-slate-500">{unit}</span>
+            </span>
+          </label>
+        );
 
         const isBezier = !!line.points;
 
@@ -1066,8 +1126,6 @@ export default function PropsPanel({
                 {isBezier ? (
                   <>
                     <span>錨點節點數:</span> <span className="text-slate-300">{line.points.length} 點</span>
-                    <span>起點:</span> <span className="text-slate-300">({line.points[0].x.toFixed(1)}, {line.points[0].y.toFixed(1)})</span>
-                    <span>終點:</span> <span className="text-slate-300">({line.points[line.points.length-1].x.toFixed(1)}, {line.points[line.points.length-1].y.toFixed(1)})</span>
                   </>
                 ) : (
                   <>
@@ -1078,7 +1136,27 @@ export default function PropsPanel({
                   </>
                 )}
               </div>
+              {isBezier && (
+                <div className="mt-2 pt-2 border-t border-[#2d3039] space-y-1">
+                  <div className="grid grid-cols-[40px_1fr_1fr] gap-1 items-center text-[10px] text-slate-500">
+                    <span></span><span className="text-center">X (m)</span><span className="text-center">Y (m)</span>
+                    <span>起點</span>{coordInput(0, 'x')}{coordInput(0, 'y')}
+                    <span>終點</span>{coordInput(line.points.length - 1, 'x')}{coordInput(line.points.length - 1, 'y')}
+                  </div>
+                  <p className="text-[9.5px] text-slate-500">可直接輸入座標，按 Enter 套用（控制把手會一起移動）。</p>
+                </div>
+              )}
             </div>
+
+            {(hasWidth || isDashed) && (
+              <div className="space-y-2 p-3 bg-[#1f2229]/40 border border-[#2d3039] rounded-lg">
+                <span className="text-[10.5px] font-bold text-slate-400 block">標線規格</span>
+                {hasWidth && numField('線寬', line.lineWidth ?? widthDefaults[selectedElement.type], (v) => { onSaveHistory?.(); onUpdateElement({ ...line, lineWidth: v }); }, 0.01)}
+                {isDashed && numField('實線段長', line.dashLength ?? MARKING_SPEC.laneDash[0], (v) => { onSaveHistory?.(); onUpdateElement({ ...line, dashLength: v, dashGap: line.dashGap ?? MARKING_SPEC.laneDash[1] }); }, 0.5)}
+                {isDashed && numField('間距', line.dashGap ?? MARKING_SPEC.laneDash[1], (v) => { onSaveHistory?.(); onUpdateElement({ ...line, dashGap: v, dashLength: line.dashLength ?? MARKING_SPEC.laneDash[0] }); }, 0.5)}
+                <p className="text-[9.5px] text-slate-500">預設值依設置規則常用值；不同道路等級或地方規範請自行調整。</p>
+              </div>
+            )}
 
             {(selectedElement.type === 'white_dashed' || selectedElement.type === 'yellow_dashed') && (
               <div className="space-y-1.5 p-3 bg-[#1f2229]/40 border border-[#2d3039] rounded-lg">
@@ -1108,7 +1186,7 @@ export default function PropsPanel({
             <div className="space-y-2">
               <label className="text-xs text-slate-400 block">轉換標線類型</label>
               <div className="grid grid-cols-2 gap-1.5">
-                {['guideline', 'yellow_double', 'white_double', 'white_dashed', 'yellow_dashed', 'white_solid', 'reversible_lane', 'BuildingLine', 'yield_line', 'stop_line', 'crossing_dashed', 'Sidewalk'].map((t) => (
+                {['guideline', 'yellow_double', 'white_double', 'white_dashed', 'yellow_dashed', 'white_solid', 'reversible_lane', 'BuildingLine', 'yield_line', 'stop_line', 'crossing_dashed', 'Sidewalk', 'red_solid', 'yellow_solid'].map((t) => (
                   <button
                     key={t}
                     id={`type-convert-${t}`}
@@ -1125,7 +1203,7 @@ export default function PropsPanel({
                         : 'bg-[#1f2229] border-[#2d3039] text-slate-400 hover:text-slate-200 hover:bg-[#2d3039]'
                     }`}
                   >
-                    {typeLabels[t] ? typeLabels[t].split(' ')[0] : t}
+                    {typeLabels[t] || t}
                   </button>
                 ))}
               </div>
@@ -1977,8 +2055,11 @@ export default function PropsPanel({
               </div>
               <p className="text-[10px] text-slate-400 leading-normal">
                 依據主彎道 <strong className="text-slate-200">{curve.R2}m</strong> 及當前選擇的
-                <strong className="text-slate-200">「{designVehicle === 'passenger' ? '普通車' : '聯結車'}」</strong>
+                <strong className="text-slate-200">「{DESIGN_VEHICLE_LABELS[designVehicle]}」</strong>
                 ，導流車道安全淨寬 w 應為：
+              </p>
+              <p className="text-[9.5px] text-slate-500 leading-snug">
+                加寬值取自內建參考表（近似日本與台灣路口設計資料），送審前請依《公路路線設計規範》或《市區道路及附屬工程設計規範》之設計車輛轉彎資料核對。
               </p>
               <div className="text-center py-2 bg-blue-950/20 rounded border border-blue-900/30">
                 <span className="text-xs text-slate-400">建議導流路幅寬</span>
@@ -2019,11 +2100,11 @@ export default function PropsPanel({
             <div className="p-3 bg-[#1f2229]/40 rounded-lg border border-[#2d3039] space-y-2">
               <h4 className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
                 {renderPropsIcon(selectedElement.type)}
-                <span>導流島幾何資訊</span>
+                <span>{island.hatchPattern === 'cross' ? '網狀線' : '槽化線（導流島）'}</span>
               </h4>
               <div className="grid grid-cols-2 gap-x-2 gap-y-1 font-mono text-[10px] text-slate-400">
-                <span>外側道路寬 $w$:</span> <span className="text-blue-400 font-bold">{island.laneWidth.toFixed(2)} m</span>
-                <span>設計基準車:</span> <span>{island.designVehicle === 'passenger' ? '普通車' : island.designVehicle === 'semi_trailer' ? '大貨車' : '聯結車 (WB15)'}</span>
+                <span>建議車道寬 w:</span> <span className="text-blue-400 font-bold">{(island.laneWidth ?? 0).toFixed(2)} m</span>
+                <span>設計車種:</span> <span>{DESIGN_VEHICLE_LABELS[island.designVehicle] || '—'}</span>
                 <span>封閉多邊形:</span> <span>{island.points.length} 節點</span>
                 <span>槽化線斜線:</span> <span className={island.hasHatching ? 'text-amber-500 font-semibold' : 'text-slate-500'}>{island.hasHatching ? '開啟' : '關閉'}</span>
               </div>
@@ -2080,9 +2161,33 @@ export default function PropsPanel({
               </div>
 
               {island.hasHatching && (
-                <p className="text-[10px] text-slate-500 italic leading-snug">
-                  * 依交通部《道路交通標誌標線號誌設置規則》，槽化線線寬15-20cm，採 45 度斜率，常規劃設 30-50cm 等距間隔。畫布採實體尺寸真實描繪。
-                </p>
+                <div className="space-y-2">
+                  {[
+                    { label: '斜紋間距', key: 'hatchSpacing', value: island.hatchSpacing ?? (island.hatchPattern === 'cross' ? MARKING_SPEC.gridSpacing : MARKING_SPEC.hatchSpacing), step: 0.05, unit: 'm' },
+                    { label: '斜紋角度', key: 'hatchAngle', value: island.hatchAngle ?? MARKING_SPEC.hatchAngle, step: 5, unit: '°' },
+                  ].map(f => (
+                    <label key={f.key} className="flex items-center justify-between text-[10.5px] text-slate-400">
+                      <span>{f.label}</span>
+                      <span className="flex items-center gap-1">
+                        <input
+                          type="number"
+                          step={f.step}
+                          value={f.value}
+                          onChange={(e) => {
+                            const v = parseFloat(e.target.value);
+                            if (isNaN(v) || (f.key === 'hatchSpacing' && v < 0.1)) return;
+                            onUpdateElement({ ...island, [f.key]: v } as any);
+                          }}
+                          className="w-16 bg-[#1f2229] border border-[#2d3039] px-1.5 py-0.5 rounded text-white text-right font-mono text-xs focus:outline-none focus:border-blue-500"
+                        />
+                        <span className="text-slate-500 w-3">{f.unit}</span>
+                      </span>
+                    </label>
+                  ))}
+                  <p className="text-[10px] text-slate-500 leading-snug">
+                    畫面、PNG、DXF 皆使用相同的間距與角度。預設值沿用原設定，實際線寬與間距請依《道路交通標誌標線號誌設置規則》最新條文核對。
+                  </p>
+                </div>
               )}
             </div>
 
@@ -2094,7 +2199,7 @@ export default function PropsPanel({
               }}
               className="w-full py-2 bg-red-950/20 text-red-400 border border-red-950/40 hover:bg-red-950/40 text-xs rounded transition-colors"
             >
-              刪除此導流島
+              {island.hatchPattern === 'cross' ? '刪除此網狀線' : '刪除此槽化線'}
             </button>
           </div>
         );
@@ -2219,7 +2324,7 @@ export default function PropsPanel({
               </h4>
               <div className="grid grid-cols-2 gap-x-2 gap-y-1 font-mono text-[10px] text-slate-400">
                 <span>類型:</span> <span className="text-slate-200">自由貝茲車道線</span>
-                <span>設計車種:</span> <span className="text-blue-400 font-bold">{activeVeh === 'passenger' ? '小客車' : activeVeh === 'semi_trailer' ? '大客車' : '聯結車'}</span>
+                <span>設計車種:</span> <span className="text-blue-400 font-bold">{DESIGN_VEHICLE_LABELS[activeVeh]}</span>
                 <span>控制端點數:</span> <span className="text-slate-300">{sp.points?.length || 0} 個</span>
                 <span>最大轉向角:</span> <span className={`${isSafe ? 'text-green-400 font-bold' : 'text-red-400 font-bold'}`}>{maxSteeringAngle ? `${maxSteeringAngle.toFixed(1)}°` : '0°'}</span>
                 <span>最大限制角度:</span> <span className="text-slate-400 font-bold">40.0°</span>
@@ -2231,8 +2336,8 @@ export default function PropsPanel({
               <label className="text-[10.5px] font-bold text-slate-400 block">此軌跡模擬車型</label>
               <div className="grid grid-cols-3 gap-1 pt-1">
                 {[
-                  { value: 'passenger', label: '小客車' },
-                  { value: 'semi_trailer', label: '大客車' },
+                  { value: 'passenger', label: '小型車' },
+                  { value: 'semi_trailer', label: '大型車' },
                   { value: 'articulated', label: '聯結車' }
                 ].map((v) => {
                   const isActive = activeVeh === v.value;
@@ -2272,7 +2377,7 @@ export default function PropsPanel({
               </div>
               <p className="text-[10px] text-slate-400">
                 {isSafe 
-                  ? `符合該車種 (${activeVeh === 'passenger' ? '小客車' : activeVeh === 'semi_trailer' ? '大客車' : '聯結車'}) 最大40度轉向角限制。` 
+                  ? `符合該車種 (${DESIGN_VEHICLE_LABELS[activeVeh]}) 最大40度轉向角限制。` 
                   : `警告！車輛瞬間轉角為 ${maxSteeringAngle.toFixed(1)}°，高於法規規範 40° 限制。`}
               </p>
             </div>
@@ -2467,6 +2572,90 @@ export default function PropsPanel({
         );
       }
 
+      case 'road_text': {
+        const rt = selectedElement as any;
+        const upd = (patch: any) => { onSaveHistory?.(); onUpdateElement({ ...rt, ...patch }); };
+        return (
+          <div className="space-y-4">
+            <div className="p-3 bg-[#1f2229]/40 rounded-lg border border-[#2d3039] space-y-3">
+              <h4 className="text-xs font-semibold text-slate-300">路面標字</h4>
+              <label className="block text-[10.5px] text-slate-400 space-y-1">
+                <span>字樣（由近而遠）</span>
+                <input
+                  value={rt.text}
+                  onChange={(e) => onUpdateElement({ ...rt, text: e.target.value })}
+                  className="w-full bg-[#1f2229] border border-[#2d3039] px-2 py-1 rounded text-white text-sm focus:outline-none focus:border-blue-500"
+                />
+              </label>
+              <div className="flex flex-wrap gap-1">
+                {['慢', '停', '讓', '公車專用', '機慢車優先', '學校', '速限50'].map(t => (
+                  <button key={t} onClick={() => upd({ text: t })} className="px-2 py-0.5 text-[10px] rounded border border-[#2d3039] text-slate-300 hover:border-blue-500/50 cursor-pointer">{t}</button>
+                ))}
+              </div>
+              {[
+                { label: '字高', key: 'charHeight', value: rt.charHeight ?? 2.5, step: 0.1, unit: 'm' },
+                { label: '字距', key: 'charGap', value: rt.charGap ?? 0.6, step: 0.1, unit: 'm' },
+                { label: '寬高比', key: 'widthFactor', value: rt.widthFactor ?? 0.4, step: 0.05, unit: '' },
+              ].map(f => (
+                <label key={f.key} className="flex items-center justify-between text-[10.5px] text-slate-400">
+                  <span>{f.label}</span>
+                  <span className="flex items-center gap-1">
+                    <input type="number" step={f.step} value={f.value}
+                      onChange={(e) => { const v = parseFloat(e.target.value); if (!isNaN(v) && v > 0) onUpdateElement({ ...rt, [f.key]: v }); }}
+                      className="w-16 bg-[#1f2229] border border-[#2d3039] px-1.5 py-0.5 rounded text-white text-right font-mono text-xs focus:outline-none focus:border-blue-500" />
+                    <span className="w-3 text-slate-500">{f.unit}</span>
+                  </span>
+                </label>
+              ))}
+              <div className="flex gap-2">
+                <button onClick={() => upd({ angle: rt.angle + Math.PI })} className="flex-1 py-1.5 text-[10.5px] rounded border border-[#2d3039] bg-[#1f2229] text-slate-300 hover:text-white cursor-pointer">反向 180°</button>
+                <button onClick={() => upd({ color: rt.color === 'yellow' ? 'white' : 'yellow' })} className="flex-1 py-1.5 text-[10.5px] rounded border border-[#2d3039] bg-[#1f2229] text-slate-300 hover:text-white cursor-pointer">{rt.color === 'yellow' ? '改為白色' : '改為黃色'}</button>
+              </div>
+              <p className="text-[9.5px] text-slate-500">字高、寬高比預設為常見值，請依設置規則或地方規範調整。</p>
+            </div>
+            <button onClick={() => { onSaveHistory?.(); onDeleteElement(rt.id); }} className="w-full py-2 bg-red-950/20 text-red-400 border border-red-950/40 hover:bg-red-950/40 text-xs rounded">刪除此標字</button>
+          </div>
+        );
+      }
+
+      case 'moto_box':
+      case 'moto_turn_box': {
+        const mb = selectedElement as any;
+        const c = getMotoBoxCorners(mb);
+        const width = distance(c[0], c[1]);
+        return (
+          <div className="space-y-4">
+            <div className="p-3 bg-[#1f2229]/40 rounded-lg border border-[#2d3039] space-y-3">
+              <h4 className="text-xs font-semibold text-slate-300">{MARKING_NAMES[mb.type]}</h4>
+              <div className="grid grid-cols-2 gap-x-2 gap-y-1 font-mono text-[10px] text-slate-400">
+                <span>寬度（前緣）:</span><span className="text-blue-400 font-bold">{width.toFixed(2)} m</span>
+                <span>面積:</span><span>{(width * mb.depth).toFixed(2)} m²</span>
+              </div>
+              <label className="flex items-center justify-between text-[10.5px] text-slate-400">
+                <span>深度</span>
+                <span className="flex items-center gap-1">
+                  <input type="number" step={0.1} min={0.5} value={Number(mb.depth.toFixed(2))}
+                    onChange={(e) => { const v = parseFloat(e.target.value); if (!isNaN(v) && v >= 0.5) onUpdateElement({ ...mb, depth: v }); }}
+                    className="w-16 bg-[#1f2229] border border-[#2d3039] px-1.5 py-0.5 rounded text-white text-right font-mono text-xs focus:outline-none focus:border-blue-500" />
+                  <span className="text-slate-500">m</span>
+                </span>
+              </label>
+              <label className="block text-[10.5px] text-slate-400 space-y-1">
+                <span>區內文字</span>
+                <input value={mb.label ?? (mb.type === 'moto_turn_box' ? '機車待轉' : '機車停等區')}
+                  onChange={(e) => onUpdateElement({ ...mb, label: e.target.value })}
+                  className="w-full bg-[#1f2229] border border-[#2d3039] px-2 py-1 rounded text-white text-sm focus:outline-none focus:border-blue-500" />
+              </label>
+              <label className="flex items-center justify-between text-[10.5px] text-slate-400">
+                <span>底色填滿（部分縣市採用）</span>
+                <input type="checkbox" checked={!!mb.fill} onChange={(e) => { onSaveHistory?.(); onUpdateElement({ ...mb, fill: e.target.checked }); }} />
+              </label>
+            </div>
+            <button onClick={() => { onSaveHistory?.(); onDeleteElement(mb.id); }} className="w-full py-2 bg-red-950/20 text-red-400 border border-red-950/40 hover:bg-red-950/40 text-xs rounded">刪除此區域</button>
+          </div>
+        );
+      }
+
       case 'road_arrow': {
         const arrow = selectedElement as any;
         const arrowType = arrow.arrowType;
@@ -2494,8 +2683,19 @@ export default function PropsPanel({
               <p className={`text-[10px] leading-normal ${
                 'text-slate-455'
               }`}>
-                指示車輛行駛方向之指向線標記。
+                指示車輛行駛方向之指向線標記。放置時會自動對齊車道行車方向。
               </p>
+              <button
+                id="arrow-flip-btn"
+                onClick={() => {
+                  onSaveHistory?.();
+                  const a = arrow.angle + Math.PI;
+                  onUpdateElement({ ...arrow, angle: Math.atan2(Math.sin(a), Math.cos(a)) });
+                }}
+                className="w-full py-1.5 text-[10.5px] rounded border border-[#2d3039] bg-[#1f2229] text-slate-300 hover:text-white hover:border-blue-500/50 cursor-pointer"
+              >
+                反向 180°
+              </button>
               <div className={`grid grid-cols-2 gap-x-2 gap-y-1 font-mono text-[10px] pt-1 ${
                 'text-slate-400'
               }`}>

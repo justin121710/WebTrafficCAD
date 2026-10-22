@@ -51,6 +51,8 @@ import {
   solveThreeCenteredCurve
 } from '../geometry';
 import { arrowData } from '../arrowData';
+import { getElementPrimitives, suggestHeading, getMotoBoxCorners, MARKING_NAMES, PATH_LINE_TYPES } from '../markings';
+import { renderPrimitives } from '../renderPrimitives';
 import { calculateIntersectionCurve } from '../utils/pathInterpolator';
 import { calculateCorners, calculateTrailerCorners } from '../utils/vehicleSimulator';
 import { Search, Ruler } from 'lucide-react';
@@ -153,6 +155,8 @@ function getElementVertices(el: CadElement): Point2D[] {
     case 'white_dashed':
     case 'yellow_dashed':
     case 'white_solid':
+    case 'red_solid':
+    case 'yellow_solid':
     case 'crossing_dashed':
     case 'stop_line':
     case 'yield_line':
@@ -809,7 +813,7 @@ function getSelectedYieldLineSign(state: any, clickWorldPt: Point2D): number {
   return distA <= distB ? 1 : -1;
 }
 
-function transformElement(
+export function transformElement(
   el: any,
   dx: number,
   dy: number,
@@ -866,10 +870,15 @@ function transformElement(
   // text
   if (copy.p) copy.p = tx(copy.p);
 
+  // 旋轉時同步更新具方向性的物件
+  if (angleRad && (copy.type === 'road_arrow' || copy.type === 'road_text' || copy.type === 'text' || (copy.type === 'parking_space' && copy.angle !== undefined))) {
+    copy.angle = (copy.angle || 0) + angleRad;
+  }
+
   return copy;
 }
 
-function getElementBoundingBox(el: any): { minX: number; maxX: number; minY: number; maxY: number } {
+export function getElementBoundingBox(el: any): { minX: number; maxX: number; minY: number; maxY: number } {
   const collect: Point2D[] = [];
   if (el.p1) collect.push(el.p1);
   if (el.p2) collect.push(el.p2);
@@ -919,6 +928,15 @@ function getElementBoundingBox(el: any): { minX: number; maxX: number; minY: num
 }
 
 interface CadCanvasProps {
+  /** 右鍵選單動作 */
+  onContextAction?: (action: 'copy' | 'paste' | 'duplicate' | 'rotate90' | 'rotate-90' | 'delete') => void;
+  canPaste?: boolean;
+  /** 畫布底色（依介面風格） */
+  canvasBackground?: string;
+  /** 畫布上浮動面板佔用的邊距（px），讓提示、狀態列、比例尺避開 */
+  insets?: { top: number; right: number; bottom: number; left: number };
+  /** 數值改變時將視圖縮放至全圖（載入專案／範本時由 App 觸發） */
+  fitRequest?: number;
   elements: CadElement[];
   onAddElement: (el: CadElement) => void;
   onUpdateElement: (el: CadElement) => void;
@@ -939,6 +957,7 @@ interface CadCanvasProps {
   snapToEndpoint: boolean;
   snapToMidpoint: boolean;
   snapToNearest: boolean;
+  snapToIntersection?: boolean;
 
   onSaveHistoryBeforeDrag: () => void;
   bgImage: any;
@@ -1027,6 +1046,11 @@ interface CadCanvasProps {
 }
 
 export default function CadCanvas({
+  onContextAction,
+  canPaste = false,
+  canvasBackground = '#101216',
+  insets = { top: 0, right: 0, bottom: 0, left: 0 },
+  fitRequest,
   elements,
   onAddElement,
   onUpdateElement,
@@ -1047,6 +1071,7 @@ export default function CadCanvas({
   snapToEndpoint,
   snapToMidpoint,
   snapToNearest,
+  snapToIntersection = true,
   onSaveHistoryBeforeDrag,
   bgImage,
   setBgImage,
@@ -1166,6 +1191,44 @@ export default function CadCanvas({
 
   // Interactive drawings draft states (used by polygon channels & circles)
   const [draftPoints, setDraftPoints] = useState<Point2D[]>([]);
+  // 內嵌文字輸入框（文字標註／路面標字）
+  const [contextMenu, setContextMenu] = useState<{ sx: number; sy: number } | null>(null);
+  const [textDraft, setTextDraft] = useState<{ kind: 'text' | 'road_text'; p: Point2D; sx: number; sy: number; value: string } | null>(null);
+  const lastRoadTextRef = useRef<string>('慢');
+
+  const commitTextDraft = () => {
+    if (!textDraft) return;
+    const value = textDraft.value.trim();
+    if (value) {
+      if (textDraft.kind === 'road_text') {
+        lastRoadTextRef.current = value;
+        const heading = suggestHeading(textDraft.p, elements, Math.PI / 2);
+        const el: CadElement = {
+          id: `road_text-${Date.now()}`,
+          type: 'road_text',
+          p: textDraft.p,
+          text: value,
+          charHeight: 2.5,
+          angle: heading ?? Math.PI / 2,
+          widthFactor: 0.4,
+          charGap: 0.6,
+        } as any;
+        onAddElement(el);
+        onSelectElement(el);
+      } else {
+        const el: CadElement = {
+          id: `text-${Date.now()}`,
+          type: 'text',
+          p: textDraft.p,
+          text: value,
+          fontSize: 1.5,
+        };
+        onAddElement(el);
+        onSelectElement(el);
+      }
+    }
+    setTextDraft(null);
+  };
 
   // Bezier path creation interactive states (shared by guideline, yellow_double, white_dashed, white_solid, and smart_path!)
   const [spPoints, setSpPoints] = useState<Point2D[]>([]);
@@ -1353,7 +1416,10 @@ export default function CadCanvas({
            tool === 'reversible_lane' ||
            tool === 'yield_line' ||
            tool === 'parking_zone' ||
-           tool === 'measurement';
+           tool === 'measurement' ||
+           tool === 'red_solid' ||
+           tool === 'yellow_solid' ||
+           tool === 'grid_box';
   };
 
   // Zoom to Fit and Center implementation
@@ -1382,7 +1448,7 @@ export default function CadCanvas({
     };
 
     elements.forEach(el => {
-      if (el.type === 'guideline' || el.type === 'yellow_double' || el.type === 'white_double' || el.type === 'white_dashed' || el.type === 'yellow_dashed' || el.type === 'white_solid' || el.type === 'smart_path' || el.type === 'parking_zone') {
+      if (el.type === 'guideline' || el.type === 'yellow_double' || el.type === 'white_double' || el.type === 'white_dashed' || el.type === 'yellow_dashed' || el.type === 'white_solid' || el.type === 'red_solid' || el.type === 'yellow_solid' || el.type === 'smart_path' || el.type === 'parking_zone') {
         const line = el as any;
         const ref = getLineBezierRepresentation(line);
         if (ref) {
@@ -1437,16 +1503,12 @@ export default function CadCanvas({
     }
   };
 
-  // Monitor elements changes to auto-center on first load (e.g. template import is fitted perfectly!)
-  const prevElementsLength = useRef(elements.length);
+  // 只在明確要求時縮放至全圖（載入專案／範本），手動繪圖不會跳動視角
   useEffect(() => {
-    if (elements.length > 0 && prevElementsLength.current === 0) {
-      setTimeout(() => {
-        handleZoomToFit();
-      }, 50);
-    }
-    prevElementsLength.current = elements.length;
-  }, [elements]);
+    if (!fitRequest) return;
+    const t = setTimeout(() => handleZoomToFit(), 50);
+    return () => clearTimeout(t);
+  }, [fitRequest]);
 
   // Handle Resize beautifully on expands / collapses using standard ResizeObserver!
   useEffect(() => {
@@ -1515,6 +1577,18 @@ export default function CadCanvas({
       }
       if (e.key === 'Escape') {
         e.preventDefault();
+        // 第一次 Esc：完成（≥2 點）或放棄進行中的繪製並保留工具；沒有進行中的繪製時才回到選取工具
+        if (appMode === 'cad' && isLineOrPathTool(activeTool) && spPoints.length >= 2 && activeTool !== 'measurement') {
+          handleCompleteSmartPath(spPoints, spCpLeft, spCpRight);
+          return;
+        }
+        if (appMode === 'cad' && (spPoints.length > 0 || draftPoints.length > 0)) {
+          setSpPoints([]);
+          setSpCpLeft([]);
+          setSpCpRight([]);
+          setDraftPoints([]);
+          return;
+        }
         setSpPoints([]);
         setSpCpLeft([]);
         setSpCpRight([]);
@@ -1538,7 +1612,7 @@ export default function CadCanvas({
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, [spPoints, spCpLeft, spCpRight, activeTool]);
+  }, [spPoints, spCpLeft, spCpRight, activeTool, draftPoints, appMode, selectedElement, connectionStartInfo, elements, designVehicle]);
 
   const normalize = (v: { x: number; y: number }): { x: number; y: number } => {
     const len = Math.hypot(v.x, v.y);
@@ -1561,7 +1635,7 @@ export default function CadCanvas({
         el.type === 'white_double' || 
         el.type === 'white_dashed' || 
         el.type === 'yellow_dashed' || 
-        el.type === 'white_solid' || 
+        el.type === 'white_solid' || el.type === 'red_solid' || el.type === 'yellow_solid' || 
         el.type === 'reversible_lane' ||
         el.type === 'stop_line' ||
         el.type === 'yield_line'
@@ -1651,7 +1725,7 @@ export default function CadCanvas({
         return;
       }
       // Endpoint snapping
-      if (el.type === 'guideline' || el.type === 'yellow_double' || el.type === 'white_double' || el.type === 'white_dashed' || el.type === 'yellow_dashed' || el.type === 'white_solid' || el.type === 'smart_path' || el.type === 'parking_zone') {
+      if (PATH_LINE_TYPES.has(el.type) || el.type === 'smart_path' || el.type === 'parking_zone' || el.type === 'bicycle_lane') {
         const line = el as any;
         const ref = getLineBezierRepresentation(line);
 
@@ -1789,6 +1863,38 @@ export default function CadCanvas({
         }
       }
     });
+
+    // 1.5 交點鎖點：只計算游標附近的線段，避免全圖兩兩比對
+    if (snapToIntersection && (!bestSnap || (bestSnap as SnapTarget).type !== 'endpoint')) {
+      const near: Array<{ id: string; a: Point2D; b: Point2D }> = [];
+      const radiusWorld = 14 / viewport.zoom;
+      elements.forEach(el => {
+        if (!el || (excludeElementId && el.id === excludeElementId)) return;
+        if (!(PATH_LINE_TYPES.has(el.type) || el.type === 'bicycle_lane')) return;
+        const ref = getLineBezierRepresentation(el as any);
+        if (!ref) return;
+        const pts = getPathOffsetCurves(ref.points, ref.cpLeft, ref.cpRight, 0, 20);
+        for (let i = 0; i < pts.length - 1; i++) {
+          if (projectPointOnSegment(worldPos, pts[i], pts[i + 1]).dist < radiusWorld * 3) {
+            near.push({ id: el.id, a: pts[i], b: pts[i + 1] });
+          }
+        }
+      });
+      for (let i = 0; i < near.length; i++) {
+        for (let j = i + 1; j < near.length; j++) {
+          if (near[i].id === near[j].id) continue;
+          if (!lineSegmentsIntersect(near[i].a, near[i].b, near[j].a, near[j].b)) continue;
+          const ip = getLineIntersection(near[i].a, near[i].b, near[j].a, near[j].b);
+          if (!ip) continue;
+          const sp = worldToScreen(ip.x, ip.y);
+          const d = Math.hypot(sx - sp.x, sy - sp.y);
+          if (d < closestDistScreen) {
+            closestDistScreen = d;
+            bestSnap = { point: ip, type: 'intersection', elementId: near[i].id };
+          }
+        }
+      }
+    }
 
     // 2. Check grid snap
     if (!bestSnap && snapToGrid && (minorGridInterval > 0 || majorGridInterval > 0)) {
@@ -2065,12 +2171,28 @@ export default function CadCanvas({
 
     // 1. Dragging sketch circle center or radius controllers
     if (activeHandle) {
-      if (activeHandle.nodeIndex === 25) { // dragging parking space center (rotation)
+      if (activeHandle.nodeIndex === 25 || activeHandle.nodeIndex === 30) {
+        // 拖曳方向即朝向：按住後往想要的方向拉，放開即確定；Shift 以 15° 為單位鎖定
         latestMouseWorldPosRef.current = activeWorldPos;
-        return;
-      }
-      if (activeHandle.nodeIndex === 30) { // dragging road arrow center (rotation)
-        latestMouseWorldPosRef.current = activeWorldPos;
+        const center = rotatingCenterRef.current;
+        const target = elements.find(el => el.id === activeHandle.elementId) as any;
+        if (center && target && distance(activeWorldPos, center) > 0.6) {
+          let dir = Math.atan2(activeWorldPos.y - center.y, activeWorldPos.x - center.x);
+          if (e.shiftKey) dir = Math.round(dir / (Math.PI / 12)) * (Math.PI / 12);
+          if (activeHandle.nodeIndex === 30) {
+            const newAngle = dir - Math.PI / 2;
+            onUpdateElement({ ...target, angle: newAngle });
+            setRoadArrowConfig?.({ arrowType: target.arrowType, length: target.length, angle: newAngle });
+          } else {
+            const Lp = target.length || 5.5;
+            const Wp = target.width || 2.5;
+            const c = Math.cos(dir), sn = Math.sin(dir);
+            const newP1 = { x: center.x - (Lp / 2) * c + (Wp / 2) * sn, y: center.y - (Lp / 2) * sn - (Wp / 2) * c };
+            const newP2 = { x: newP1.x + c * Lp, y: newP1.y + sn * Lp };
+            onUpdateElement({ ...target, angle: dir, p1: newP1, p2: newP2 });
+            setParkingStampConfig?.({ slotType: target.slotType, width: Wp, length: Lp, angle: dir });
+          }
+        }
         return;
       }
       if (activeHandle.nodeIndex === 10) { // dragging sketch circle center
@@ -2254,7 +2376,7 @@ export default function CadCanvas({
     }
 
     const actualType = isLineOrPathTool(activeTool) ? activeTool : 'white_solid';
-    const finalType = actualType === 'channelization' ? 'island' : actualType;
+    const finalType = actualType === 'channelization' || actualType === 'grid_box' ? 'island' : actualType;
 
     let merged = false;
     if (connectionStartInfo && selectedElement && selectedElement.type === finalType) {
@@ -2352,6 +2474,7 @@ export default function CadCanvas({
       isValid,
       ...(finalType === 'Sidewalk' ? { closed: true } : {}),
       ...(finalType === 'island' ? { hasHatching: true, laneWidth: R2, designVehicle } : {}),
+      ...(actualType === 'grid_box' ? { hatchPattern: 'cross', color: '#FFCC00' } : {}),
       ...(finalType === 'parking_zone' ? {
         slotType: parkingZoneConfig?.slotType || 'car',
         width: parkingZoneConfig?.width || 2.0,
@@ -2841,6 +2964,12 @@ export default function CadCanvas({
     }
 
     if (e.button === 2) {
+      // 沒有進行中的繪製且有選取物件時，開啟右鍵選單
+      if (spPoints.length === 0 && draftPoints.length === 0 && onContextAction && appMode === 'cad' && (selectedElement || selectedElementIds.length > 0 || canPaste)) {
+        setContextMenu({ sx, sy });
+        e.preventDefault();
+        return;
+      }
       // Right click to cancel or complete
       if (spPoints.length === 1) {
         setSpPoints([]);
@@ -2858,7 +2987,21 @@ export default function CadCanvas({
 
     if (e.button !== 0) return; // Only process left clicks below
 
-    const clickPt = snapTarget ? snapTarget.point : screenToWorld(sx, sy);
+    // 點擊當下重新計算鎖點（觸控／手寫筆點擊前沒有游標移動，不能沿用上一次的鎖點結果）
+    const rawClickPt = screenToWorld(sx, sy);
+    const freshSnap = computeSnapPoint(rawClickPt, sx, sy);
+    let clickPt = freshSnap ? freshSnap.point : rawClickPt;
+    // Shift 正交鎖定：與預覽一致地套用到實際點下的位置
+    if (e.shiftKey) {
+      const prev = isLineOrPathTool(activeTool) && spPoints.length > 0
+        ? spPoints[spPoints.length - 1]
+        : (activeTool === 'crosswalk' && draftPoints.length > 0 ? draftPoints[draftPoints.length - 1] : null);
+      if (prev) {
+        clickPt = Math.abs(clickPt.x - prev.x) >= Math.abs(clickPt.y - prev.y)
+          ? { x: clickPt.x, y: prev.y }
+          : { x: prev.x, y: clickPt.y };
+      }
+    }
 
     if (yieldLineDecisionState) {
       if (e.button === 0) {
@@ -3015,86 +3158,6 @@ export default function CadCanvas({
           if (rotationIntervalRef.current) {
             clearInterval(rotationIntervalRef.current);
           }
-          
-          let lastProcessedMousePos: { x: number; y: number } | null = null;
-          let isMouseStationary = false;
-          
-          rotationIntervalRef.current = setInterval(() => {
-            if (!rotatingCenterRef.current || !latestMouseWorldPosRef.current) return;
-            
-            const curMouse = {
-              x: latestMouseWorldPosRef.current.x,
-              y: latestMouseWorldPosRef.current.y
-            };
-            
-            const didMouseNotMove = lastProcessedMousePos &&
-                                    lastProcessedMousePos.x === curMouse.x &&
-                                    lastProcessedMousePos.y === curMouse.y;
-            
-            if (didMouseNotMove) {
-              isMouseStationary = true;
-            } else {
-              if (isMouseStationary && lastProcessedMousePos) {
-                detectionRefPointRef.current = { ...lastProcessedMousePos };
-              }
-              isMouseStationary = false;
-            }
-            
-            lastProcessedMousePos = { ...curMouse };
-            
-            const curElements = latestElementsRef.current;
-            const currentPk = curElements.find(item => item.id === el.id) as any;
-            if (!currentPk) return;
-            
-            const detPt = detectionRefPointRef.current || rotatingCenterRef.current;
-            const d = distance(curMouse, detPt);
-            const isUp = curMouse.y > detPt.y;
-            
-            const baseDelta = (1 * Math.PI) / 180; // 1 degree per 100ms -> 10 degrees per second
-            const speedFactor = Math.max(0.5, d / 3.0);
-            const angleDelta = baseDelta * speedFactor;
-            
-            const currentAngle = currentPk.angle !== undefined 
-              ? currentPk.angle 
-              : (currentPk.p2 && currentPk.p1 ? Math.atan2(currentPk.p2.y - currentPk.p1.y, currentPk.p2.x - currentPk.p1.x) : 0);
-            
-            let newAngle = isUp ? (currentAngle + angleDelta) : (currentAngle - angleDelta);
-            while (newAngle > Math.PI) newAngle -= 2 * Math.PI;
-            while (newAngle < -Math.PI) newAngle += 2 * Math.PI;
-            
-            const L = currentPk.length || 5.5;
-            const W = currentPk.width || 2.5;
-            const cos = Math.cos(newAngle);
-            const sin = Math.sin(newAngle);
-            
-            const newP1 = {
-              x: rotatingCenterRef.current.x - (L / 2) * cos + (W / 2) * sin,
-              y: rotatingCenterRef.current.y - (L / 2) * sin - (W / 2) * cos
-            };
-            
-            const newP2 = {
-              x: newP1.x + cos * L,
-              y: newP1.y + sin * L
-            };
-            
-            const updatedPk = {
-              ...currentPk,
-              angle: newAngle,
-              p1: newP1,
-              p2: newP2
-            };
-            
-            onUpdateElement(updatedPk);
-            
-            if (setParkingStampConfig) {
-              setParkingStampConfig({
-                slotType: currentPk.slotType,
-                width: W,
-                length: L,
-                angle: newAngle
-              });
-            }
-          }, 100);
           return;
         }
       }
@@ -3115,66 +3178,6 @@ export default function CadCanvas({
           if (rotationIntervalRef.current) {
             clearInterval(rotationIntervalRef.current);
           }
-          
-          let lastProcessedMousePos: { x: number; y: number } | null = null;
-          let isMouseStationary = false;
-          
-          rotationIntervalRef.current = setInterval(() => {
-            if (!rotatingCenterRef.current || !latestMouseWorldPosRef.current) return;
-            
-            const curMouse = {
-              x: latestMouseWorldPosRef.current.x,
-              y: latestMouseWorldPosRef.current.y
-            };
-            
-            const didMouseNotMove = lastProcessedMousePos &&
-                                    lastProcessedMousePos.x === curMouse.x &&
-                                    lastProcessedMousePos.y === curMouse.y;
-            
-            if (didMouseNotMove) {
-              isMouseStationary = true;
-            } else {
-              if (isMouseStationary && lastProcessedMousePos) {
-                detectionRefPointRef.current = { ...lastProcessedMousePos };
-              }
-              isMouseStationary = false;
-            }
-            
-            lastProcessedMousePos = { ...curMouse };
-            
-            const curElements = latestElementsRef.current;
-            const currentArrow = curElements.find(item => item.id === el.id) as any;
-            if (!currentArrow) return;
-            
-            const detPt = detectionRefPointRef.current || rotatingCenterRef.current;
-            const d = distance(curMouse, detPt);
-            const isUp = curMouse.y > detPt.y;
-            
-            const baseDelta = (1 * Math.PI) / 180;
-            const speedFactor = Math.max(0.5, d / 3.0);
-            const angleDelta = baseDelta * speedFactor;
-            
-            const currentAngle = currentArrow.angle !== undefined ? currentArrow.angle : 0;
-            
-            let newAngle = isUp ? (currentAngle + angleDelta) : (currentAngle - angleDelta);
-            while (newAngle > Math.PI) newAngle -= 2 * Math.PI;
-            while (newAngle < -Math.PI) newAngle += 2 * Math.PI;
-            
-            const updatedArrow = {
-              ...currentArrow,
-              angle: newAngle
-            };
-            
-            onUpdateElement(updatedArrow);
-            
-            if (setRoadArrowConfig) {
-              setRoadArrowConfig({
-                arrowType: currentArrow.arrowType,
-                length: currentArrow.length,
-                angle: newAngle
-              });
-            }
-          }, 100);
           return;
         }
       }
@@ -3222,7 +3225,7 @@ export default function CadCanvas({
           el.type === 'white_double' || 
           el.type === 'white_dashed' || 
           el.type === 'yellow_dashed' || 
-          el.type === 'white_solid' || 
+          el.type === 'white_solid' || el.type === 'red_solid' || el.type === 'yellow_solid' || 
           el.type === 'smart_path' ||
           el.type === 'BuildingLine' ||
           el.type === 'crossing_dashed' ||
@@ -3500,6 +3503,25 @@ export default function CadCanvas({
               }
             }
           }
+        } else if (el.type === 'moto_box' || el.type === 'moto_turn_box' || el.type === 'road_text') {
+          // 以幾何原語判斷：點在填滿多邊形內、或靠近文字／外框
+          const prims = getElementPrimitives(el);
+          for (const pr of prims) {
+            if (pr.kind === 'text') {
+              const st = worldToScreen(pr.p.x, pr.p.y);
+              const d = Math.hypot(sx - st.x, sy - st.y);
+              const r = Math.max(10, pr.size * viewport.zoom * 0.6);
+              if (d < r && d < minDistanceScreen + r) { minDistanceScreen = Math.min(minDistanceScreen, d); selected = el; }
+            } else if (pr.kind === 'line' || pr.kind === 'poly') {
+              const quad = pr.pts;
+              let inside = false;
+              for (let h = 0, k = quad.length - 1; h < quad.length; k = h++) {
+                const xi = quad[h].x, yi = quad[h].y, xj = quad[k].x, yj = quad[k].y;
+                if (((yi > clickPt.y) !== (yj > clickPt.y)) && (clickPt.x < (xj - xi) * (clickPt.y - yi) / (yj - yi) + xi)) inside = !inside;
+              }
+              if (inside) { selected = el; minDistanceScreen = 0; }
+            }
+          }
         } else if (el.type === 'angular_dimension') {
           const ang = el as AngularDimensionElement;
           const sCenter = worldToScreen(ang.center.x, ang.center.y);
@@ -3689,87 +3711,6 @@ export default function CadCanvas({
       if (rotationIntervalRef.current) {
         clearInterval(rotationIntervalRef.current);
       }
-
-      let lastProcessedMousePos: { x: number; y: number } | null = null;
-      let isMouseStationary = false;
-
-      rotationIntervalRef.current = setInterval(() => {
-        if (!rotatingCenterRef.current || !latestMouseWorldPosRef.current) return;
-        
-        const curMouse = {
-          x: latestMouseWorldPosRef.current.x,
-          y: latestMouseWorldPosRef.current.y
-        };
-        
-        const didMouseNotMove = lastProcessedMousePos &&
-                                lastProcessedMousePos.x === curMouse.x &&
-                                lastProcessedMousePos.y === curMouse.y;
-        
-        if (didMouseNotMove) {
-          isMouseStationary = true;
-        } else {
-          if (isMouseStationary && lastProcessedMousePos) {
-            detectionRefPointRef.current = { ...lastProcessedMousePos };
-          }
-          isMouseStationary = false;
-        }
-        
-        lastProcessedMousePos = { ...curMouse };
-        
-        const curElements = latestElementsRef.current;
-        const currentPk = curElements.find(item => item.id === newId) as any;
-        if (!currentPk) return;
-        
-        // 旋轉速度與距離成正比的變速計算
-        const detPt = detectionRefPointRef.current || rotatingCenterRef.current;
-        const d = distance(curMouse, detPt);
-        const isUp = curMouse.y > detPt.y;
-        
-        const baseDelta = (1 * Math.PI) / 180; // 1度/100ms -> 10度/秒
-        const speedFactor = Math.max(0.5, d / 3.0);
-        const angleDelta = baseDelta * speedFactor;
-        
-        const currentAngle = currentPk.angle !== undefined 
-          ? currentPk.angle 
-          : (currentPk.p2 && currentPk.p1 ? Math.atan2(currentPk.p2.y - currentPk.p1.y, currentPk.p2.x - currentPk.p1.x) : 0);
-        
-        let newAngle = isUp ? (currentAngle + angleDelta) : (currentAngle - angleDelta);
-        while (newAngle > Math.PI) newAngle -= 2 * Math.PI;
-        while (newAngle < -Math.PI) newAngle += 2 * Math.PI;
-        
-        const L = currentPk.length || 5.5;
-        const W = currentPk.width || 2.5;
-        const nextCos = Math.cos(newAngle);
-        const nextSin = Math.sin(newAngle);
-        
-        const newP1 = {
-          x: rotatingCenterRef.current.x - (L / 2) * nextCos + (W / 2) * nextSin,
-          y: rotatingCenterRef.current.y - (L / 2) * nextSin - (W / 2) * nextCos
-        };
-        
-        const newP2 = {
-          x: newP1.x + nextCos * L,
-          y: newP1.y + nextSin * L
-        };
-        
-        const updatedPk = {
-          ...currentPk,
-          angle: newAngle,
-          p1: newP1,
-          p2: newP2
-        };
-        
-        onUpdateElement(updatedPk);
-        
-        if (setParkingStampConfig) {
-          setParkingStampConfig({
-            slotType: currentPk.slotType,
-            width: W,
-            length: L,
-            angle: newAngle
-          });
-        }
-      }, 100);
       return;
     }
 
@@ -3778,7 +3719,10 @@ export default function CadCanvas({
       const newId = `arrow-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
       const stampType = roadArrowConfig?.arrowType || 'straight';
       const stampLength = roadArrowConfig?.length || 5.0;
-      const stampAngle = roadArrowConfig?.angle || 0;
+      // 自動對齊車道行車方向（找不到車道線時沿用上次角度）
+      const lastAngle = roadArrowConfig?.angle || 0;
+      const heading = suggestHeading(clickPt, elements, lastAngle + Math.PI / 2);
+      const stampAngle = heading !== null ? heading - Math.PI / 2 : lastAngle;
 
       const arrowEl: CadElement = {
         id: newId,
@@ -3802,70 +3746,33 @@ export default function CadCanvas({
       if (rotationIntervalRef.current) {
         clearInterval(rotationIntervalRef.current);
       }
-
-      let lastProcessedMousePos: { x: number; y: number } | null = null;
-      let isMouseStationary = false;
-
-      rotationIntervalRef.current = setInterval(() => {
-        if (!rotatingCenterRef.current || !latestMouseWorldPosRef.current) return;
-        
-        const curMouse = {
-          x: latestMouseWorldPosRef.current.x,
-          y: latestMouseWorldPosRef.current.y
-        };
-        
-        const didMouseNotMove = lastProcessedMousePos &&
-                                lastProcessedMousePos.x === curMouse.x &&
-                                lastProcessedMousePos.y === curMouse.y;
-        
-        if (didMouseNotMove) {
-          isMouseStationary = true;
-        } else {
-          if (isMouseStationary && lastProcessedMousePos) {
-            detectionRefPointRef.current = { ...lastProcessedMousePos };
-          }
-          isMouseStationary = false;
-        }
-        
-        lastProcessedMousePos = { ...curMouse };
-        
-        const curElements = latestElementsRef.current;
-        const currentArrow = curElements.find(item => item.id === newId) as any;
-        if (!currentArrow) return;
-        
-        const detPt = detectionRefPointRef.current || rotatingCenterRef.current;
-        const d = distance(curMouse, detPt);
-        const isUp = curMouse.y > detPt.y;
-        
-        const baseDelta = (1 * Math.PI) / 180;
-        const speedFactor = Math.max(0.5, d / 3.0);
-        const angleDelta = baseDelta * speedFactor;
-        
-        const currentAngle = currentArrow.angle !== undefined ? currentArrow.angle : 0;
-        
-        let newAngle = isUp ? (currentAngle + angleDelta) : (currentAngle - angleDelta);
-        while (newAngle > Math.PI) newAngle -= 2 * Math.PI;
-        while (newAngle < -Math.PI) newAngle += 2 * Math.PI;
-        
-        const updatedArrow = {
-          ...currentArrow,
-          angle: newAngle
-        };
-        
-        onUpdateElement(updatedArrow);
-        
-        if (setRoadArrowConfig) {
-          setRoadArrowConfig({
-            arrowType: stampType,
-            length: stampLength,
-            angle: newAngle
-          });
-        }
-      }, 100);
       return;
     }
 
     // 5. Channelization island closed drafting has been moved to Bezier path builder (same as Sidewalk)
+
+    // 5.4. 機車停等區／待轉區：第 1、2 點為前緣（靠停止線），第 3 點決定深度
+    if (activeTool === 'moto_box' || activeTool === 'moto_turn_box') {
+      if (draftPoints.length < 2) {
+        setDraftPoints([...draftPoints, clickPt]);
+        return;
+      }
+      let [a, b] = draftPoints;
+      const len = distance(a, b) || 1;
+      let depth = ((b.x - a.x) * (clickPt.y - a.y) - (b.y - a.y) * (clickPt.x - a.x)) / len;
+      if (depth < 0) { [a, b] = [b, a]; depth = -depth; }
+      const boxEl: CadElement = {
+        id: `${activeTool}-${Date.now()}`,
+        type: activeTool,
+        p1: a,
+        p2: b,
+        depth: Math.max(0.5, depth),
+      } as any;
+      onAddElement(boxEl);
+      onSelectElement(boxEl);
+      setDraftPoints([]);
+      return;
+    }
 
     // 5.5. Crosswalk sequential clicks drafting
     if (activeTool === 'crosswalk') {
@@ -3958,25 +3865,18 @@ export default function CadCanvas({
       return;
     }
 
-    // 6. Text Label Annotation tool: Delay prompt slightly to let pointerDown event cycle release first.
-    if (activeTool === 'text_label') {
+    // 6. 文字標註／路面標字：於點擊處開啟內嵌輸入框（不使用瀏覽器 prompt，沙盒環境也能用）
+    if (activeTool === 'text_label' || activeTool === 'road_text') {
       e.stopPropagation();
       e.preventDefault();
-      
-      setTimeout(() => {
-        const labelText = prompt('請輸入工程設計備註/標記文字:', '車道安全標線');
-        if (labelText && labelText.trim()) {
-          const txtEl: CadElement = {
-            id: `text-${Date.now()}`,
-            type: 'text',
-            p: clickPt,
-            text: labelText.trim(),
-            fontSize: 1.5
-          };
-          onAddElement(txtEl);
-          onSelectElement(txtEl);
-        }
-      }, 50);
+      const sp = worldToScreen(clickPt.x, clickPt.y);
+      setTextDraft({
+        kind: activeTool === 'road_text' ? 'road_text' : 'text',
+        p: clickPt,
+        sx: sp.x,
+        sy: sp.y,
+        value: activeTool === 'road_text' ? lastRoadTextRef.current : '',
+      });
       return;
     }
 
@@ -4203,7 +4103,7 @@ export default function CadCanvas({
     const textDrawColor = '#e2e8f0';
 
     // Clear Screen
-    ctx.fillStyle = '#101216';
+    ctx.fillStyle = canvasBackground;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
     const { zoom, panX, panY } = viewport;
@@ -4380,7 +4280,7 @@ export default function CadCanvas({
         el.type === 'white_double' || 
         el.type === 'white_dashed' || 
         el.type === 'yellow_dashed' || 
-        el.type === 'white_solid' || 
+        el.type === 'white_solid' || el.type === 'red_solid' || el.type === 'yellow_solid' || 
         el.type === 'BuildingLine' ||
         el.type === 'crossing_dashed' ||
         el.type === 'stop_line' ||
@@ -4391,268 +4291,10 @@ export default function CadCanvas({
         const ref = getLineBezierRepresentation(line);
 
         if (ref) {
-          ctx.lineCap = 'butt';
-          ctx.lineJoin = 'round';
-          ctx.miterLimit = 10;
-          ctx.setLineDash([]);
-
-          if (el.type === 'guideline') {
-            ctx.strokeStyle = 'rgba(56, 189, 248, 0.6)';
-            ctx.setLineDash([4, 6]);
-            ctx.lineWidth = Math.max(1.5, zoom * 0.08);
-
-            const segPts = getPathOffsetCurves(ref.points, ref.cpLeft, ref.cpRight, 0, 25);
-            ctx.beginPath();
-            segPts.forEach((pt, idx) => {
-              const s = worldToScreen(pt.x, pt.y);
-              if (idx === 0) ctx.moveTo(s.x, s.y);
-              else ctx.lineTo(s.x, s.y);
-            });
-            ctx.stroke();
-            ctx.setLineDash([]);
-          } else if (el.type === 'yellow_double') {
-            ctx.strokeStyle = yellowColor;
-            ctx.lineWidth = Math.max(1.5, zoom * 0.1);
-
-            const leftOffset = getPathOffsetCurves(ref.points, ref.cpLeft, ref.cpRight, 0.08, 25);
-            const rightOffset = getPathOffsetCurves(ref.points, ref.cpLeft, ref.cpRight, -0.08, 25);
-
-            ctx.beginPath();
-            leftOffset.forEach((pt, idx) => {
-              const s = worldToScreen(pt.x, pt.y);
-              if (idx === 0) ctx.moveTo(s.x, s.y);
-              else ctx.lineTo(s.x, s.y);
-            });
-            ctx.stroke();
-
-            ctx.beginPath();
-            rightOffset.forEach((pt, idx) => {
-              const s = worldToScreen(pt.x, pt.y);
-              if (idx === 0) ctx.moveTo(s.x, s.y);
-              else ctx.lineTo(s.x, s.y);
-            });
-            ctx.stroke();
-          } else if (el.type === 'white_double') {
-            ctx.strokeStyle = primaryLineColor;
-            ctx.lineWidth = Math.max(1.5, zoom * 0.1);
-
-            const leftOffset = getPathOffsetCurves(ref.points, ref.cpLeft, ref.cpRight, 0.08, 25);
-            const rightOffset = getPathOffsetCurves(ref.points, ref.cpLeft, ref.cpRight, -0.08, 25);
-
-            ctx.beginPath();
-            leftOffset.forEach((pt, idx) => {
-              const s = worldToScreen(pt.x, pt.y);
-              if (idx === 0) ctx.moveTo(s.x, s.y);
-              else ctx.lineTo(s.x, s.y);
-            });
-            ctx.stroke();
-
-            ctx.beginPath();
-            rightOffset.forEach((pt, idx) => {
-              const s = worldToScreen(pt.x, pt.y);
-              if (idx === 0) ctx.moveTo(s.x, s.y);
-              else ctx.lineTo(s.x, s.y);
-            });
-            ctx.stroke();
-          } else if (el.type === 'white_dashed') {
-            const isLeftTurnGuide = (el as any).isLeftTurnGuide;
-            ctx.strokeStyle = primaryLineColor;
-            if (isLeftTurnGuide) {
-              ctx.lineWidth = Math.max(3.0, zoom * 0.3);
-              ctx.setLineDash([zoom * 1.0, zoom * 2.0]);
-            } else {
-              ctx.lineWidth = Math.max(1.5, zoom * 0.1);
-              ctx.setLineDash([zoom * 4.0, zoom * 6.0]);
-            }
-
-            const segPts = getPathOffsetCurves(ref.points, ref.cpLeft, ref.cpRight, 0, 25);
-            ctx.beginPath();
-            segPts.forEach((pt, idx) => {
-              const s = worldToScreen(pt.x, pt.y);
-              if (idx === 0) ctx.moveTo(s.x, s.y);
-              else ctx.lineTo(s.x, s.y);
-            });
-            ctx.stroke();
-            ctx.setLineDash([]);
-          } else if (el.type === 'yellow_dashed') {
-            const isLeftTurnGuide = (el as any).isLeftTurnGuide;
-            ctx.strokeStyle = yellowDashedColor; // yellow color
-            if (isLeftTurnGuide) {
-              ctx.lineWidth = Math.max(3.0, zoom * 0.3);
-              ctx.setLineDash([zoom * 1.0, zoom * 2.0]);
-            } else {
-              ctx.lineWidth = Math.max(1.5, zoom * 0.1);
-              ctx.setLineDash([zoom * 4.0, zoom * 6.0]);
-            }
-
-            const segPts = getPathOffsetCurves(ref.points, ref.cpLeft, ref.cpRight, 0, 25);
-            ctx.beginPath();
-            segPts.forEach((pt, idx) => {
-              const s = worldToScreen(pt.x, pt.y);
-              if (idx === 0) ctx.moveTo(s.x, s.y);
-              else ctx.lineTo(s.x, s.y);
-            });
-            ctx.stroke();
-            ctx.setLineDash([]);
-          } else if (el.type === 'white_solid') {
-            ctx.strokeStyle = primaryLineColor;
-            // Width 15cm
-            ctx.lineWidth = Math.max(2, zoom * 0.15);
-
-            const segPts = getPathOffsetCurves(ref.points, ref.cpLeft, ref.cpRight, 0, 25);
-            ctx.beginPath();
-            segPts.forEach((pt, idx) => {
-              const s = worldToScreen(pt.x, pt.y);
-              if (idx === 0) ctx.moveTo(s.x, s.y);
-              else ctx.lineTo(s.x, s.y);
-            });
-            ctx.stroke();
-          } else if (el.type === 'crossing_dashed') {
-            // crossing_dashed (30cm wide line, cycle: 1m solid line and 2m gap)
-            ctx.strokeStyle = primaryLineColor;
-            ctx.lineWidth = Math.max(3.0, zoom * 0.3);
-            ctx.setLineDash([zoom * 1.0, zoom * 2.0]);
-
-            const segPts = getPathOffsetCurves(ref.points, ref.cpLeft, ref.cpRight, 0, 25);
-            ctx.beginPath();
-            segPts.forEach((pt, idx) => {
-              const s = worldToScreen(pt.x, pt.y);
-              if (idx === 0) ctx.moveTo(s.x, s.y);
-              else ctx.lineTo(s.x, s.y);
-            });
-            ctx.stroke();
-            ctx.setLineDash([]);
-          } else if (el.type === 'stop_line') {
-            // stop_line (30cm - 40cm wide white solid, we use 35cm/0.35m)
-            ctx.strokeStyle = primaryLineColor;
-            ctx.lineWidth = Math.max(3.5, zoom * 0.35);
-
-            const segPts = getPathOffsetCurves(ref.points, ref.cpLeft, ref.cpRight, 0, 25);
-            ctx.beginPath();
-            segPts.forEach((pt, idx) => {
-              const s = worldToScreen(pt.x, pt.y);
-              if (idx === 0) ctx.moveTo(s.x, s.y);
-              else ctx.lineTo(s.x, s.y);
-            });
-            ctx.stroke();
-          } else if (el.type === 'yield_line') {
-            // 使用符合台灣交通工程標線法規之讓路線專用繪製邏輯
-            drawYieldLineBezier(ctx, ref.points, ref.cpLeft, ref.cpRight, (el as any).sgn ?? 1, zoom, worldToScreen);
-          } else if (el.type === 'reversible_lane') {
-            // 新增調撥車道線，樣式為雙白虛線
-            // 單線寬 10cm (0.1m)，內側間隔 10cm (0.1m) -> 中心間距 20公分 (0.2m) -> 左右各 offset 0.1m
-            // 採用標準車道虛線比例（如實線 4m、空白 6m）
-            ctx.save();
-            ctx.strokeStyle = primaryLineColor;
-            ctx.lineWidth = Math.max(1.0, zoom * 0.1); // 線寬 10公分 (0.1m)
-            ctx.setLineDash([zoom * 4.0, zoom * 6.0]); // 4米實線, 6米空白
-
-            const leftOffset = getPathOffsetCurves(ref.points, ref.cpLeft, ref.cpRight, 0.1, 25);
-            const rightOffset = getPathOffsetCurves(ref.points, ref.cpLeft, ref.cpRight, -0.1, 25);
-
-            ctx.beginPath();
-            leftOffset.forEach((pt, idx) => {
-              const s = worldToScreen(pt.x, pt.y);
-              if (idx === 0) ctx.moveTo(s.x, s.y);
-              else ctx.lineTo(s.x, s.y);
-            });
-            ctx.stroke();
-
-            ctx.beginPath();
-            rightOffset.forEach((pt, idx) => {
-              const s = worldToScreen(pt.x, pt.y);
-              if (idx === 0) ctx.moveTo(s.x, s.y);
-              else ctx.lineTo(s.x, s.y);
-            });
-            ctx.stroke();
-            ctx.restore();
-          } else if (el.type === 'bicycle_lane') {
-            // 新增腳踏車道(粉紅色)，繪製方法如同車流軌跡，但只留下車流軌跡的底色，點選時出現軌跡，不需要出現腳踏車體。
-            const laneWidth = (el as any).width || 1.5;
-            const halfW = laneWidth / 2;
-
-            const leftOffset = getPathOffsetCurves(ref.points, ref.cpLeft, ref.cpRight, -halfW, 40);
-            const rightOffset = getPathOffsetCurves(ref.points, ref.cpLeft, ref.cpRight, halfW, 40);
-
-            if (leftOffset.length >= 2 && rightOffset.length >= 2) {
-              ctx.save();
-              ctx.fillStyle = isSelected ? 'rgba(244, 114, 182, 0.40)' : 'rgba(244, 114, 182, 0.20)'; // pink backdrop fill
-              ctx.strokeStyle = '#f472b6'; // pink outer borders
-              ctx.lineWidth = Math.max(1.0, zoom * 0.05);
-
-              ctx.beginPath();
-              // Left border trace
-              leftOffset.forEach((pt, idx) => {
-                const s = worldToScreen(pt.x, pt.y);
-                if (idx === 0) ctx.moveTo(s.x, s.y);
-                else ctx.lineTo(s.x, s.y);
-              });
-              // Right border trace back
-              for (let i = rightOffset.length - 1; i >= 0; i--) {
-                const s = worldToScreen(rightOffset[i].x, rightOffset[i].y);
-                ctx.lineTo(s.x, s.y);
-              }
-              ctx.closePath();
-              ctx.fill();
-              ctx.stroke();
-
-              // Selected lane path track
-              if (isSelected) {
-                ctx.strokeStyle = '#ec4899'; // deep pink active path track
-                ctx.lineWidth = Math.max(1.5, zoom * 0.04);
-                ctx.setLineDash([zoom * 0.2, zoom * 0.3]);
-
-                const centerPts = getPathOffsetCurves(ref.points, ref.cpLeft, ref.cpRight, 0, 30);
-                ctx.beginPath();
-                centerPts.forEach((pt, idx) => {
-                  const s = worldToScreen(pt.x, pt.y);
-                  if (idx === 0) ctx.moveTo(s.x, s.y);
-                  else ctx.lineTo(s.x, s.y);
-                });
-                ctx.stroke();
-              }
-              ctx.restore();
-            }
-          } else if (el.type === 'Sidewalk') {
-            // Sidewalk pavement: Solid gray fill + 10cm dark border envelope
-            const segPts = getPathOffsetCurves(ref.points, ref.cpLeft, ref.cpRight, 0, 30);
-            if (segPts.length >= 2) {
-              ctx.save();
-              ctx.fillStyle = '#A9A9A9'; // Engineering gray pavement fill
-              ctx.strokeStyle = '#1e293b'; // 10cm dark gray border
-              ctx.lineWidth = Math.max(1.5, zoom * 0.1); // 10cm border
-
-              ctx.beginPath();
-              segPts.forEach((pt, idx) => {
-                const s = worldToScreen(pt.x, pt.y);
-                if (idx === 0) ctx.moveTo(s.x, s.y);
-                else ctx.lineTo(s.x, s.y);
-              });
-              
-              // Close the sidewalk polygon back to start
-              const startS = worldToScreen(segPts[0].x, segPts[0].y);
-              ctx.lineTo(startS.x, startS.y);
-              ctx.closePath();
-
-              // Fill pavement
-              ctx.fill();
-              
-              // Draw outer border
-              ctx.stroke();
-              ctx.restore();
-            }
-          } else if (el.type === 'BuildingLine') {
-            ctx.strokeStyle = '#00ffff';
-            ctx.lineWidth = 2.5;
-
-            const segPts = getPathOffsetCurves(ref.points, ref.cpLeft, ref.cpRight, 0, 25);
-            ctx.beginPath();
-            segPts.forEach((pt, idx) => {
-              const s = worldToScreen(pt.x, pt.y);
-              if (idx === 0) ctx.moveTo(s.x, s.y);
-              else ctx.lineTo(s.x, s.y);
-            });
-            ctx.stroke();
+          // 標線本體：與 PNG／DXF 匯出共用同一份幾何（src/markings.ts）
+          renderPrimitives(ctx, getElementPrimitives(el), { zoom, w2s: worldToScreen, palette: 'screen' });
+          if (isSelected && el.type === 'bicycle_lane') {
+            renderPrimitives(ctx, getElementPrimitives(el), { zoom, w2s: worldToScreen, palette: 'screen', overrideColor: '#ec4899' });
           }
 
           // Render anchors and symmetric guidelines if selected!
@@ -4795,24 +4437,8 @@ export default function CadCanvas({
         ctx.fillStyle = 'rgba(15, 23, 42, 0.55)';
         ctx.fill();
 
-        ctx.strokeStyle = (island.color || whiteColor);
-        ctx.lineWidth = Math.max(1.5, zoom * 0.1);
-        ctx.stroke();
-
-        if (island.hasHatching && boundaryPoints.length >= 3) {
-          const hatching = generateHatchingLines(boundaryPoints, 0.45, 45);
-          
-          ctx.strokeStyle = island.color || 'rgba(255, 255, 255, 0.75)';
-          ctx.lineWidth = Math.max(1.5, zoom * 0.12);
-          ctx.beginPath();
-          hatching.forEach((line) => {
-            const s1 = worldToScreen(line.p1.x, line.p1.y);
-            const s2 = worldToScreen(line.p2.x, line.p2.y);
-            ctx.moveTo(s1.x, s1.y);
-            ctx.lineTo(s2.x, s2.y);
-          });
-          ctx.stroke();
-        }
+        // 外框與斜紋：與匯出共用同一份幾何（間距、線寬可於屬性面板調整）
+        renderPrimitives(ctx, getElementPrimitives(el), { zoom, w2s: worldToScreen, palette: 'screen' });
 
         if (isSelected) {
           const ref = getLineBezierRepresentation(island);
@@ -5101,7 +4727,7 @@ export default function CadCanvas({
         ctx.fill();
         ctx.stroke();
 
-        if (pk.showSizeLabel !== false && zoom > 7) {
+        if (pk.showSizeLabel !== false && Math.min(W, L) * zoom > 46) {
           ctx.fillStyle = isSelected ? '#38bdf8' : 'rgba(255, 255, 255, 0.55)';
           ctx.font = '9px JetBrains Mono, monospace, sans-serif';
           ctx.textAlign = 'center';
@@ -5204,7 +4830,7 @@ export default function CadCanvas({
           ctx.fill();
           ctx.stroke();
 
-          if ((el as any).showSizeLabel !== false && zoom > 7) {
+          if ((el as any).showSizeLabel !== false && Math.min(slot.width, slot.length) * zoom > 46) {
             ctx.fillStyle = isSelected ? '#38bdf8' : 'rgba(255, 255, 255, 0.55)';
             ctx.font = '9px JetBrains Mono, monospace, sans-serif';
             ctx.textAlign = 'center';
@@ -5259,7 +4885,8 @@ export default function CadCanvas({
           
           ctx.font = '10px JetBrains Mono, monospace, sans-serif';
           const textWidth = ctx.measureText(text).width;
-          // ctx.fillRect(midX - textWidth / 2 - 4, midY - 7, textWidth + 8, 14);
+          ctx.fillStyle = 'rgba(15, 17, 21, 0.85)';
+          ctx.fillRect(midX - textWidth / 2 - 4, midY - 7, textWidth + 8, 14);
           
           ctx.fillStyle = '#f8fafc';
           ctx.textAlign = 'center';
@@ -5267,6 +4894,8 @@ export default function CadCanvas({
           ctx.fillText(text, midX, midY);
           ctx.restore();
         }
+      } else if (el.type === 'moto_box' || el.type === 'moto_turn_box' || el.type === 'road_text') {
+        renderPrimitives(ctx, getElementPrimitives(el), { zoom, w2s: worldToScreen, palette: 'screen', overrideColor: isSelected ? '#38bdf8' : undefined });
       } else if (el.type === 'angular_dimension') {
         const angEl = el as AngularDimensionElement;
         const sCenter = worldToScreen(angEl.center.x, angEl.center.y);
@@ -5309,7 +4938,8 @@ export default function CadCanvas({
         const text = `${angEl.angleDeg.toFixed(1)}°`;
         ctx.font = '10px JetBrains Mono, monospace, sans-serif';
         const textWidth = ctx.measureText(text).width;
-        // ctx.fillRect(tx - textWidth / 2 - 3, ty - 7, textWidth + 6, 14);
+        ctx.fillStyle = 'rgba(15, 17, 21, 0.85)';
+        ctx.fillRect(tx - textWidth / 2 - 3, ty - 7, textWidth + 6, 14);
 
         ctx.fillStyle = '#f8fafc';
         ctx.textAlign = 'center';
@@ -5526,7 +5156,8 @@ export default function CadCanvas({
         const text = `${angleDeg.toFixed(1)}°`;
         ctx.font = '10px JetBrains Mono, monospace, sans-serif';
         const textWidth = ctx.measureText(text).width;
-        // ctx.fillRect(tx - textWidth / 2 - 3, ty - 7, textWidth + 6, 14);
+        ctx.fillStyle = 'rgba(15, 17, 21, 0.85)';
+        ctx.fillRect(tx - textWidth / 2 - 3, ty - 7, textWidth + 6, 14);
 
         ctx.fillStyle = '#f8fafc';
         ctx.textAlign = 'center';
@@ -5732,6 +5363,26 @@ export default function CadCanvas({
       }
     }
 
+    // 機車停等區／待轉區繪製預覽
+    if ((activeTool === 'moto_box' || activeTool === 'moto_turn_box') && draftPoints.length > 0) {
+      if (draftPoints.length === 1) {
+        const a = worldToScreen(draftPoints[0].x, draftPoints[0].y);
+        const m = worldToScreen(mouseWorld.x, mouseWorld.y);
+        ctx.save();
+        ctx.strokeStyle = 'rgba(56, 189, 248, 0.8)';
+        ctx.setLineDash([4, 4]);
+        ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(m.x, m.y); ctx.stroke();
+        ctx.restore();
+      } else {
+        let [a, b] = draftPoints;
+        const len = distance(a, b) || 1;
+        let depth = ((b.x - a.x) * (mouseWorld.y - a.y) - (b.y - a.y) * (mouseWorld.x - a.x)) / len;
+        if (depth < 0) { [a, b] = [b, a]; depth = -depth; }
+        const preview = { id: '__preview__', type: activeTool, p1: a, p2: b, depth: Math.max(0.5, depth) } as any;
+        renderPrimitives(ctx, getElementPrimitives(preview), { zoom, w2s: worldToScreen, palette: 'screen', overrideColor: 'rgba(56, 189, 248, 0.9)' });
+      }
+    }
+
     // DRAW ACTIVE BEZIER PEN CURVE DRAFTS (shared by guideline, yellow_double, white_dashed, white_solid, and smart_path!)
     if (isLineOrPathTool(activeTool) && spPoints.length > 0) {
       ctx.lineWidth = Math.max(2, zoom * 0.15);
@@ -5740,7 +5391,7 @@ export default function CadCanvas({
       const mS = worldToScreen(mouseWorld.x, mouseWorld.y);
 
       // Special Dynamic Pavement Enclosure preview for Sidewalk & channelization tool
-      if (activeTool === 'Sidewalk' || activeTool === 'channelization') {
+      if (activeTool === 'Sidewalk' || activeTool === 'channelization' || activeTool === 'grid_box') {
         const allPts: Point2D[] = [];
         for (let j = 0; j < spPoints.length - 1; j++) {
           const pStart = spPoints[j];
@@ -5756,7 +5407,7 @@ export default function CadCanvas({
         allPts.push(mouseWorld);
 
         ctx.save();
-        ctx.fillStyle = activeTool === 'channelization'
+        ctx.fillStyle = activeTool === 'channelization' || activeTool === 'grid_box'
           ? 'rgba(15, 23, 42, 0.45)' // Channelizing darker area
           : 'rgba(169, 169, 169, 0.25)'; // translucent grey pavement (#A9A9A9)
         ctx.beginPath();
@@ -5781,7 +5432,7 @@ export default function CadCanvas({
 
       // Temporary dashed connector to cursor (only for smart_path and pavement tools)
       const isSmartPath = activeTool === 'smart_path';
-      const isPavement = activeTool === 'Sidewalk' || activeTool === 'channelization';
+      const isPavement = activeTool === 'Sidewalk' || activeTool === 'channelization' || activeTool === 'grid_box';
       if (isSmartPath || isPavement) {
         ctx.strokeStyle = 'rgba(56, 189, 248, 0.4)';
         ctx.setLineDash([2, 3]);
@@ -5824,7 +5475,7 @@ export default function CadCanvas({
           ctx.lineTo(s2.x, s2.y);
           ctx.stroke();
         }
-      } else if (activeTool !== 'Sidewalk' && activeTool !== 'channelization') {
+      } else if (activeTool !== 'Sidewalk' && activeTool !== 'channelization' && activeTool !== 'grid_box') {
         // 構造預覽點陣列（整合已點點與滑鼠點/閉合點）
         const previewPoints = [...spPoints];
         const previewCpLeft = [...spCpLeft];
@@ -5844,202 +5495,22 @@ export default function CadCanvas({
         }
 
         if (previewPoints.length >= 2) {
-          // 繪製與實體完全相同樣式的線條
+          // 預覽與完成後外觀一致：直接使用共用幾何原語
           ctx.lineCap = 'butt';
           ctx.lineJoin = 'miter';
           ctx.setLineDash([]);
 
-          if (activeTool === 'guideline') {
-            ctx.strokeStyle = 'rgba(56, 189, 248, 0.6)';
-            ctx.setLineDash([4, 6]);
-            ctx.lineWidth = Math.max(1.5, zoom * 0.08);
-
-            const segPts = getPathOffsetCurves(previewPoints, previewCpLeft, previewCpRight, 0, 25);
-            ctx.beginPath();
-            segPts.forEach((pt, idx) => {
-              const s = worldToScreen(pt.x, pt.y);
-              if (idx === 0) ctx.moveTo(s.x, s.y);
-              else ctx.lineTo(s.x, s.y);
-            });
-            ctx.stroke();
-            ctx.setLineDash([]);
-          } else if (activeTool === 'yellow_double') {
-            ctx.strokeStyle = yellowColor;
-            ctx.lineWidth = Math.max(1.5, zoom * 0.1);
-
-            const leftOffset = getPathOffsetCurves(previewPoints, previewCpLeft, previewCpRight, 0.08, 25);
-            const rightOffset = getPathOffsetCurves(previewPoints, previewCpLeft, previewCpRight, -0.08, 25);
-
-            ctx.beginPath();
-            leftOffset.forEach((pt, idx) => {
-              const s = worldToScreen(pt.x, pt.y);
-              if (idx === 0) ctx.moveTo(s.x, s.y);
-              else ctx.lineTo(s.x, s.y);
-            });
-            ctx.stroke();
-
-            ctx.beginPath();
-            rightOffset.forEach((pt, idx) => {
-              const s = worldToScreen(pt.x, pt.y);
-              if (idx === 0) ctx.moveTo(s.x, s.y);
-              else ctx.lineTo(s.x, s.y);
-            });
-            ctx.stroke();
-          } else if (activeTool === 'white_double') {
-            ctx.strokeStyle = primaryLineColor;
-            ctx.lineWidth = Math.max(1.5, zoom * 0.1);
-
-            const leftOffset = getPathOffsetCurves(previewPoints, previewCpLeft, previewCpRight, 0.08, 25);
-            const rightOffset = getPathOffsetCurves(previewPoints, previewCpLeft, previewCpRight, -0.08, 25);
-
-            ctx.beginPath();
-            leftOffset.forEach((pt, idx) => {
-              const s = worldToScreen(pt.x, pt.y);
-              if (idx === 0) ctx.moveTo(s.x, s.y);
-              else ctx.lineTo(s.x, s.y);
-            });
-            ctx.stroke();
-
-            ctx.beginPath();
-            rightOffset.forEach((pt, idx) => {
-              const s = worldToScreen(pt.x, pt.y);
-              if (idx === 0) ctx.moveTo(s.x, s.y);
-              else ctx.lineTo(s.x, s.y);
-            });
-            ctx.stroke();
-          } else if (activeTool === 'white_dashed') {
-            ctx.strokeStyle = primaryLineColor;
-            ctx.lineWidth = Math.max(1.5, zoom * 0.1);
-            ctx.setLineDash([zoom * 4.0, zoom * 6.0]);
-
-            const segPts = getPathOffsetCurves(previewPoints, previewCpLeft, previewCpRight, 0, 25);
-            ctx.beginPath();
-            segPts.forEach((pt, idx) => {
-              const s = worldToScreen(pt.x, pt.y);
-              if (idx === 0) ctx.moveTo(s.x, s.y);
-              else ctx.lineTo(s.x, s.y);
-            });
-            ctx.stroke();
-            ctx.setLineDash([]);
-          } else if (activeTool === 'yellow_dashed') {
-            ctx.strokeStyle = yellowDashedColor;
-            ctx.lineWidth = Math.max(1.5, zoom * 0.1);
-            ctx.setLineDash([zoom * 4.0, zoom * 6.0]);
-
-            const segPts = getPathOffsetCurves(previewPoints, previewCpLeft, previewCpRight, 0, 25);
-            ctx.beginPath();
-            segPts.forEach((pt, idx) => {
-              const s = worldToScreen(pt.x, pt.y);
-              if (idx === 0) ctx.moveTo(s.x, s.y);
-              else ctx.lineTo(s.x, s.y);
-            });
-            ctx.stroke();
-            ctx.setLineDash([]);
-          } else if (activeTool === 'white_solid') {
-            ctx.strokeStyle = primaryLineColor;
-            ctx.lineWidth = Math.max(2, zoom * 0.15);
-
-            const segPts = getPathOffsetCurves(previewPoints, previewCpLeft, previewCpRight, 0, 25);
-            ctx.beginPath();
-            segPts.forEach((pt, idx) => {
-              const s = worldToScreen(pt.x, pt.y);
-              if (idx === 0) ctx.moveTo(s.x, s.y);
-              else ctx.lineTo(s.x, s.y);
-            });
-            ctx.stroke();
-          } else if (activeTool === 'crossing_dashed') {
-            ctx.strokeStyle = primaryLineColor;
-            ctx.lineWidth = Math.max(3.0, zoom * 0.3);
-            ctx.setLineDash([zoom * 1.0, zoom * 2.0]);
-
-            const segPts = getPathOffsetCurves(previewPoints, previewCpLeft, previewCpRight, 0, 25);
-            ctx.beginPath();
-            segPts.forEach((pt, idx) => {
-              const s = worldToScreen(pt.x, pt.y);
-              if (idx === 0) ctx.moveTo(s.x, s.y);
-              else ctx.lineTo(s.x, s.y);
-            });
-            ctx.stroke();
-            ctx.setLineDash([]);
-          } else if (activeTool === 'stop_line') {
-            ctx.strokeStyle = primaryLineColor;
-            ctx.lineWidth = Math.max(3.5, zoom * 0.35);
-
-            const segPts = getPathOffsetCurves(previewPoints, previewCpLeft, previewCpRight, 0, 25);
-            ctx.beginPath();
-            segPts.forEach((pt, idx) => {
-              const s = worldToScreen(pt.x, pt.y);
-              if (idx === 0) ctx.moveTo(s.x, s.y);
-              else ctx.lineTo(s.x, s.y);
-            });
-            ctx.stroke();
-          } else if (activeTool === 'yield_line') {
-            drawYieldLineBezier(ctx, previewPoints, previewCpLeft, previewCpRight, 1, zoom, worldToScreen);
-          } else if (activeTool === 'reversible_lane') {
-            ctx.save();
-            ctx.strokeStyle = primaryLineColor;
-            ctx.lineWidth = Math.max(1.0, zoom * 0.1);
-            ctx.setLineDash([zoom * 4.0, zoom * 6.0]);
-
-            const leftOffset = getPathOffsetCurves(previewPoints, previewCpLeft, previewCpRight, 0.1, 25);
-            const rightOffset = getPathOffsetCurves(previewPoints, previewCpLeft, previewCpRight, -0.1, 25);
-
-            ctx.beginPath();
-            leftOffset.forEach((pt, idx) => {
-              const s = worldToScreen(pt.x, pt.y);
-              if (idx === 0) ctx.moveTo(s.x, s.y);
-              else ctx.lineTo(s.x, s.y);
-            });
-            ctx.stroke();
-
-            ctx.beginPath();
-            rightOffset.forEach((pt, idx) => {
-              const s = worldToScreen(pt.x, pt.y);
-              if (idx === 0) ctx.moveTo(s.x, s.y);
-              else ctx.lineTo(s.x, s.y);
-            });
-            ctx.stroke();
-            ctx.restore();
-          } else if (activeTool === 'bicycle_lane') {
-            const laneWidth = 1.5;
-            const halfW = laneWidth / 2;
-
-            const leftOffset = getPathOffsetCurves(previewPoints, previewCpLeft, previewCpRight, -halfW, 40);
-            const rightOffset = getPathOffsetCurves(previewPoints, previewCpLeft, previewCpRight, halfW, 40);
-
-            if (leftOffset.length >= 2 && rightOffset.length >= 2) {
-              ctx.save();
-              ctx.fillStyle = 'rgba(244, 114, 182, 0.20)';
-              ctx.strokeStyle = '#f472b6';
-              ctx.lineWidth = Math.max(1.0, zoom * 0.05);
-
-              ctx.beginPath();
-              leftOffset.forEach((pt, idx) => {
-                const s = worldToScreen(pt.x, pt.y);
-                if (idx === 0) ctx.moveTo(s.x, s.y);
-                else ctx.lineTo(s.x, s.y);
-              });
-              for (let i = rightOffset.length - 1; i >= 0; i--) {
-                const s = worldToScreen(rightOffset[i].x, rightOffset[i].y);
-                ctx.lineTo(s.x, s.y);
-              }
-              ctx.closePath();
-              ctx.fill();
-              ctx.stroke();
-              ctx.restore();
-            }
-          } else if (activeTool === 'BuildingLine') {
-            ctx.strokeStyle = '#00ffff';
-            ctx.lineWidth = 2.5;
-
-            const segPts = getPathOffsetCurves(previewPoints, previewCpLeft, previewCpRight, 0, 25);
-            ctx.beginPath();
-            segPts.forEach((pt, idx) => {
-              const s = worldToScreen(pt.x, pt.y);
-              if (idx === 0) ctx.moveTo(s.x, s.y);
-              else ctx.lineTo(s.x, s.y);
-            });
-            ctx.stroke();
+          if (activeTool !== 'parking_zone' && activeTool !== 'measurement') {
+            const previewEl = {
+              id: '__preview__',
+              type: activeTool,
+              points: previewPoints,
+              cpLeft: previewCpLeft,
+              cpRight: previewCpRight,
+              sgn: 1,
+              width: 1.5,
+            } as any;
+            renderPrimitives(ctx, getElementPrimitives(previewEl), { zoom, w2s: worldToScreen, palette: 'screen' });
           } else if (activeTool === 'parking_zone') {
             ctx.save();
             ctx.strokeStyle = 'rgba(56, 189, 248, 0.85)';
@@ -6168,7 +5639,7 @@ export default function CadCanvas({
 
       // Local helper polyline resolver
       const getLocalPoly = (el: any): Point2D[] => {
-        if (el.type === 'BuildingLine' || el.type === 'guideline' || el.type === 'yellow_double' || el.type === 'white_dashed' || el.type === 'yellow_dashed' || el.type === 'white_solid' || el.type === 'smart_path' || el.type === 'parking_zone') {
+        if (el.type === 'BuildingLine' || el.type === 'guideline' || el.type === 'yellow_double' || el.type === 'white_dashed' || el.type === 'yellow_dashed' || el.type === 'white_solid' || el.type === 'red_solid' || el.type === 'yellow_solid' || el.type === 'smart_path' || el.type === 'parking_zone') {
           const ref = getLineBezierRepresentation(el);
           if (ref) {
             return getPathOffsetCurves(ref.points, ref.cpLeft, ref.cpRight, 0, 25);
@@ -6203,7 +5674,7 @@ export default function CadCanvas({
 
         // 2. Soft Collision
         if (!isHardCollision) {
-          for (const lineEl of elements.filter(e => e.type === 'yellow_double' || e.type === 'white_solid' || e.type === 'white_dashed' || e.type === 'yellow_dashed')) {
+          for (const lineEl of elements.filter(e => e.type === 'yellow_double' || e.type === 'white_solid' || e.type === 'red_solid' || e.type === 'yellow_solid' || e.type === 'white_dashed' || e.type === 'yellow_dashed')) {
             const poly = getLocalPoly(lineEl);
             for (let k = 0; k < poly.length - 1; k++) {
               if (lineSegmentsIntersect(quadEdges[0].a, quadEdges[0].b, poly[k], poly[k+1]) ||
@@ -6294,7 +5765,7 @@ export default function CadCanvas({
           // Little dynamic indicator text on vehicle roof
           ctx.fillStyle = isHardCollision ? '#f87171' : '#38bdf8';
           ctx.font = '8px sans-serif';
-          ctx.fillText(designVehicle === 'articulated' ? '聯結車' : designVehicle === 'semi_trailer' ? '大客車/大貨車' : '自小客車', s1.x, s1.y - 4);
+          ctx.fillText(designVehicle === 'articulated' ? '聯結車' : designVehicle === 'semi_trailer' ? '大型車' : '小型車', s1.x, s1.y - 4);
 
           // Wheel Hubs
           ctx.fillStyle = '#1e293b';
@@ -7534,7 +7005,7 @@ export default function CadCanvas({
     simFirstVecStart, simFirstVecEnd, simIsIntersectionMode, simP0X, simP0Y, simP0Angle, simP3X, simP3Y, simP3Angle, 
     simP1RatioPercent, simP2RatioPercent, simIntersectionPickState, simShowIntersectionHelpers, simEnableOutswing, 
     simI1RatioPercent, simI1OffsetDistance, simI2RatioPercent, simI2OffsetDistance, simStartExtensionM, simEndExtensionM, 
-    simIsCalibrating,
+    simIsCalibrating, canvasBackground,
   ]);
 
   // Curvature check for floating top error warnings
@@ -7555,7 +7026,7 @@ export default function CadCanvas({
     if (liveMinRadius < limitRadius) {
       hasCurvatureWarning = true;
     }
-  } else if (selectedElement && (selectedElement.type === 'guideline' || selectedElement.type === 'yellow_double' || selectedElement.type === 'white_dashed' || selectedElement.type === 'yellow_dashed' || selectedElement.type === 'white_solid' || selectedElement.type === 'smart_path')) {
+  } else if (selectedElement && (selectedElement.type === 'guideline' || selectedElement.type === 'yellow_double' || selectedElement.type === 'white_dashed' || selectedElement.type === 'yellow_dashed' || selectedElement.type === 'white_solid' || selectedElement.type === 'red_solid' || selectedElement.type === 'yellow_solid' || selectedElement.type === 'smart_path')) {
     const sp = selectedElement as any;
     if (sp.points && sp.points.length > 1) {
       for (let j = 0; j < sp.points.length - 1; j++) {
@@ -7605,7 +7076,7 @@ export default function CadCanvas({
   }
 
   const getElementPolyline = (el: any): Point2D[] => {
-    if (el.type === 'BuildingLine' || el.type === 'guideline' || el.type === 'yellow_double' || el.type === 'white_double' || el.type === 'white_dashed' || el.type === 'yellow_dashed' || el.type === 'white_solid' || el.type === 'smart_path' || el.type === 'reversible_lane' || el.type === 'crossing_dashed' || el.type === 'stop_line' || el.type === 'Sidewalk' || el.type === 'bicycle_lane' || el.type === 'parking_zone') {
+    if (el.type === 'BuildingLine' || el.type === 'guideline' || el.type === 'yellow_double' || el.type === 'white_double' || el.type === 'white_dashed' || el.type === 'yellow_dashed' || el.type === 'white_solid' || el.type === 'red_solid' || el.type === 'yellow_solid' || el.type === 'smart_path' || el.type === 'reversible_lane' || el.type === 'crossing_dashed' || el.type === 'stop_line' || el.type === 'Sidewalk' || el.type === 'bicycle_lane' || el.type === 'parking_zone') {
       const ref = getLineBezierRepresentation(el);
       if (ref) {
         return getPathOffsetCurves(ref.points, ref.cpLeft, ref.cpRight, 0, 25);
@@ -7713,7 +7184,7 @@ export default function CadCanvas({
       if (!hasHardCollision) {
         const laneTypes = [
           'yellow_double', 'white_double', 'white_solid', 'white_dashed', 
-          'yellow_dashed', 'reversible_lane', 'crossing_dashed', 'stop_line'
+          'yellow_dashed', 'reversible_lane', 'crossing_dashed', 'stop_line', 'red_solid', 'yellow_solid'
         ];
         const laneElements = elements.filter(el => laneTypes.includes(el.type));
         let hitYellow = false;
@@ -7797,7 +7268,7 @@ export default function CadCanvas({
 
         // 2. Soft Collision
         if (!hasSoftCollision) {
-          for (const lineEl of elements.filter(e => e.type === 'yellow_double' || e.type === 'white_solid' || e.type === 'white_dashed' || e.type === 'yellow_dashed')) {
+          for (const lineEl of elements.filter(e => e.type === 'yellow_double' || e.type === 'white_solid' || e.type === 'red_solid' || e.type === 'yellow_solid' || e.type === 'white_dashed' || e.type === 'yellow_dashed')) {
             const poly = getElementPolyline(lineEl);
             for (let k = 0; k < poly.length - 1; k++) {
               if (lineSegmentsIntersect(quadEdges[0].a, quadEdges[0].b, poly[k], poly[k+1]) ||
@@ -7878,6 +7349,7 @@ export default function CadCanvas({
       {hasHardCollision && (
         <div 
           id="hard-collision-warning-hud"
+          style={{ top: 16 + insets.top }}
           className="absolute top-4 left-1/2 transform -translate-x-1/2 z-33 flex items-center gap-3 px-5 py-3 bg-red-950 border border-red-500 rounded-xl shadow-2xl backdrop-blur-md text-red-200 animate-pulse max-w-xl"
         >
           <svg className="w-5 h-5 text-red-500 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M12 9v4M12 17h.01M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/></svg>
@@ -7890,6 +7362,7 @@ export default function CadCanvas({
       {!hasHardCollision && hasSoftCollision && (
         <div 
           id="soft-collision-warning-hud"
+          style={{ top: 16 + insets.top }}
           className="absolute top-4 left-1/2 transform -translate-x-1/2 z-33 flex items-center gap-3 px-5 py-3 bg-yellow-950 border border-yellow-500/80 rounded-xl shadow-2xl backdrop-blur-md text-yellow-100 max-w-xl"
         >
           <svg className="w-5 h-5 text-yellow-500 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M12 9v4M12 17h.01M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/></svg>
@@ -7900,7 +7373,7 @@ export default function CadCanvas({
       )}
 
       {/* Floating Canvas Controls */}
-      <div className="absolute top-4 right-4 flex flex-col items-end gap-2 z-10 select-none">
+      <div style={{ top: 16 + insets.top, right: 16 + insets.right }} className="absolute top-4 right-4 flex flex-col items-end gap-2 z-10 select-none">
         {/* Zoom to Fit Button */}
         <button
           id="btn-zoom-to-fit"
@@ -7914,7 +7387,7 @@ export default function CadCanvas({
 
       {/* Floating SmartPath Draw Actions Box */}
       {isLineOrPathTool(activeTool) && spPoints.length >= 1 && (
-        <div id="smartpath-floating-draw-bar" className={`absolute bottom-16 left-1/2 transform -translate-x-1/2 z-25 flex gap-2 p-2 rounded-xl shadow-2xl backdrop-blur-md ${
+        <div id="smartpath-floating-draw-bar" style={{ bottom: 64 + insets.bottom }} className={`absolute bottom-16 left-1/2 transform -translate-x-1/2 z-25 flex gap-2 p-2 rounded-xl shadow-2xl backdrop-blur-md ${
           'bg-zinc-900/95 border border-zinc-800/80'
         }`}>
           <button
@@ -7927,7 +7400,7 @@ export default function CadCanvas({
                 : 'bg-zinc-800 text-zinc-600 cursor-not-allowed'
             }`}
           >
-            完成路徑 (雙擊起點)
+            完成 (Enter)
           </button>
           <button
             onClick={() => {
@@ -7978,128 +7451,60 @@ export default function CadCanvas({
                 };
             }
           }
+          const pen = `已放置 ${spCount} 個節點。點擊新增節點、按住拖曳可彎曲；Shift 鎖定水平/垂直。Enter、雙擊或 Esc 完成。`;
+          const region = `已放置 ${spCount} 個節點。沿邊界依序點擊，Enter、雙擊或點回起點即自動閉合。`;
+          const name = MARKING_NAMES[tool] || '繪圖工具';
           switch (tool) {
-            case 'guideline':
-              return {
-                name: '繪製道路切基準線 (鋼筆模式)',
-                desc: `已點擊 ${spCount} 個錨點。左鍵點擊增加節點，按住拖拽調整切線。按 Enter 或鍵盤 v 鍵完成繪製。`
-              };
-            case 'yellow_double':
-              return {
-                name: '繪製黃雙線分向線 (鋼筆模式)',
-                desc: `已點擊 ${spCount} 個錨點。左鍵點擊增加節點，按住拖拽調整切線。按 Enter 或鍵盤 v 鍵完成繪製。`
-              };
-            case 'white_double':
-              return {
-                name: '繪製白雙線分向線 (鋼筆模式)',
-                desc: `已點擊 ${spCount} 個錨點。左鍵點擊增加節點，按住拖拽調整切線。按 Enter 或鍵盤 v 鍵完成繪製。`
-              };
-            case 'white_dashed':
-              return {
-                name: '繪製車道白虛線 (鋼筆模式)',
-                desc: `已點擊 ${spCount} 個錨點。左鍵點擊增加節點，按住拖拽調整切線。按 Enter 或鍵盤 v 鍵完成繪製。`
-              };
-            case 'yellow_dashed':
-              return {
-                name: '繪製車道黃虛線 (鋼筆模式)',
-                desc: `已點擊 ${spCount} 個錨點。左鍵點擊增加節點，按住拖拽調整切線。按 Enter 或鍵盤 v 鍵完成繪製。`
-              };
-            case 'white_solid':
-              return {
-                name: '繪製車道實線 (鋼筆模式)',
-                desc: `已點擊 ${spCount} 個錨點。左鍵點擊增加節點，按住拖拽調整切線。按 Enter 或鍵盤 v 鍵完成繪製。`
-              };
-            case 'crossing_dashed':
-              return {
-                name: '繪製穿越虛線 (鋼筆模式)',
-                desc: `已點擊 ${spCount} 個錨點。左鍵點擊增加節點，按住拖拽調整切線。按 Enter 或鍵盤 v 鍵完成繪製。`
-              };
-            case 'stop_line':
-              return {
-                name: '繪製停止線 (鋼筆模式)',
-                desc: `已點擊 ${spCount} 個錨點。左鍵點擊增加節點，按住拖拽調整切線。按 Enter 或鍵盤 v 鍵完成繪製。`
-              };
-            case 'yield_line':
-              return {
-                name: '繪製讓路標線 (鋼筆模式)',
-                desc: `已點擊 ${spCount} 個錨點。左鍵點擊增加節點，按住拖拽調整切線。按 Enter 或鍵盤 v 鍵完成繪製。`
-              };
-            case 'reversible_lane':
-              return {
-                name: '繪製調撥車道線 (鋼筆模式)',
-                desc: `已點擊 ${spCount} 個錨點。左鍵點擊增加節點，按住拖拽調整切線。按 Enter 或鍵盤 v 鍵完成繪製。`
-              };
-            case 'bicycle_lane':
-              return {
-                name: '繪製自行車道線 (鋼筆模式)',
-                desc: `已點擊 ${spCount} 個錨點。左鍵點擊增加節點，按住拖拽調整切線。按 Enter 或鍵盤 v 鍵完成繪製。`
-              };
-            case 'BuildingLine':
-              return {
-                name: '繪製地界建築線 (鋼筆模式)',
-                desc: `已點擊 ${spCount} 個錨點。左鍵點擊增加節點，按住拖拽調整切線。按 Enter 或鍵盤 v 鍵完成繪製。`
-              };
-            case 'smart_path':
-              return {
-                name: '繪製自由貝茲標線 (鋼筆模式)',
-                desc: `已點擊 ${spCount} 個錨點。左鍵點擊增加節點，按住拖拽調整切線。按 Enter 或鍵盤 v 鍵完成繪製。`
-              };
-            case 'sketch_circle':
-              return {
-                name: '繪製 Sketch 草稿圓 (圓心 -> 半徑)',
-                desc: draftCount === 0 ? '第一點點擊決定「圓心軸」' : '第二點壓拖決定「草稿半徑」'
-              };
-            case 'channelization':
-              return {
-                name: '繪製自定義導流區 (多邊形模式)',
-                desc: `已繪製 ${draftCount} 個頂點。點擊畫布以標註區域邊界，點擊起點或雙擊即可閉合島嶼生成。`
-              };
             case 'Sidewalk':
-              return {
-                name: '繪製人行道 (多邊形模式)',
-                desc: `已繪製 ${draftCount} 個頂點。點擊畫布以標註區域邊界，點擊起點或雙擊即可閉合人行道生成。`
-              };
-            case 'text_label':
-              return {
-                name: '標註工程說明文字 (點擊選位)',
-                desc: '在想要擺設說明的實體位置點擊滑鼠左鍵即可。'
-              };
-            case 'parking_space':
-              return {
-                name: '繪製單個停車格 (滑鼠點擊)',
-                desc: '在畫布上想放置車格的位置，點擊滑鼠左鍵生成（可在右側面板調整參數與朝向）。'
-              };
+            case 'channelization':
+            case 'grid_box':
+              return { name: `${name}（點選區域邊界）`, desc: region };
             case 'parking_zone':
-              return {
-                name: '繪製停車收費區 (多邊形模式)',
-                desc: `已繪製 ${draftCount} 個頂點。點擊畫布以標註區域邊界，點擊起點或雙擊即可閉合區域生成（內部車格將自動排滿）。`
-              };
+              return { name: `${name}`, desc: `沿停車帶畫一條路徑（已放置 ${spCount} 點），完成後車格會依右側參數沿路徑自動排列。` };
+            case 'crosswalk': {
+              const steps = [
+                '第 1 點：點在行穿線一側邊緣的起點。',
+                '第 2 點：同一側邊緣的終點（決定長度）。',
+                '第 3 點：對側邊緣、與第 2 點相對的端點（決定寬度）。',
+                '第 4 點：對側邊緣、與第 1 點相對的端點，點下即完成。',
+              ];
+              return { name: `${name}（步驟 ${Math.min(draftCount + 1, 4)}/4）`, desc: steps[Math.min(draftCount, 3)] };
+            }
+            case 'moto_box':
+            case 'moto_turn_box': {
+              const steps = [
+                '第 1 點：前緣（靠停止線）的一端。',
+                '第 2 點：前緣的另一端。',
+                '第 3 點：往後拉出區域深度，點下即完成。',
+              ];
+              return { name: `${name}（步驟 ${Math.min(draftCount + 1, 3)}/3）`, desc: steps[Math.min(draftCount, 2)] };
+            }
             case 'road_arrow':
-              return {
-                name: '繪製路面指向箭頭 (滑鼠點擊)',
-                desc: '在車道中心線適當位置，點擊滑鼠左鍵即可生成箭頭標線（可在右側面板或畫布微調樣式與旋轉角）。'
-              };
-            case 'crosswalk':
-              return {
-                name: '繪製斑馬人行橫道 (滑鼠兩點)',
-                desc: draftCount === 0 ? '第一點點擊決定斑馬線一端。' : '移動滑鼠決定長度與方向，再次點擊即可生成。'
-              };
+              return { name, desc: '點擊車道中央即放置，會自動對齊車道行車方向；按住往想要的方向拖曳可自訂朝向（Shift 每 15°）。' };
+            case 'road_text':
+              return { name, desc: '點擊車道中央，輸入字樣（例：慢、停、公車專用）後按 Enter。字會沿行車方向由近而遠排列。' };
+            case 'text_label':
+              return { name, desc: '點擊要放文字的位置，輸入內容後按 Enter（Esc 取消）。' };
+            case 'parking_space':
+              return { name, desc: '點擊放置車格；按住往車格長邊方向拖曳可旋轉（Shift 每 15°）。尺寸可在右側調整。' };
+            case 'measurement':
+              return { name, desc: spCount === 0 ? '點擊量測起點。' : '點擊量測終點。' };
+            case 'angular_dimension':
+              return { name, desc: ['點擊夾角頂點。', '點擊第一邊上的任一點。', '點擊第二邊上的任一點。'][Math.min(spCount, 2)] };
+            case 'arc_3point':
+              return { name, desc: ['點擊圓弧起點。', '點擊圓弧上任一點。', '點擊圓弧終點。'][Math.min(spCount, 2)] };
+            case 'sketch_circle':
+              return { name, desc: draftCount === 0 ? '點擊決定圓心。' : '移動並點擊決定半徑。' };
             case 'map_scale':
-              return {
-                name: '底圖比例尺校正 (滑鼠拖曳)',
-                desc: '按住滑鼠左鍵並在底圖的已知比例標線（如10公尺標記）上拖曳一條紅色校正線，放開後輸入實地距離。'
-              };
+              return { name: '底圖比例尺校正', desc: '在底圖上已知長度的物件（如 10 m 標記）拖曳一條校正線，放開後輸入實際距離。' };
             default:
-              return {
-                name: '繪圖工具',
-                desc: '在畫布上點擊或拖曳即可繪製。'
-              };
+              return { name: `${name}（鋼筆）`, desc: pen };
           }
         };
 
         const instr = getToolInstruction(activeTool, spPoints.length, draftPoints.length);
         return (
-          <div className={`absolute top-4 left-4 pointer-events-none px-4 py-3 rounded-lg shadow-2xl backdrop-blur-md max-w-sm flex flex-col gap-1 transition-all z-10 ${
+          <div style={{ top: 16 + insets.top, left: 16 + insets.left }} className={`absolute top-4 left-4 pointer-events-none px-4 py-3 rounded-lg shadow-2xl backdrop-blur-md max-w-sm flex flex-col gap-1 transition-all z-10 ${
             'bg-zinc-900/90 border border-zinc-800/80'
           }`}>
             <h4 className="text-xs font-bold tracking-wider text-zinc-300">
@@ -8113,13 +7518,16 @@ export default function CadCanvas({
       })()}
 
       {/* Touch Navigation Helpers on Right Bottom corner */}
-      <div className="absolute bottom-4 left-4 flex gap-4 text-[10px] font-mono px-3 py-1.5 rounded-md pointer-events-none backdrop-blur-sm z-10 bg-zinc-900/60 border border-zinc-800/20 text-zinc-500">
-        <span>縮放: {Math.round(viewport.zoom * 10)}%</span>
-        <span>Space拖移/滑鼠中鍵: 平移圖面</span>
+      <div id="canvas-status-bar" style={{ bottom: 16 + insets.bottom, left: 16 + insets.left }} className="absolute bottom-4 left-4 flex gap-4 text-[10px] font-mono px-3 py-1.5 rounded-md pointer-events-none backdrop-blur-sm z-10 bg-zinc-900/60 border border-zinc-800/20 text-zinc-500">
+        <span className="text-zinc-300">X {mouseWorld.x.toFixed(2)}　Y {mouseWorld.y.toFixed(2)} m</span>
+        <span>縮放 {Math.round(viewport.zoom * 10)}%</span>
+        <span className="hidden xl:inline">Shift 正交／15°</span>
+        <span className="hidden xl:inline">Space 或中鍵 平移</span>
+        <span className="hidden xl:inline">Esc 完成／取消</span>
       </div>
 
       {/* Dynamic Scale Bar on Right Bottom corner */}
-      <div className="absolute bottom-4 right-4 flex flex-col items-center select-none pointer-events-none z-10 font-mono text-[10px] gap-1 transition-all text-white drop-shadow-[0_1.5px_1.5px_rgba(0,0,0,0.8)]">
+      <div style={{ bottom: 16 + insets.bottom, right: 16 + insets.right }} className="absolute bottom-4 right-4 flex flex-col items-center select-none pointer-events-none z-10 font-mono text-[10px] gap-1 transition-all text-white drop-shadow-[0_1.5px_1.5px_rgba(0,0,0,0.8)]">
         <span className="font-bold tracking-wider">{scaleLabel}</span>
         <div className="relative h-1 border-b border-white" style={{ width: `${scalePixelWidth}px` }}>
           <div className="absolute left-0 bottom-0 w-[1px] h-1.5 bg-white"></div>
@@ -8127,6 +7535,55 @@ export default function CadCanvas({
           <div className="absolute right-0 bottom-0 w-[1px] h-1.5 bg-white"></div>
         </div>
       </div>
+
+      {contextMenu && onContextAction && (
+        <>
+          <div className="absolute inset-0 z-40" onPointerDown={() => setContextMenu(null)} onContextMenu={(e) => e.preventDefault()} />
+          <div id="canvas-context-menu" className="absolute z-50 w-44 py-1 rounded-lg bg-zinc-900/95 border border-zinc-700 shadow-2xl text-xs text-zinc-200" style={{ left: contextMenu.sx, top: contextMenu.sy }}>
+            {([
+              ['copy', '複製', 'Ctrl+C', !!(selectedElement || selectedElementIds.length)],
+              ['paste', '貼上', 'Ctrl+V', canPaste],
+              ['duplicate', '原地複製', 'Ctrl+D', !!(selectedElement || selectedElementIds.length)],
+              ['rotate90', '逆時針旋轉 90°', '', !!(selectedElement || selectedElementIds.length)],
+              ['rotate-90', '順時針旋轉 90°', '', !!(selectedElement || selectedElementIds.length)],
+              ['delete', '刪除', 'Delete', !!(selectedElement || selectedElementIds.length)],
+            ] as const).map(([action, label, key, enabled]) => (
+              <button
+                key={action}
+                id={`ctx-${action}`}
+                disabled={!enabled}
+                onClick={() => { onContextAction(action); setContextMenu(null); }}
+                className={`w-full flex items-center justify-between px-3 py-1.5 text-left cursor-pointer disabled:opacity-30 disabled:cursor-default hover:bg-white/10 ${action === 'delete' ? 'text-red-400' : ''}`}
+              >
+                <span>{label}</span><span className="text-[10px] text-zinc-500">{key}</span>
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+
+      {textDraft && (
+        <div
+          className="absolute z-50 -translate-x-1/2 -translate-y-full flex flex-col gap-1 p-2 rounded-lg bg-zinc-900/95 border border-blue-500/60 shadow-2xl"
+          style={{ left: textDraft.sx, top: textDraft.sy - 8 }}
+        >
+          <span className="text-[10px] text-zinc-400">{textDraft.kind === 'road_text' ? '路面標字（例：慢、停、公車專用）' : '文字標註'}</span>
+          <input
+            id="inline-text-input"
+            autoFocus
+            value={textDraft.value}
+            onChange={(e) => setTextDraft({ ...textDraft, value: e.target.value })}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') commitTextDraft();
+              if (e.key === 'Escape') setTextDraft(null);
+              e.stopPropagation();
+            }}
+            onBlur={commitTextDraft}
+            className="w-56 bg-zinc-950 border border-zinc-700 focus:border-blue-500 rounded px-2 py-1 text-sm text-white outline-none"
+            placeholder="輸入文字後按 Enter"
+          />
+        </div>
+      )}
 
       {calibrationDialog && (
         <div className="absolute inset-0 z-[100] bg-black/75 flex items-center justify-center p-4 backdrop-blur-sm">

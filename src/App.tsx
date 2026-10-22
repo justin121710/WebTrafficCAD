@@ -3,7 +3,6 @@ import { CadElement, CadTool, IslandElement, TextElement, Waypoint, VehicleConfi
 import { 
   calculateWidening, 
   generateChannelizingIsland, 
-  exportToDXF, 
   sampleCubicBezier, 
   getLineBezierRepresentation, 
   getPathOffsetCurves, 
@@ -34,7 +33,17 @@ import {
 } from './utils/vehicleSimulator';
 import Toolbar from './components/Toolbar';
 import PropsPanel from './components/PropsPanel';
-import CadCanvas from './components/CadCanvas';
+import CadCanvas, { transformElement, getElementBoundingBox } from './components/CadCanvas';
+import { exportElementsToDXF } from './dxf';
+import { renderElementsToPng } from './exportPng';
+import { computeQuantities, layerKeyOf } from './markings';
+import { buildCrossroadTemplate } from './templates';
+import { saveAutosave, loadAutosave, clearAutosave } from './autosave';
+import { UiStyle, loadUiStyle, saveUiStyle } from './ui/uiStyle';
+import StylePicker from './ui/StylePicker';
+import { MinimalToolRail, GuidedToolSidebar, PolishedDock } from './ui/ToolPalette';
+import { ExportPanel, SettingsPanel, LayerPanel, QuantityPanel, ArrowTypeBar, ConfirmDialog, AutosaveBanner, ViewSettings } from './ui/Panels';
+import { PaletteName } from './renderPrimitives';
 import { Compass, Info, CheckCircle2, RotateCcw, RotateCw, Image as ImageIcon, Download, Upload, Trash2, Ruler, X, Grid, ChevronLeft, ChevronRight, Play, Pause, Sliders, Layers, Truck, Lock, Unlock, GitBranch, MapPin, Save, FolderOpen, ChevronDown, PenTool, Paintbrush } from 'lucide-react';
 
 const normalizeColor = (c: string): string => {
@@ -916,6 +925,28 @@ export default function App() {
   const [designVehicle, setDesignVehicle] = useState<'passenger' | 'semi_trailer' | 'articulated'>('semi_trailer');
   const [bgImage, setBgImage] = useState<any>(null);
   const [exportedImage, setExportedImage] = useState<string | null>(null);
+  const [projectName, setProjectName] = useState<string>('未命名路口配置');
+  const [exportOptions, setExportOptions] = useState<{ palette: PaletteName; includeConstruction: boolean; includeAnnotations: boolean; titleBlock: boolean }>({
+    palette: 'print',
+    includeConstruction: false,
+    includeAnnotations: true,
+    titleBlock: true,
+  });
+  const [fitRequest, setFitRequest] = useState<number>(0);
+  const [uiStyle, setUiStyleState] = useState<UiStyle>(() => loadUiStyle());
+  const setUiStyle = (st: UiStyle) => { setUiStyleState(st); saveUiStyle(st); };
+  const [modernMenu, setModernMenu] = useState<null | 'file' | 'export' | 'view'>(null);
+  const [rightTab, setRightTab] = useState<'props' | 'layers' | 'qty'>('props');
+  const [isRightPanelOpen, setIsRightPanelOpen] = useState<boolean>(true);
+  const [hiddenLayers, setHiddenLayers] = useState<string[]>([]);
+  const [snapToIntersection, setSnapToIntersection] = useState<boolean>(true);
+  const [confirmDialog, setConfirmDialog] = useState<{ title: string; message: string; confirmLabel: string; onConfirm: () => void } | null>(null);
+  const [autosaveOffer, setAutosaveOffer] = useState<{ savedAt: string; project: any } | null>(null);
+  const [isDirty, setIsDirty] = useState<boolean>(false);
+  const autosaveReadyRef = useRef<boolean>(false);
+  // 載入專案後的第一次內容變更不算「未存檔」
+  const skipDirtyRef = useRef<boolean>(false);
+  const projectFileBase = () => `${(projectName || 'WebTrafficCAD').replace(/[\\/:*?"<>|]/g, '_')}_${new Date().toISOString().slice(0, 10)}`;
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isExportDropdownOpen, setIsExportDropdownOpen] = useState<boolean>(false);
 
@@ -1130,8 +1161,10 @@ export default function App() {
     }
   };
 
+  // 畫布只收到「可見」物件，因此以 id 合併，避免隱藏圖層的物件被覆蓋掉
   const handleUpdateElements = (nextElements: CadElement[]) => {
-    setElements(nextElements);
+    const byId = new Map(nextElements.map(el => [el.id, el]));
+    setElements(prev => prev.map(el => byId.get(el.id) ?? el));
     if (selectedElement) {
       const updatedSel = nextElements.find(el => el.id === selectedElement.id);
       if (updatedSel) {
@@ -1149,12 +1182,19 @@ export default function App() {
     setSelectedElementIds(prev => prev.filter(x => x !== id));
   };
 
+  // 清空畫布：先以內建對話框確認（不使用瀏覽器 confirm，沙盒環境也能用），且可復原
   const handleClearCanvas = () => {
-    // Silent clear with automatic history state backup (prevents blocking in iframe sandboxes)
-    saveHistory(elements);
-    setElements([]);
-    setSelectedElement(null);
-    setSelectedElementIds([]);
+    setConfirmDialog({
+      title: '清空畫布',
+      message: `將刪除畫布上全部 ${elements.length} 個物件。清空後仍可按「復原（Ctrl+Z）」找回。`,
+      confirmLabel: '清空',
+      onConfirm: () => {
+        saveHistory(elements);
+        setElements([]);
+        setSelectedElement(null);
+        setSelectedElementIds([]);
+      },
+    });
   };
 
   // Save history before discrete active handles drag begins
@@ -1163,69 +1203,22 @@ export default function App() {
   };
 
   // Road intersection template helper (載入交叉路口 Demo)
+  // 載入十字路口範本（已有內容時先確認）
   const handleLoadDemo = () => {
-    saveHistory(elements);
-    // Setup guidelines + annotated demo
-    const demoElements: CadElement[] = [
-      {
-        id: 'demo-line-1',
-        type: 'yellow_double',
-        points: [{ x: -35.0, y: 0.0 }, { x: -8.0, y: 0.0 }],
-        cpLeft: [{ x: -35.0, y: 0.0 }, { x: -8.0, y: 0.0 }],
-        cpRight: [{ x: -35.0, y: 0.0 }, { x: -8.0, y: 0.0 }]
-      },
-      {
-        id: 'demo-line-2',
-        type: 'yellow_double',
-        points: [{ x: 0.0, y: 10.0 }, { x: 0.0, y: 35.0 }],
-        cpLeft: [{ x: 0.0, y: 10.0 }, { x: 0.0, y: 35.0 }],
-        cpRight: [{ x: 0.0, y: 10.0 }, { x: 0.0, y: 35.0 }]
-      },
-      {
-        id: 'demo-road-edge-A',
-        type: 'white_solid',
-        points: [{ x: -35.0, y: -8.0 }, { x: 8.0, y: -8.0 }],
-        cpLeft: [{ x: -35.0, y: -8.0 }, { x: 8.0, y: -8.5 }],
-        cpRight: [{ x: -35.0, y: -8.0 }, { x: 8.0, y: -8.0 }]
-      },
-      {
-        id: 'demo-road-edge-B',
-        type: 'white_solid',
-        points: [{ x: 8.0, y: -8.0 }, { x: 8.0, y: 35.0 }],
-        cpLeft: [{ x: 8.0, y: -8.0 }, { x: 8.0, y: 35.0 }],
-        cpRight: [{ x: 8.0, y: -8.0 }, { x: 8.0, y: 35.0 }]
-      },
-      {
-        id: 'demo-sketch-1',
-        type: 'sketch_circle',
-        center: { x: 32.0, y: 16.0 },
-        radius: 24.0
-      },
-      {
-        id: 'demo-sketch-2',
-        type: 'sketch_circle',
-        center: { x: 16.0, y: -16.0 },
-        radius: 8.0
-      },
-      {
-        id: 'demo-text-1',
-        type: 'text',
-        p: { x: -20.0, y: 3.5 },
-        text: '橫向道路 (省道15線) - 雙向2車道',
-        fontSize: 1.2
-      },
-      {
-        id: 'demo-text-2',
-        type: 'text',
-        p: { x: -16.0, y: -13.0 },
-        text: '💡 使用「圓形草稿輔助線」與「自由貝茲標線」進行高精度法理車道標線臨摹',
-        fontSize: 0.95
-      }
-    ];
-
-    setElements(demoElements);
-    setSelectedElement(null);
-    setActiveTool('select');
+    const load = () => {
+      saveHistory(elements);
+      setElements(buildCrossroadTemplate());
+      setSelectedElement(null);
+      setSelectedElementIds([]);
+      setActiveTool('select');
+      setFitRequest(n => n + 1);
+      showToast('已載入十字路口範本，可直接修改或匯出。', 'success');
+    };
+    if (elements.length > 0) {
+      setConfirmDialog({ title: '載入範本', message: '載入範本會取代目前畫布內容（可用復原 Ctrl+Z 找回）。確定要繼續嗎？', confirmLabel: '載入範本', onConfirm: load });
+    } else {
+      load();
+    }
   };
 
   // Generate channelizing island automatically from selected curve or smart paths
@@ -1268,63 +1261,131 @@ export default function App() {
     }
   };
 
+  // 專案快照（存檔、自動儲存共用）
+  const buildProjectData = () => ({
+    version: '1.1.0',
+    appMode,
+    projectName,
+    cad: {
+      elements,
+      R2,
+      designVehicle,
+    },
+    bgImage,
+    simulation: {
+      simConfig,
+      simControllerMode,
+      simRawPoints,
+      simIsIntersectionMode,
+      simP0X,
+      simP0Y,
+      simP0Angle,
+      simP3X,
+      simP3Y,
+      simP3Angle,
+      simP1RatioPercent,
+      simP2RatioPercent,
+      simEnableOutswing,
+      simI1RatioPercent,
+      simI1OffsetDistance,
+      simI2RatioPercent,
+      simI2OffsetDistance,
+      simStartExtensionM,
+      simEndExtensionM,
+      simLockedPaths,
+    },
+    settings: {
+      snapToGrid,
+      snapToEndpoint,
+      snapToMidpoint,
+      snapToNearest,
+      snapToIntersection,
+      showGrid,
+      minorGridInterval,
+      majorGridInterval,
+      hiddenLayers,
+      exportOptions,
+    }
+  });
+
+  // 套用專案資料（開啟檔案、還原自動儲存共用）；回傳是否成功
+  const applyProjectData = (json: any): boolean => {
+    if (!json || !json.cad || !Array.isArray(json.cad.elements)) return false;
+    skipDirtyRef.current = true;
+    if (json.appMode) setAppMode(json.appMode);
+    setProjectName(typeof json.projectName === 'string' ? json.projectName : '未命名路口配置');
+    setElements(json.cad.elements);
+    setHistoryStack([]);
+    setRedoStack([]);
+    if (typeof json.cad.R2 === 'number') setR2(json.cad.R2);
+    if (json.cad.designVehicle) setDesignVehicle(json.cad.designVehicle);
+    setBgImage(json.bgImage ?? null);
+
+    // 模擬軌跡狀態
+    if (json.simulation) {
+      const sim = json.simulation;
+      if (sim.simConfig) setSimConfig(sim.simConfig);
+      if (sim.simControllerMode) setSimControllerMode(sim.simControllerMode);
+      if (sim.simRawPoints) setSimRawPoints(sim.simRawPoints);
+      if (typeof sim.simIsIntersectionMode === 'boolean') setSimIsIntersectionMode(sim.simIsIntersectionMode);
+      if (sim.simP0X !== undefined) setSimP0X(sim.simP0X);
+      if (sim.simP0Y !== undefined) setSimP0Y(sim.simP0Y);
+      if (typeof sim.simP0Angle === 'number') setSimP0Angle(sim.simP0Angle);
+      if (sim.simP3X !== undefined) setSimP3X(sim.simP3X);
+      if (sim.simP3Y !== undefined) setSimP3Y(sim.simP3Y);
+      if (typeof sim.simP3Angle === 'number') setSimP3Angle(sim.simP3Angle);
+      if (typeof sim.simP1RatioPercent === 'number') setSimP1RatioPercent(sim.simP1RatioPercent);
+      if (typeof sim.simP2RatioPercent === 'number') setSimP2RatioPercent(sim.simP2RatioPercent);
+      if (typeof sim.simEnableOutswing === 'boolean') setSimEnableOutswing(sim.simEnableOutswing);
+      if (typeof sim.simI1RatioPercent === 'number') setSimI1RatioPercent(sim.simI1RatioPercent);
+      if (typeof sim.simI1OffsetDistance === 'number') setSimI1OffsetDistance(sim.simI1OffsetDistance);
+      if (typeof sim.simI2RatioPercent === 'number') setSimI2RatioPercent(sim.simI2RatioPercent);
+      if (typeof sim.simI2OffsetDistance === 'number') setSimI2OffsetDistance(sim.simI2OffsetDistance);
+      if (typeof sim.simStartExtensionM === 'number') setSimStartExtensionM(sim.simStartExtensionM);
+      if (typeof sim.simEndExtensionM === 'number') setSimEndExtensionM(sim.simEndExtensionM);
+      if (Array.isArray(sim.simLockedPaths)) setSimLockedPaths(sim.simLockedPaths);
+    }
+
+    if (json.settings) {
+      const st = json.settings;
+      if (typeof st.snapToGrid === 'boolean') setSnapToGrid(st.snapToGrid);
+      if (typeof st.snapToEndpoint === 'boolean') setSnapToEndpoint(st.snapToEndpoint);
+      if (typeof st.snapToMidpoint === 'boolean') setSnapToMidpoint(st.snapToMidpoint);
+      if (typeof st.snapToNearest === 'boolean') setSnapToNearest(st.snapToNearest);
+      if (typeof st.snapToIntersection === 'boolean') setSnapToIntersection(st.snapToIntersection);
+      if (typeof st.showGrid === 'boolean') setShowGrid(st.showGrid);
+      if (typeof st.minorGridInterval === 'number') setMinorGridInterval(st.minorGridInterval);
+      if (typeof st.majorGridInterval === 'number') setMajorGridInterval(st.majorGridInterval);
+      setHiddenLayers(Array.isArray(st.hiddenLayers) ? st.hiddenLayers : []);
+      if (st.exportOptions) setExportOptions(prev => ({ ...prev, ...st.exportOptions }));
+    }
+
+    setSelectedElement(null);
+    setSelectedElementIds([]);
+    setSelectedAnchorIndices([]);
+    setEditingPathId(null);
+    setSimCurrentStepIndex(0);
+    simFractionalStepRef.current = 0;
+    setSimIsPlaying(false);
+    setFitRequest(n => n + 1);
+    return true;
+  };
+
   // 儲存整個專案狀態為 JSON
   const handleSaveProject = () => {
     try {
-      const projectData = {
-        version: '1.0.0',
-        appMode,
-        cad: {
-          elements,
-          R2,
-          designVehicle,
-        },
-        bgImage,
-        simulation: {
-          simConfig,
-          simControllerMode,
-          simRawPoints,
-          simIsIntersectionMode,
-          simP0X,
-          simP0Y,
-          simP0Angle,
-          simP3X,
-          simP3Y,
-          simP3Angle,
-          simP1RatioPercent,
-          simP2RatioPercent,
-          simEnableOutswing,
-          simI1RatioPercent,
-          simI1OffsetDistance,
-          simI2RatioPercent,
-          simI2OffsetDistance,
-          simStartExtensionM,
-          simEndExtensionM,
-          simLockedPaths,
-        },
-        settings: {
-          snapToGrid,
-          snapToEndpoint,
-          snapToMidpoint,
-          snapToNearest,
-          showGrid,
-          minorGridInterval,
-          majorGridInterval,
-        }
-      };
-
-      const jsonString = JSON.stringify(projectData, null, 2);
+      const jsonString = JSON.stringify(buildProjectData(), null, 2);
       const blob = new Blob([jsonString], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      link.download = `WebTrafficCAD_Project_${new Date().toISOString().slice(0, 10)}.json`;
+      link.download = `${projectFileBase()}.json`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
       URL.revokeObjectURL(url);
-      
-      showToast('專案已成功儲存！', 'success');
+      setIsDirty(false);
+      showToast('專案已儲存為 JSON 檔！', 'success');
     } catch (e) {
       console.error(e);
       showToast('儲存專案時發生錯誤！', 'error');
@@ -1340,75 +1401,11 @@ export default function App() {
     reader.onload = (e) => {
       try {
         const json = JSON.parse(e.target?.result as string);
-        
-        if (!json || !json.cad || !Array.isArray(json.cad.elements)) {
+        if (!applyProjectData(json)) {
           showToast('無效的專案檔案格式！', 'error');
           return;
         }
-
-        // 復原狀態
-        if (json.appMode) setAppMode(json.appMode);
-        
-        // CAD 狀態
-        if (json.cad.elements) {
-          setElements(json.cad.elements);
-          setHistoryStack([]);
-          setRedoStack([]);
-        }
-        if (typeof json.cad.R2 === 'number') setR2(json.cad.R2);
-        if (json.cad.designVehicle) setDesignVehicle(json.cad.designVehicle);
-
-        // 背景底圖
-        if (json.bgImage !== undefined) {
-          setBgImage(json.bgImage);
-        }
-
-        // 模擬軌跡狀態
-        if (json.simulation) {
-          const sim = json.simulation;
-          if (sim.simConfig) setSimConfig(sim.simConfig);
-          if (sim.simControllerMode) setSimControllerMode(sim.simControllerMode);
-          if (sim.simRawPoints) setSimRawPoints(sim.simRawPoints);
-          if (typeof sim.simIsIntersectionMode === 'boolean') setSimIsIntersectionMode(sim.simIsIntersectionMode);
-          if (sim.simP0X !== undefined) setSimP0X(sim.simP0X);
-          if (sim.simP0Y !== undefined) setSimP0Y(sim.simP0Y);
-          if (typeof sim.simP0Angle === 'number') setSimP0Angle(sim.simP0Angle);
-          if (sim.simP3X !== undefined) setSimP3X(sim.simP3X);
-          if (sim.simP3Y !== undefined) setSimP3Y(sim.simP3Y);
-          if (typeof sim.simP3Angle === 'number') setSimP3Angle(sim.simP3Angle);
-          if (typeof sim.simP1RatioPercent === 'number') setSimP1RatioPercent(sim.simP1RatioPercent);
-          if (typeof sim.simP2RatioPercent === 'number') setSimP2RatioPercent(sim.simP2RatioPercent);
-          if (typeof sim.simEnableOutswing === 'boolean') setSimEnableOutswing(sim.simEnableOutswing);
-          if (typeof sim.simI1RatioPercent === 'number') setSimI1RatioPercent(sim.simI1RatioPercent);
-          if (typeof sim.simI1OffsetDistance === 'number') setSimI1OffsetDistance(sim.simI1OffsetDistance);
-          if (typeof sim.simI2RatioPercent === 'number') setSimI2RatioPercent(sim.simI2RatioPercent);
-          if (typeof sim.simI2OffsetDistance === 'number') setSimI2OffsetDistance(sim.simI2OffsetDistance);
-          if (typeof sim.simStartExtensionM === 'number') setSimStartExtensionM(sim.simStartExtensionM);
-          if (typeof sim.simEndExtensionM === 'number') setSimEndExtensionM(sim.simEndExtensionM);
-          if (Array.isArray(sim.simLockedPaths)) setSimLockedPaths(sim.simLockedPaths);
-        }
-
-        // 其他設定
-        if (json.settings) {
-          const s = json.settings;
-          if (typeof s.snapToGrid === 'boolean') setSnapToGrid(s.snapToGrid);
-          if (typeof s.snapToEndpoint === 'boolean') setSnapToEndpoint(s.snapToEndpoint);
-          if (typeof s.snapToMidpoint === 'boolean') setSnapToMidpoint(s.snapToMidpoint);
-          if (typeof s.snapToNearest === 'boolean') setSnapToNearest(s.snapToNearest);
-          if (typeof s.showGrid === 'boolean') setShowGrid(s.showGrid);
-          if (typeof s.minorGridInterval === 'number') setMinorGridInterval(s.minorGridInterval);
-          if (typeof s.majorGridInterval === 'number') setMajorGridInterval(s.majorGridInterval);
-        }
-
-        // 重設選擇狀態
-        setSelectedElement(null);
-        setSelectedElementIds([]);
-        setSelectedAnchorIndices([]);
-        setEditingPathId(null);
-        setSimCurrentStepIndex(0);
-        simFractionalStepRef.current = 0;
-        setSimIsPlaying(false);
-
+        setIsDirty(false);
         showToast('專案已成功匯入！', 'success');
       } catch (err) {
         console.error(err);
@@ -1419,633 +1416,279 @@ export default function App() {
     event.target.value = '';
   };
 
-  // Export CAD Geometry as vector text AutoCAD DXF file trigger
-  const handleExportDXF = () => {
+  const downloadBlob = (blob: Blob, filename: string) => {
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
 
+  // 匯出 DXF：與畫布共用同一份幾何（具線寬、精確虛線、完整圖層）
+  const handleExportDXF = () => {
     if (elements.length === 0) {
       showToast('當前畫布為空，無幾何資料可以匯出為 DXF！', 'error');
       return;
     }
-
     try {
-      const dxfContent = exportToDXF(elements);
-      const blob = new Blob([dxfContent], { type: 'application/dxf;charset=utf-8;' });
-      const url = URL.createObjectURL(blob);
-      
-      const link = document.createElement('a');
-      link.href = url;
-      link.setAttribute('download', `WebTrafficCAD_Design_${new Date().toISOString().slice(0, 10)}.dxf`);
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
-    } catch (e) {
-      showToast('匯出 DXF 發生異常，請確認幾何點位符合格式！', 'error');
-    }
-  };
-
-  // Export high resolution PNG following the 10% bounding box padding calculations
-  const handleExportPNG = () => {
-    try {
-      if (elements.length === 0 && !bgImage) {
-        showToast('當前畫布為空，無底圖與幾何資料可以匯出為圖片！', 'error');
-        return;
-      }
-
-      // 1. Calculate physical coordinate bounding box extremes
-      let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-
-      const updateBounds = (p: { x: number; y: number }) => {
-        if (p && typeof p.x === 'number' && typeof p.y === 'number') {
-          if (p.x < minX) minX = p.x;
-          if (p.x > maxX) maxX = p.x;
-          if (p.y < minY) minY = p.y;
-          if (p.y > maxY) maxY = p.y;
-        }
-      };
-
-      // Include background image bounds
-      if (bgImage && bgImage.widthMeters && bgImage.heightMeters) {
-        updateBounds({ x: bgImage.x - bgImage.widthMeters / 2, y: bgImage.y - bgImage.heightMeters / 2 });
-        updateBounds({ x: bgImage.x + bgImage.widthMeters / 2, y: bgImage.y + bgImage.heightMeters / 2 });
-      }
-
-      elements.forEach(el => {
-        if (el.type === 'island') {
-          const island = el as any;
-          if (island.points && island.points.length > 0) {
-            const hasBezier = island.cpLeft && island.cpRight && island.cpLeft.length === island.points.length;
-            const bPoints = hasBezier 
-              ? sampleClosedBezierLoop(island.points, island.cpLeft, island.cpRight, 20)
-              : island.points;
-            bPoints.forEach(updateBounds);
-          }
-        } else if (el.type === 'crosswalk') {
-          const cw = el as any;
-          if (cw.pA1) updateBounds(cw.pA1);
-          if (cw.pA2) updateBounds(cw.pA2);
-          if (cw.pB1) updateBounds(cw.pB1);
-          if (cw.pB2) updateBounds(cw.pB2);
-        } else if (el.type === 'three_center_curve') {
-          const curve = el as any;
-          if (curve.points && curve.points.length > 0) {
-            curve.points.forEach(updateBounds);
-          }
-        } else if (el.type === 'text') {
-          const txt = el as any;
-          if (txt.p) {
-            updateBounds(txt.p);
-            updateBounds({ x: txt.p.x - 3, y: txt.p.y - 1 });
-            updateBounds({ x: txt.p.x + 3, y: txt.p.y + 1 });
-          }
-        } else if (el.type === 'sketch_circle') {
-          const circ = el as any;
-          if (circ.center && circ.radius !== undefined) {
-            updateBounds({ x: circ.center.x - circ.radius, y: circ.center.y });
-            updateBounds({ x: circ.center.x + circ.radius, y: circ.center.y });
-            updateBounds({ x: circ.center.x, y: circ.center.y - circ.radius });
-            updateBounds({ x: circ.center.x, y: circ.center.y + circ.radius });
-          }
-        } else {
-          const path = el as any;
-          if (path.points && path.points.length > 0) {
-            if (path.points.length === 1) {
-              updateBounds(path.points[0]);
-            } else {
-              for (let j = 0; j < path.points.length - 1; j++) {
-                const pStart = path.points[j];
-                const cpStart = (path.cpRight && path.cpRight[j]) || pStart;
-                const cpEnd = (path.cpLeft && path.cpLeft[j + 1]) || path.points[j + 1];
-                const pEnd = path.points[j + 1];
-                const samples = sampleCubicBezier(pStart, cpStart, cpEnd, pEnd, 15);
-                samples.forEach(updateBounds);
-              }
-            }
-          } else if (path.p1 && path.p2) {
-            updateBounds(path.p1);
-            updateBounds(path.p2);
-          }
-        }
+      const dxfContent = exportElementsToDXF(visibleElements, {
+        includeConstruction: exportOptions.includeConstruction,
+        includeAnnotations: exportOptions.includeAnnotations,
       });
-
-      // 2. Add 10% safety padding margin as requested
-      const wRaw = (maxX !== -Infinity && minX !== Infinity) ? (maxX - minX) : 0;
-      const hRaw = (maxY !== -Infinity && minY !== Infinity) ? (maxY - minY) : 0;
-      
-      const activeWRaw = wRaw > 0 ? wRaw : 20;
-      const activeHRaw = hRaw > 0 ? hRaw : 20;
-
-      const wOffset = activeWRaw * 0.10;
-      const hOffset = activeHRaw * 0.10;
-
-      const finalMinX = (minX === Infinity) ? -20 : minX - wOffset;
-      const finalMaxX = (maxX === -Infinity) ? 20 : maxX + wOffset;
-      const finalMinY = (minY === Infinity) ? -20 : minY - hOffset;
-      const finalMaxY = (maxY === -Infinity) ? 20 : maxY + hOffset;
-
-      let finalW = finalMaxX - finalMinX;
-      let finalH = finalMaxY - finalMinY;
-
-      if (isNaN(finalW) || finalW <= 0.001) finalW = 40;
-      if (isNaN(finalH) || finalH <= 0.001) finalH = 40;
-
-      // 3. Create high resolution offscreen canvas
-      const imgWidth = 2048;
-      const imgHeight = Math.max(512, Math.round(imgWidth * (finalH / finalW)));
-
-      const offscreen = document.createElement('canvas');
-      offscreen.width = imgWidth;
-      offscreen.height = imgHeight;
-      const ctx = offscreen.getContext('2d');
-      if (!ctx) {
-        showToast('無法取得 2D Canvas Context！', 'error');
-        return;
-      }
-
-      // Fill dark Blueprint blueprint theme background
-      ctx.fillStyle = '#0f1115';
-      ctx.fillRect(0, 0, imgWidth, imgHeight);
-
-      // Zoom mapping ratios
-      const zoom = imgWidth / finalW;
-      const worldToScreen = (wx: number, wy: number) => {
-        const sx = (wx - finalMinX) * zoom;
-        const sy = imgHeight - (wy - finalMinY) * zoom;
-        return { x: sx, y: sy };
-      };
-
-      const drawElementsAndSave = () => {
-        try {
-          // Draw reference grid ONLY if there's no background image or if it's calibrated
-          const shouldShowGrid = !bgImage || bgImage.isCalibrated;
-          if (shouldShowGrid) {
-            ctx.strokeStyle = 'rgba(255, 255, 255, 0.04)';
-            ctx.lineWidth = 1;
-            for (let x = Math.floor(finalMinX); x <= Math.ceil(finalMaxX); x += 2) {
-              ctx.beginPath();
-              const s1 = worldToScreen(x, finalMinY);
-              const s2 = worldToScreen(x, finalMaxY);
-              ctx.moveTo(s1.x, s1.y);
-              ctx.lineTo(s2.x, s2.y);
-              ctx.stroke();
-            }
-            for (let y = Math.floor(finalMinY); y <= Math.ceil(finalMaxY); y += 2) {
-              ctx.beginPath();
-              const s1 = worldToScreen(finalMinX, y);
-              const s2 = worldToScreen(finalMaxX, y);
-              ctx.moveTo(s1.x, s1.y);
-              ctx.lineTo(s2.x, s2.y);
-              ctx.stroke();
-            }
-          }
-
-          // Render elements with constant offsets
-          elements.forEach(el => {
-            if (el.type === 'island') {
-              const island = el as IslandElement;
-              if (island.points && island.points.length > 0) {
-                const hasBezier = island.cpLeft && island.cpRight && island.cpLeft.length === island.points.length;
-                const boundaryPoints = hasBezier 
-                  ? sampleClosedBezierLoop(island.points, island.cpLeft, island.cpRight, 20)
-                  : island.points;
-
-                ctx.beginPath();
-                boundaryPoints.forEach((pt, idx) => {
-                  const s = worldToScreen(pt.x, pt.y);
-                  if (idx === 0) ctx.moveTo(s.x, s.y);
-                  else ctx.lineTo(s.x, s.y);
-                });
-                ctx.closePath();
-                ctx.fillStyle = 'rgba(15, 23, 42, 0.75)';
-                ctx.fill();
-                ctx.strokeStyle = island.color || '#ffffff';
-                ctx.lineWidth = Math.max(1.5, zoom * 0.1);
-                ctx.stroke();
-
-                if (island.hasHatching && boundaryPoints.length >= 3) {
-                  const hatching = generateHatchingLines(boundaryPoints, 0.45, 45);
-                  ctx.strokeStyle = island.color || 'rgba(255, 255, 255, 0.75)';
-                  ctx.lineWidth = Math.max(1.5, zoom * 0.12);
-                  ctx.beginPath();
-                  hatching.forEach(hl => {
-                    const s1 = worldToScreen(hl.p1.x, hl.p1.y);
-                    const s2 = worldToScreen(hl.p2.x, hl.p2.y);
-                    ctx.moveTo(s1.x, s1.y);
-                    ctx.lineTo(s2.x, s2.y);
-                  });
-                  ctx.stroke();
-                }
-              }
-            } else if (el.type === 'crosswalk') {
-              const cw = el as any;
-              const stripeWidth = cw.stripeWidth ?? 0.4;
-              const stripeGap = cw.stripeGap ?? 0.4;
-              const stripes = generateCrosswalkStripes(cw.pA1, cw.pA2, cw.pB1, cw.pB2, stripeWidth, stripeGap);
-              ctx.save();
-              ctx.fillStyle = 'rgba(255, 255, 255, 0.95)';
-              stripes.forEach((stripe) => {
-                ctx.beginPath();
-                const s1 = worldToScreen(stripe.p1.x, stripe.p1.y);
-                const s2 = worldToScreen(stripe.p2.x, stripe.p2.y);
-                const s3 = worldToScreen(stripe.p3.x, stripe.p3.y);
-                const s4 = worldToScreen(stripe.p4.x, stripe.p4.y);
-                ctx.moveTo(s1.x, s1.y);
-                ctx.lineTo(s2.x, s2.y);
-                ctx.lineTo(s3.x, s3.y);
-                ctx.lineTo(s4.x, s4.y);
-                ctx.closePath();
-                ctx.fill();
-              });
-              ctx.restore();
-            } else if (el.type === 'parking_space') {
-              const pk = el as any;
-              const L = pk.length || 5.0;
-              const W = pk.width || 2.0;
-              const angle = pk.angle !== undefined ? pk.angle : Math.atan2(pk.p2.y - pk.p1.y, pk.p2.x - pk.p1.x);
-
-              const s1 = worldToScreen(pk.p1.x, pk.p1.y);
-
-              ctx.save();
-              ctx.translate(s1.x, s1.y);
-              ctx.rotate(-angle);
-
-              ctx.lineCap = 'round';
-              ctx.lineJoin = 'round';
-              ctx.strokeStyle = '#ffffff';
-              ctx.lineWidth = Math.max(1.5, zoom * 0.1);
-              ctx.fillStyle = 'rgba(255, 255, 255, 0.05)';
-
-              ctx.beginPath();
-              ctx.moveTo(0, 0);
-              ctx.lineTo(L * zoom, 0);
-              ctx.lineTo(L * zoom, -W * zoom);
-              ctx.lineTo(0, -W * zoom);
-              ctx.closePath();
-              ctx.fill();
-              ctx.stroke();
-
-              if (zoom > 7) {
-                ctx.fillStyle = 'rgba(255, 255, 255, 0.55)';
-                const fontSizePx = Math.max(8, zoom * 0.25);
-                ctx.font = `${fontSizePx}px sans-serif`;
-                ctx.textAlign = 'center';
-                ctx.textBaseline = 'middle';
-                ctx.fillText(`${pk.slotType === 'car' ? '汽車' : '機車'} ${W}x${L}m`, (L / 2) * zoom, -(W / 2) * zoom);
-              }
-              ctx.restore();
-            } else if (el.type === 'parking_zone') {
-              const zone = el as any;
-              const ref = getLineBezierRepresentation(zone);
-              if (ref) {
-                ctx.save();
-                ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
-                ctx.lineWidth = Math.max(1.0, zoom * 0.05);
-                ctx.setLineDash([4, 6]);
-                ctx.beginPath();
-                const segPts = getPathOffsetCurves(ref.points, ref.cpLeft, ref.cpRight, 0, 25);
-                segPts.forEach((pt, j) => {
-                  const s = worldToScreen(pt.x, pt.y);
-                  if (j === 0) ctx.moveTo(s.x, s.y);
-                  else ctx.lineTo(s.x, s.y);
-                });
-                ctx.stroke();
-                ctx.restore();
-              }
-
-              const slots = generateParkingZoneSlots(zone);
-              slots.forEach((slot) => {
-                ctx.save();
-                ctx.lineCap = 'round';
-                ctx.lineJoin = 'round';
-                ctx.strokeStyle = '#ffffff';
-                ctx.lineWidth = Math.max(1.5, zoom * 0.1);
-                ctx.fillStyle = 'rgba(255, 255, 255, 0.05)';
-
-                const s1 = worldToScreen(slot.corners[0].x, slot.corners[0].y);
-                const s2 = worldToScreen(slot.corners[1].x, slot.corners[1].y);
-                const s3 = worldToScreen(slot.corners[2].x, slot.corners[2].y);
-                const s4 = worldToScreen(slot.corners[3].x, slot.corners[3].y);
-
-                ctx.beginPath();
-                ctx.moveTo(s1.x, s1.y);
-                ctx.lineTo(s2.x, s2.y);
-                ctx.lineTo(s3.x, s3.y);
-                ctx.lineTo(s4.x, s4.y);
-                ctx.closePath();
-                ctx.fill();
-                ctx.stroke();
-
-                if (zoom > 7) {
-                  ctx.fillStyle = 'rgba(255, 255, 255, 0.55)';
-                  const fontSizePx = Math.max(8, zoom * 0.25);
-                  ctx.font = `${fontSizePx}px sans-serif`;
-                  ctx.textAlign = 'center';
-                  ctx.textBaseline = 'middle';
-                  const cx = (s1.x + s2.x + s3.x + s4.x) / 4;
-                  const cy = (s1.y + s2.y + s3.y + s4.y) / 4;
-                  ctx.fillText(`${slot.slotType === 'car' ? '汽車' : '機車'} ${slot.width}x${slot.length}m`, cx, cy);
-                }
-                ctx.restore();
-              });
-            } else if (el.type === 'three_center_curve') {
-              const curve = el as any;
-              if (curve.points && curve.points.length > 0) {
-                ctx.save();
-                ctx.strokeStyle = '#3b82f6';
-                ctx.lineWidth = Math.max(2, zoom * 0.15);
-                ctx.lineCap = 'square';
-                ctx.lineJoin = 'miter';
-                ctx.beginPath();
-                for (let i = 0; i < curve.points.length; i++) {
-                  const sPt = worldToScreen(curve.points[i].x, curve.points[i].y);
-                  if (i === 0) ctx.moveTo(sPt.x, sPt.y);
-                  else ctx.lineTo(sPt.x, sPt.y);
-                }
-                ctx.stroke();
-                ctx.restore();
-              }
-            } else if (el.type === 'text') {
-              const txt = el as TextElement;
-              const s = worldToScreen(txt.p.x, txt.p.y);
-              ctx.fillStyle = '#e2e8f0';
-              const fontSizePx = Math.max(12, txt.fontSize * zoom);
-              ctx.font = `${fontSizePx}px sans-serif`;
-              ctx.textBaseline = 'middle';
-              ctx.textAlign = 'center';
-              ctx.fillText(txt.text, s.x, s.y);
-            } else if (el.type === 'sketch_circle') {
-              const circ = el as any;
-              const s = worldToScreen(circ.center.x, circ.center.y);
-              ctx.strokeStyle = 'rgba(14, 165, 233, 0.35)'; // translucent blue
-              ctx.lineWidth = Math.max(1.0, zoom * 0.05);
-              ctx.setLineDash([Math.max(5, zoom * 0.1), Math.max(5, zoom * 0.1)]);
-              ctx.beginPath();
-              ctx.arc(s.x, s.y, circ.radius * zoom, 0, 2 * Math.PI);
-              ctx.stroke();
-              ctx.setLineDash([]);
-            } else {
-              const line = el as any;
-              const ref = getLineBezierRepresentation(line);
-              if (ref && ref.points && ref.points.length > 0) {
-                ctx.lineCap = 'butt';
-                ctx.setLineDash([]);
-                
-                if (el.type === 'guideline') {
-                  ctx.strokeStyle = 'rgba(56, 189, 248, 0.5)';
-                  ctx.setLineDash([5, 8]);
-                  ctx.lineWidth = Math.max(1.5, zoom * 0.08);
-                  ctx.beginPath();
-                  const segPts = getPathOffsetCurves(ref.points, ref.cpLeft, ref.cpRight, 0, 25);
-                  segPts.forEach((pt, j) => {
-                    const s = worldToScreen(pt.x, pt.y);
-                    if (j === 0) ctx.moveTo(s.x, s.y);
-                    else ctx.lineTo(s.x, s.y);
-                  });
-                  ctx.stroke();
-                  ctx.setLineDash([]);
-                } else if (el.type === 'yellow_double') {
-                  ctx.strokeStyle = '#f59e0b';
-                  ctx.lineWidth = Math.max(1.5, zoom * 0.1);
-                  
-                  const leftOffset = getPathOffsetCurves(ref.points, ref.cpLeft, ref.cpRight, 0.1, 25);
-                  const rightOffset = getPathOffsetCurves(ref.points, ref.cpLeft, ref.cpRight, -0.1, 25);
-                  
-                  ctx.beginPath();
-                  leftOffset.forEach((pt, j) => {
-                    const s = worldToScreen(pt.x, pt.y);
-                    if (j === 0) ctx.moveTo(s.x, s.y);
-                    else ctx.lineTo(s.x, s.y);
-                  });
-                  ctx.stroke();
-                  
-                  ctx.beginPath();
-                  rightOffset.forEach((pt, j) => {
-                    const s = worldToScreen(pt.x, pt.y);
-                    if (j === 0) ctx.moveTo(s.x, s.y);
-                    else ctx.lineTo(s.x, s.y);
-                  });
-                  ctx.stroke();
-                } else if (el.type === 'white_dashed') {
-                  ctx.strokeStyle = '#ffffff';
-                  ctx.lineWidth = el.isLeftTurnGuide ? Math.max(1.5, zoom * 0.3) : Math.max(1.5, zoom * 0.12);
-                  ctx.setLineDash(el.isLeftTurnGuide ? [zoom * 1.0, zoom * 2.0] : [zoom * 4.0, zoom * 6.0]);
-                  ctx.beginPath();
-                  const segPts = getPathOffsetCurves(ref.points, ref.cpLeft, ref.cpRight, 0, 25);
-                  segPts.forEach((pt, j) => {
-                    const s = worldToScreen(pt.x, pt.y);
-                    if (j === 0) ctx.moveTo(s.x, s.y);
-                    else ctx.lineTo(s.x, s.y);
-                  });
-                  ctx.stroke();
-                  ctx.setLineDash([]);
-                } else if (el.type === 'yellow_dashed') {
-                  ctx.strokeStyle = '#eab308'; // Yellow-500 yellow_dashed
-                  ctx.lineWidth = el.isLeftTurnGuide ? Math.max(1.5, zoom * 0.3) : Math.max(1.5, zoom * 0.12);
-                  ctx.setLineDash(el.isLeftTurnGuide ? [zoom * 1.0, zoom * 2.0] : [zoom * 4.0, zoom * 6.0]);
-                  ctx.beginPath();
-                  const segPts = getPathOffsetCurves(ref.points, ref.cpLeft, ref.cpRight, 0, 25);
-                  segPts.forEach((pt, j) => {
-                    const s = worldToScreen(pt.x, pt.y);
-                    if (j === 0) ctx.moveTo(s.x, s.y);
-                    else ctx.lineTo(s.x, s.y);
-                  });
-                  ctx.stroke();
-                  ctx.setLineDash([]);
-                } else if (el.type === 'white_solid') {
-                  ctx.strokeStyle = '#ffffff';
-                  ctx.lineWidth = Math.max(1.5, zoom * 0.15);
-                  ctx.beginPath();
-                  const segPts = getPathOffsetCurves(ref.points, ref.cpLeft, ref.cpRight, 0, 25);
-                  segPts.forEach((pt, j) => {
-                    const s = worldToScreen(pt.x, pt.y);
-                    if (j === 0) ctx.moveTo(s.x, s.y);
-                    else ctx.lineTo(s.x, s.y);
-                  });
-                  ctx.stroke();
-                } else if (el.type === 'smart_path') {
-                  ctx.strokeStyle = '#06b6d4';
-                  ctx.lineWidth = Math.max(1.5, zoom * 0.15);
-                  ctx.beginPath();
-                  const segPts = getPathOffsetCurves(ref.points, ref.cpLeft, ref.cpRight, 0, 25);
-                  segPts.forEach((pt, j) => {
-                    const s = worldToScreen(pt.x, pt.y);
-                    if (j === 0) ctx.moveTo(s.x, s.y);
-                    else ctx.lineTo(s.x, s.y);
-                  });
-                  ctx.stroke();
-                } else if (el.type === 'crossing_dashed') {
-                  ctx.strokeStyle = '#ffffff';
-                  ctx.lineWidth = Math.max(3.0, zoom * 0.3);
-                  ctx.setLineDash([zoom * 1.0, zoom * 2.0]);
-                  ctx.beginPath();
-                  const segPts = getPathOffsetCurves(ref.points, ref.cpLeft, ref.cpRight, 0, 25);
-                  segPts.forEach((pt, j) => {
-                    const s = worldToScreen(pt.x, pt.y);
-                    if (j === 0) ctx.moveTo(s.x, s.y);
-                    else ctx.lineTo(s.x, s.y);
-                  });
-                  ctx.stroke();
-                  ctx.setLineDash([]);
-                } else if (el.type === 'stop_line') {
-                  ctx.strokeStyle = '#ffffff';
-                  ctx.lineWidth = Math.max(3.5, zoom * 0.35);
-                  ctx.beginPath();
-                  const segPts = getPathOffsetCurves(ref.points, ref.cpLeft, ref.cpRight, 0, 25);
-                  segPts.forEach((pt, j) => {
-                    const s = worldToScreen(pt.x, pt.y);
-                    if (j === 0) ctx.moveTo(s.x, s.y);
-                    else ctx.lineTo(s.x, s.y);
-                  });
-                  ctx.stroke();
-                } else if (el.type === 'BuildingLine') {
-                  ctx.strokeStyle = '#00ffff';
-                  ctx.lineWidth = Math.max(1.5, zoom * 0.12);
-                  ctx.beginPath();
-                  const segPts = getPathOffsetCurves(ref.points, ref.cpLeft, ref.cpRight, 0, 25);
-                  segPts.forEach((pt, j) => {
-                    const s = worldToScreen(pt.x, pt.y);
-                    if (j === 0) ctx.moveTo(s.x, s.y);
-                    else ctx.lineTo(s.x, s.y);
-                  });
-                  ctx.stroke();
-                } else if (el.type === 'Sidewalk') {
-                  const segPts = getPathOffsetCurves(ref.points, ref.cpLeft, ref.cpRight, 0, 30);
-                  if (segPts.length >= 2) {
-                    ctx.save();
-                    ctx.fillStyle = '#A9A9A9';
-                    ctx.strokeStyle = '#1e293b';
-                    ctx.lineWidth = Math.max(1.5, zoom * 0.1);
-                    ctx.beginPath();
-                    segPts.forEach((pt, idx) => {
-                      const s = worldToScreen(pt.x, pt.y);
-                      if (idx === 0) ctx.moveTo(s.x, s.y);
-                      else ctx.lineTo(s.x, s.y);
-                    });
-                    ctx.closePath();
-                    ctx.fill();
-                    ctx.stroke();
-                    ctx.restore();
-                  }
-                } else if (el.type === 'yield_line') {
-                  const segPts = getPathOffsetCurves(ref.points, ref.cpLeft, ref.cpRight, 0, 30);
-                  if (segPts.length >= 2) {
-                    const cumulativeDist: number[] = [0];
-                    let totalLen = 0;
-                    for (let k = 1; k < segPts.length; k++) {
-                      totalLen += distance(segPts[k - 1], segPts[k]);
-                      cumulativeDist.push(totalLen);
-                    }
-
-                    const spacing = 0.65;
-                    const W = 0.40;
-                    const H = 0.55;
-
-                    ctx.save();
-                    ctx.fillStyle = '#ffffff';
-                    ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
-                    ctx.lineWidth = 1;
-
-                    for (let d = spacing / 2; d < totalLen; d += spacing) {
-                      let idx = 0;
-                      while (idx < cumulativeDist.length - 2 && cumulativeDist[idx + 1] < d) {
-                        idx++;
-                      }
-                      const segLen = cumulativeDist[idx + 1] - cumulativeDist[idx];
-                      const t = segLen > 0.0001 ? (d - cumulativeDist[idx]) / segLen : 0;
-                      
-                      const C = lerp(segPts[idx], segPts[idx + 1], t);
-                      const rawTangent = { x: segPts[idx + 1].x - segPts[idx].x, y: segPts[idx + 1].y - segPts[idx].y };
-                      const tangent = normalize(rawTangent);
-                      const normal = { x: -tangent.y, y: tangent.x };
-
-                      const B1 = { x: C.x - tangent.x * (W / 2), y: C.y - tangent.y * (W / 2) };
-                      const B2 = { x: C.x + tangent.x * (W / 2), y: C.y + tangent.y * (W / 2) };
-                      const V = { x: C.x + normal.x * H, y: C.y + normal.y * H };
-
-                      const b1S = worldToScreen(B1.x, B1.y);
-                      const b2S = worldToScreen(B2.x, B2.y);
-                      const vS = worldToScreen(V.x, V.y);
-
-                      ctx.beginPath();
-                      ctx.moveTo(b1S.x, b1S.y);
-                      ctx.lineTo(b2S.x, b2S.y);
-                      ctx.lineTo(vS.x, vS.y);
-                      ctx.closePath();
-                      ctx.fill();
-                      ctx.stroke();
-                    }
-                    ctx.restore();
-                  }
-                }
-              }
-            }
-          });
-
-          // 4. Download png file trigger and set exported image state modal
-          const dataUrl = offscreen.toDataURL('image/png');
-          setExportedImage(dataUrl);
-
-          // Try automatic download trigger as well
-          try {
-            const a = document.createElement('a');
-            a.href = dataUrl;
-            a.download = `WebTrafficCAD_Blueprint_${new Date().toISOString().slice(0, 10)}.png`;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-          } catch (downloadErr) {
-            console.warn("Auto automatic file download blocked or failed, relying on fallback dialog.", downloadErr);
-          }
-        } catch (innerErr) {
-          showToast('渲染工程圖或轉換為圖片時發生錯誤：' + (innerErr as Error).message, 'error');
-        }
-      };
-
-      if (bgImage && bgImage.src) {
-        const bgImg = new Image();
-        if (!bgImage.src.startsWith('data:')) {
-          bgImg.crossOrigin = "anonymous"; // Safe mode for canvas save
-        }
-        bgImg.onload = () => {
-          // Draw image onto canvas based on its world coordinates
-          const tl = worldToScreen(bgImage.x - bgImage.widthMeters / 2, bgImage.y + bgImage.heightMeters / 2); // Top left
-          const br = worldToScreen(bgImage.x + bgImage.widthMeters / 2, bgImage.y - bgImage.heightMeters / 2); // Bottom right
-          const sW = br.x - tl.x;
-          const sH = br.y - tl.y;
-          
-          ctx.save();
-          ctx.globalAlpha = bgImage.opacity !== undefined ? bgImage.opacity : 0.5;
-          ctx.drawImage(bgImg, tl.x, tl.y, sW, sH);
-          ctx.restore();
-          
-          drawElementsAndSave();
-        };
-        bgImg.onerror = (err) => {
-          console.warn("Background image failed to load for high-res PNG export, using fallback", err);
-          drawElementsAndSave(); // fallback
-        };
-        bgImg.src = bgImage.src;
-      } else {
-        drawElementsAndSave();
-      }
-    } catch (outerErr) {
-      showToast('準備匯出功能時發生錯誤：' + (outerErr as Error).message, 'error');
+      downloadBlob(new Blob([dxfContent], { type: 'application/dxf' }), `${projectFileBase()}.dxf`);
+      showToast('DXF 已匯出（單位：公尺，圖層依標線類型分層）', 'success');
+    } catch (e) {
+      console.error(e);
+      showToast('匯出 DXF 發生異常：' + (e as Error).message, 'error');
     }
   };
 
-  return (
-    <div id="webtrafficcad-app-root" className="flex flex-col h-screen w-screen bg-[#0a0b0e] text-slate-300 overflow-hidden font-sans">
-      
-      {/* CAD App Elegant Top Header */}
-      <header className="flex items-center justify-between px-6 py-3 bg-[#14161c] border-b border-[#2d3039] shrink-0 select-none h-12 z-20">
-        <div className="flex items-center gap-6">
-          <div>
-            <h1 className="text-sm font-black tracking-wider uppercase bg-gradient-to-r from-blue-500 to-indigo-300 bg-clip-text text-transparent">
-              WebTrafficCAD
-            </h1>
-          </div>
+  // 匯出 PNG：與畫布共用同一份幾何，可選白底列印與圖框
+  const handleExportPNG = async () => {
+    if (elements.length === 0 && !bgImage) {
+      showToast('當前畫布為空，無底圖與幾何資料可以匯出為圖片！', 'error');
+      return;
+    }
+    try {
+      const dataUrl = await renderElementsToPng(visibleElements, {
+        palette: exportOptions.palette,
+        includeConstruction: exportOptions.includeConstruction,
+        includeAnnotations: exportOptions.includeAnnotations,
+        titleBlock: exportOptions.titleBlock,
+        title: projectName,
+        bgImage,
+      });
+      setExportedImage(dataUrl);
+      const a = document.createElement('a');
+      a.href = dataUrl;
+      a.download = `${projectFileBase()}.png`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    } catch (e) {
+      showToast('渲染工程圖時發生錯誤：' + (e as Error).message, 'error');
+    }
+  };
 
-          {/* App Mode Switcher (左右合體按鈕) */}
+  // 匯出數量計算表（CSV，Excel 可直接開啟）
+  const handleExportQuantities = () => {
+    const rows = computeQuantities(visibleElements);
+    if (rows.length === 0) {
+      showToast('目前沒有可計算數量的標線。', 'error');
+      return;
+    }
+    const lines = ['項目,物件數,實線長度(m),塗佈面積(m2)'];
+    rows.forEach(r => lines.push(`${r.name},${r.count},${r.length.toFixed(2)},${r.area.toFixed(2)}`));
+    const totalArea = rows.reduce((s, r) => s + r.area, 0);
+    lines.push(`合計,,,${totalArea.toFixed(2)}`);
+    downloadBlob(new Blob(['\ufeff' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' }), `${projectFileBase()}_數量表.csv`);
+    showToast('數量計算表已匯出（CSV）', 'success');
+  };
+
+  // ---------- 複製／貼上／旋轉 ----------
+  const clipboardRef = useRef<CadElement[]>([]);
+  const pasteCountRef = useRef<number>(0);
+  const [canPaste, setCanPaste] = useState<boolean>(false);
+  const getSelectedElements = (): CadElement[] => {
+    const ids = selectedElementIds.length > 0 ? selectedElementIds : (selectedElement ? [selectedElement.id] : []);
+    return elements.filter(el => ids.includes(el.id));
+  };
+  const cloneWithOffset = (els: CadElement[], d: number): CadElement[] =>
+    els.map(el => ({ ...transformElement(JSON.parse(JSON.stringify(el)), d, -d, 0, { x: 0, y: 0 }), id: `${el.type}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}` }));
+  const addAndSelect = (added: CadElement[]) => {
+    if (!added.length) return;
+    saveHistory(elements);
+    setElements(prev => [...prev, ...added]);
+    setSelectedElement(added[0]);
+    setSelectedElementIds(added.length > 1 ? added.map(el => el.id) : []);
+    setActiveTool('select');
+  };
+  const handleContextAction = (action: 'copy' | 'paste' | 'duplicate' | 'rotate90' | 'rotate-90' | 'delete') => {
+    const sel = getSelectedElements();
+    if (action === 'copy') {
+      if (!sel.length) return;
+      clipboardRef.current = JSON.parse(JSON.stringify(sel));
+      pasteCountRef.current = 0;
+      setCanPaste(true);
+      showToast(`已複製 ${sel.length} 個物件`, 'info');
+    } else if (action === 'paste') {
+      if (!clipboardRef.current.length) return;
+      pasteCountRef.current += 1;
+      addAndSelect(cloneWithOffset(clipboardRef.current, 2 * pasteCountRef.current));
+    } else if (action === 'duplicate') {
+      addAndSelect(cloneWithOffset(sel, 2));
+    } else if (action === 'rotate90' || action === 'rotate-90') {
+      if (!sel.length) return;
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      sel.forEach(el => { const b = getElementBoundingBox(el); minX = Math.min(minX, b.minX); minY = Math.min(minY, b.minY); maxX = Math.max(maxX, b.maxX); maxY = Math.max(maxY, b.maxY); });
+      const c = { x: (minX + maxX) / 2, y: (minY + maxY) / 2 };
+      const ang = action === 'rotate90' ? Math.PI / 2 : -Math.PI / 2;
+      const ids = sel.map(el => el.id);
+      saveHistory(elements);
+      const next = elements.map(el => (ids.includes(el.id) ? transformElement(el, 0, 0, ang, c) : el));
+      setElements(next);
+      if (selectedElement) setSelectedElement(next.find(el => el.id === selectedElement.id) || null);
+    } else if (action === 'delete') {
+      if (!sel.length) return;
+      saveHistory(elements);
+      const ids = sel.map(el => el.id);
+      setElements(prev => prev.filter(el => !ids.includes(el.id)));
+      setSelectedElement(null);
+      setSelectedElementIds([]);
+    }
+  };
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (appMode !== 'cad') return;
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      if (!(e.ctrlKey || e.metaKey)) return;
+      const k = e.key.toLowerCase();
+      if (k === 'c') handleContextAction('copy');
+      else if (k === 'v') { e.preventDefault(); handleContextAction('paste'); }
+      else if (k === 'd') { e.preventDefault(); handleContextAction('duplicate'); }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  });
+
+  // 新版介面選單：點擊選單外任何地方即關閉（玻璃面板的 backdrop-filter 會限制 fixed 遮罩，因此改用全域監聽）
+  useEffect(() => {
+    if (!modernMenu) return;
+    const onDown = (e: PointerEvent) => {
+      if (!(e.target as HTMLElement).closest('[data-menu-root]')) setModernMenu(null);
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setModernMenu(null); };
+    window.addEventListener('pointerdown', onDown, true);
+    window.addEventListener('keydown', onKey);
+    return () => { window.removeEventListener('pointerdown', onDown, true); window.removeEventListener('keydown', onKey); };
+  }, [modernMenu]);
+
+  // ---------- 自動儲存 ----------
+  // 啟動時檢查是否有上次未存檔的自動儲存
+  useEffect(() => {
+    loadAutosave().then(rec => {
+      if (rec && rec.project && Array.isArray(rec.project?.cad?.elements) && rec.project.cad.elements.length > 0) {
+        setAutosaveOffer(rec);
+      }
+      autosaveReadyRef.current = true;
+    });
+  }, []);
+
+  // 內容變更後 1.5 秒自動儲存，並標記為「尚未存檔」
+  useEffect(() => {
+    if (!autosaveReadyRef.current || autosaveOffer) return;
+    if (skipDirtyRef.current) skipDirtyRef.current = false;
+    else setIsDirty(true);
+    const t = setTimeout(() => {
+      saveAutosave(buildProjectData());
+    }, 1500);
+    return () => clearTimeout(t);
+  }, [elements, bgImage, simLockedPaths, projectName, hiddenLayers]);
+
+  // 有未存檔的變更時，關閉或重新整理頁面前提醒
+  useEffect(() => {
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (!isDirty || elements.length === 0) return;
+      e.preventDefault();
+      e.returnValue = '';
+    };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => window.removeEventListener('beforeunload', onBeforeUnload);
+  }, [isDirty, elements.length]);
+
+  const handleRestoreAutosave = () => {
+    if (autosaveOffer && applyProjectData(autosaveOffer.project)) {
+      showToast('已還原上次自動儲存的內容。', 'success');
+    }
+    setAutosaveOffer(null);
+  };
+  const handleDiscardAutosave = () => {
+    clearAutosave();
+    setAutosaveOffer(null);
+  };
+
+  // 圖層顯示：隱藏的圖層不繪製、不可選取、不匯出
+  const visibleElements = useMemo(
+    () => (hiddenLayers.length ? elements.filter(el => !hiddenLayers.includes(layerKeyOf(el))) : elements),
+    [elements, hiddenLayers]
+  );
+  const toggleLayer = (key: string) => {
+    setHiddenLayers(prev => (prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key]));
+    setSelectedElement(null);
+    setSelectedElementIds([]);
+  };
+
+  // ---------- 介面風格共用 ----------
+  const handleModeChange = (mode: 'cad' | 'simulation') => {
+    if (mode === 'cad') {
+      setAppMode('cad');
+      return;
+    }
+    setAppMode('simulation');
+    setSimDrawMode('select');
+    setActiveTool('select');
+    setSelectedElement(null);
+    setSelectedElementIds([]);
+  };
+
+  const handleUploadBg = (file: File) => {
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const src = event.target?.result as string;
+      const img = new Image();
+      img.onload = () => {
+        setBgImage({
+          src,
+          x: 0,
+          y: 0,
+          widthMeters: img.width / 20,
+          heightMeters: img.height / 20,
+          opacity: 0.6,
+          isCalibrated: false,
+          pixelPerMeter: 20,
+          fileName: file.name
+        });
+      };
+      img.src = src;
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const viewSettings: ViewSettings = {
+    showGrid, setShowGrid, minorGridInterval, setMinorGridInterval, majorGridInterval, setMajorGridInterval,
+    snapToGrid, setSnapToGrid, snapToEndpoint, setSnapToEndpoint, snapToMidpoint, setSnapToMidpoint,
+    snapToNearest, setSnapToNearest, snapToIntersection, setSnapToIntersection,
+    bgImage, setBgImage, onUploadBg: handleUploadBg,
+    isCalibrating: activeTool === 'map_scale',
+    onCalibrate: () => setActiveTool(activeTool === 'map_scale' ? 'select' : 'map_scale'),
+  };
+
+  const exportPanelEl = (
+    <ExportPanel
+      options={exportOptions}
+      setOptions={setExportOptions}
+      projectName={projectName}
+      setProjectName={setProjectName}
+      onPng={() => { handleExportPNG(); setModernMenu(null); setIsExportDropdownOpen(false); }}
+      onDxf={() => { handleExportDXF(); setModernMenu(null); setIsExportDropdownOpen(false); }}
+      onCsv={() => { handleExportQuantities(); setModernMenu(null); setIsExportDropdownOpen(false); }}
+      hiddenCount={hiddenLayers.length}
+    />
+  );
+
+  const hasToolConfig = activeTool === 'parking_space' || activeTool === 'parking_zone' || activeTool === 'road_arrow';
+  const hasSelection = !!selectedElement || selectedElementIds.length > 0;
+  // 簡潔風格：屬性面板只在有選取、工具有參數或模擬模式時出現
+  const minimalPanelVisible = appMode === 'simulation' || hasSelection || hasToolConfig || rightTab !== 'props';
+  const polishedPanelVisible = isRightPanelOpen && (appMode === 'simulation' || hasSelection || hasToolConfig || rightTab !== 'props');
+  const canvasInsets = uiStyle === 'polished'
+    ? { top: 64, right: polishedPanelVisible ? 352 : 0, bottom: 112, left: appMode === 'simulation' ? 140 : 0 }
+    : { top: 0, right: 0, bottom: 0, left: 0 };
+
+  const modeSwitchEl = (
           <div className="flex items-center bg-[#0a0b0e] border border-[#2d3039] rounded-lg p-0.5 select-none shrink-0">
             <button
               onClick={() => setAppMode('cad')}
@@ -2074,10 +1717,9 @@ export default function App() {
               車流軌跡模擬
             </button>
           </div>
-        </div>
-
-        {/* Global Control Group: Undo, Redo, Exports, and Background Image Management */}
-        <div className="flex items-center gap-3">
+  );
+  const historyBtnsEl = (
+<>
           {/* Clear Canvas Button */}
           <button
             onClick={() => {
@@ -2114,8 +1756,10 @@ export default function App() {
             <RotateCw className="w-4 h-4 text-slate-400" />
           </button>
 
-          <div className="h-4 w-px bg-[#2d3039]" />
-
+</>
+  );
+  const fileBtnsEl = (
+<>
           {/* Save Project (JSON) */}
           <button
             id="save-project-btn"
@@ -2143,9 +1787,9 @@ export default function App() {
             style={{ display: 'none' }}
           />
 
-          <div className="h-4 w-px bg-[#2d3039]" />
-
-          {/* Export Dropdown */}
+</>
+  );
+  const classicExportEl = (
           <div id="export-dropdown-container" className="relative shrink-0">
             <button
               id="export-dropdown-toggle-btn"
@@ -2154,38 +1798,17 @@ export default function App() {
               title="匯出工程圖 (PNG) 或 AutoCAD DXF 向量檔"
             >
               <Download className="w-3.5 h-3.5 text-blue-400" />
-              <span>匯出</span>
+              <span className="hidden xl:inline">匯出</span>
               <ChevronDown className="w-3 h-3 text-blue-400/70" />
             </button>
             {isExportDropdownOpen && (
-              <div className="absolute right-0 top-full mt-1.5 w-48 rounded bg-[#1f2229] border border-[#2d3039] shadow-xl py-1 z-30">
-                <button
-                  onClick={() => {
-                    handleExportPNG();
-                    setIsExportDropdownOpen(false);
-                  }}
-                  className="flex items-center gap-2 w-full px-3 py-2 text-xs text-left text-slate-350 hover:bg-slate-800 hover:text-white transition-all cursor-pointer"
-                >
-                  <ImageIcon className="w-3.5 h-3.5 text-blue-400" />
-                  <span>匯出工程圖 (PNG)</span>
-                </button>
-                <button
-                  onClick={() => {
-                    handleExportDXF();
-                    setIsExportDropdownOpen(false);
-                  }}
-                  className="flex items-center gap-2 w-full px-3 py-2 text-xs text-left text-slate-350 hover:bg-slate-800 hover:text-white transition-all cursor-pointer"
-                >
-                  <Download className="w-3.5 h-3.5 text-blue-400" />
-                  <span>匯出 AutoCAD DXF 向量檔</span>
-                </button>
+              <div className="ui-classic absolute right-0 top-full mt-1.5 w-72 rounded-lg bg-[#1f2229] border border-[#2d3039] shadow-xl p-3 z-30">
+                {exportPanelEl}
               </div>
             )}
           </div>
-
-          <div className="h-4 w-px bg-[#2d3039]" />
-
-          {/* Grid Settings Popover Button */}
+  );
+  const gridPopoverEl = (
           <div className="relative">
             <button
               id="grid-settings-toggle-btn"
@@ -2201,7 +1824,7 @@ export default function App() {
               title="網格背景配置與尺寸間距設定"
             >
               <Grid className="w-3.5 h-3.5 text-blue-400" />
-              <span>網格背景設定</span>
+              <span className="hidden xl:inline">網格背景設定</span>
             </button>
 
             {isGridSettingsOpen && (
@@ -2303,8 +1926,8 @@ export default function App() {
               </div>
             )}
           </div>
-
-          {/* Snap Settings Popover Button */}
+  );
+  const snapPopoverEl = (
           <div className="relative">
             <button
               id="snap-settings-toggle-btn"
@@ -2313,14 +1936,14 @@ export default function App() {
                 setIsGridSettingsOpen(false);
               }}
               className={`flex items-center gap-1.5 h-8 px-3 text-xs rounded transition-all cursor-pointer font-medium ${
-                isSnapSettingsOpen || (snapToGrid || snapToEndpoint || snapToMidpoint || snapToNearest)
+                isSnapSettingsOpen || (snapToGrid || snapToEndpoint || snapToMidpoint || snapToNearest || snapToIntersection)
                   ? 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/40 shadow-[0_0_8px_rgba(0,255,255,0.15)] bg-[#1e222b]'
                   : 'bg-[#1f2229] border border-[#2d3039] hover:bg-slate-800 text-slate-300'
               }`}
               title="鎖點設定 (Snap Settings)"
             >
               <Compass className="w-3.5 h-3.5 text-cyan-400" />
-              <span>SNAP 鎖點設定</span>
+              <span className="hidden xl:inline">SNAP 鎖點設定</span>
             </button>
 
             {isSnapSettingsOpen && (
@@ -2383,15 +2006,22 @@ export default function App() {
                       {snapToNearest ? 'ON' : 'OFF'}
                     </span>
                   </button>
+                  <button 
+                    onClick={() => setSnapToIntersection(!snapToIntersection)} 
+                    className="flex items-center justify-between w-full hover:bg-[#1f2229] p-1.5 rounded-md transition-colors text-slate-300 hover:text-white text-left cursor-pointer"
+                  >
+                    <span>交點鎖點 (Intersection)</span>
+                    <span className={`text-[9px] font-extrabold px-1.5 py-0.5 rounded ${snapToIntersection ? 'bg-cyan-500/20 text-cyan-400' : 'bg-slate-800 text-slate-500'}`}>
+                      {snapToIntersection ? 'ON' : 'OFF'}
+                    </span>
+                  </button>
                 </div>
               </>
             )}
           </div>
-
-          <div className="h-4 w-px bg-[#2d3039]" />
-
-          {/* Integrated Design Background Image Manager */}
-          {!bgImage ? (
+  );
+  const bgManagerEl = (
+!bgImage ? (
             <div className="relative flex items-center h-8 rounded bg-[#1f2229] border border-dashed border-blue-500/35 hover:border-blue-500 hover:bg-slate-800 transition-all text-xs font-medium text-blue-450 cursor-pointer overflow-hidden px-3">
               <input 
                 id="bg-image-uploader"
@@ -2424,7 +2054,7 @@ export default function App() {
                 className="absolute inset-0 opacity-0 cursor-pointer w-full h-full" 
               />
               <Upload className="w-3.5 h-3.5 mr-1.5 text-blue-400" />
-              <span>上傳底圖</span>
+              <span className="hidden xl:inline">上傳底圖</span>
             </div>
           ) : (
             <div className="flex items-center gap-2 bg-[#0f1115] border border-[#2d3039] rounded px-2.5 h-8 text-xs select-none">
@@ -2498,15 +2128,9 @@ export default function App() {
                 <Trash2 className="w-3.5 h-3.5" />
               </button>
             </div>
-          )}
-
-        </div>
-      </header>
-
-      {/* Main CAD Interactive Workspace Grid */}
-      <div className="flex flex-1 min-h-0 w-full relative">
-        {/* Left Sidebar (CAD Toolbar / Simulation control) */}
-        {appMode === 'cad' ? (
+          )
+  );
+  const classicToolbarEl = (
           <>
             <Toolbar 
               activeTool={activeTool} 
@@ -2558,7 +2182,8 @@ export default function App() {
               </div>
             )}
           </>
-        ) : (
+  );
+  const simLeftPanelEl = (
           <div 
             id="left-sim-panel" 
             className="flex flex-col bg-[#14161c] border-r border-[#2d3039] w-[110px] h-full p-2 justify-between select-none overflow-y-auto shrink-0 space-y-4"
@@ -2787,12 +2412,17 @@ export default function App() {
               </div>
             </div>
           </div>
-        )}
-
-        {/* Central CAD Infinite Canvas */}
+  );
+  const canvasAreaEl = (
         <div className="flex-1 h-full min-w-0 relative flex flex-col">
           <CadCanvas 
-            elements={elements}
+            onContextAction={handleContextAction}
+            canPaste={canPaste}
+            insets={canvasInsets}
+            canvasBackground={uiStyle === 'polished' ? '#0c1222' : uiStyle === 'minimal' ? '#0f1012' : '#101216'}
+            fitRequest={fitRequest}
+            snapToIntersection={snapToIntersection}
+            elements={visibleElements}
             onAddElement={handleAddElement}
             onUpdateElement={handleUpdateElement}
           onUpdateElements={handleUpdateElements}
@@ -2988,30 +2618,8 @@ export default function App() {
             </div>
           )}
         </div>
-
-        {/* Collapsible Wrapper for Right Details Panel */}
-        <div 
-          id="props-collapsible-wrapper"
-          className={`relative h-full flex shrink-0 transition-all duration-300 ease-in-out select-none bg-[#14161c] ${
-            isPropsCollapsed ? 'w-0' : 'w-80 border-l border-[#2d3039]'
-          }`}
-        >
-          {/* Smooth overlay vertical collapse button */}
-          <button
-            id="toggle-props-panel-btn"
-            onClick={() => setIsPropsCollapsed(!isPropsCollapsed)}
-            className="absolute top-1/2 -left-3.5 -translate-y-1/2 z-35 flex items-center justify-center w-3.5 h-12 bg-[#1f2229] hover:bg-slate-800 border border-[#2d3039] hover:text-white rounded-l-md cursor-pointer transition-all text-slate-400 font-bold"
-            title={isPropsCollapsed ? '展開右側屬性控制台' : '隱藏右側屬性控制台'}
-          >
-            {isPropsCollapsed ? (
-              <ChevronLeft className="w-3 h-3 text-slate-400 hover:text-white" />
-            ) : (
-              <ChevronRight className="w-3 h-3 text-slate-400 hover:text-white" />
-            )}
-          </button>
-
-          <div className="w-80 h-full overflow-y-auto">
-            {appMode === 'cad' ? (
+  );
+  const propsPanelEl = (
               <PropsPanel 
                 selectedElement={selectedElement}
                 R2={R2}
@@ -3084,7 +2692,8 @@ export default function App() {
                   }
                 }}
               />
-            ) : (
+  );
+  const simRightPanelEl = (
               <div 
                 id="right-sim-panel" 
                 className="flex flex-col h-full bg-[#14161c] text-slate-350 p-4 space-y-4 select-none overflow-y-auto"
@@ -3782,10 +3391,12 @@ export default function App() {
                   </div>
                 </div>
               </div>
-            )}
-          </div>
-        </div>
-      </div>
+  );
+
+  const sharedOverlaysEl = (
+    <>
+      <ConfirmDialog dialog={confirmDialog} onClose={() => setConfirmDialog(null)} />
+      <AutosaveBanner offer={autosaveOffer} onRestore={handleRestoreAutosave} onDiscard={handleDiscardAutosave} />
 
       {exportedImage && (
         <div className="fixed inset-0 bg-black/85 flex items-center justify-center p-4 z-[150] backdrop-blur-sm">
@@ -3841,7 +3452,7 @@ export default function App() {
 
       {/* Embedded Elegant Toast notification */}
       {toast && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[250] max-w-sm w-full bg-[#14161c] border border-zinc-800 text-zinc-100 px-4 py-3 rounded-2xl shadow-2xl flex items-center gap-3 animate-slide-up duration-350">
+        <div id="app-toast" className={`fixed ${uiStyle === 'classic' ? 'bottom-6' : 'top-16'} left-1/2 -translate-x-1/2 z-[250] max-w-sm w-full bg-[#14161c] border border-zinc-800 text-zinc-100 px-4 py-3 rounded-2xl shadow-2xl flex items-center gap-3 animate-slide-up duration-350`}>
           <span className="text-base flex-shrink-0">
             {toast.type === 'success' ? '🎯' : toast.type === 'error' ? '⚠️' : 'ℹ️'}
           </span>
@@ -3854,6 +3465,365 @@ export default function App() {
           </button>
         </div>
       )}
+    </>
+  );
+
+  // ====================================================================
+  // 新版介面（A 簡潔／B 直覺／C 美觀）：共用相同狀態與功能，只改變版面與外觀
+  // ====================================================================
+  const renderModernLayout = () => {
+    const v = uiStyle as 'minimal' | 'guided' | 'polished';
+    const isPolished = v === 'polished';
+    const isGuided = v === 'guided';
+
+    const iconBtn = (id: string, title: string, icon: React.ReactNode, onClick: () => void, disabled = false, label?: string) => (
+      <button
+        id={id}
+        title={title}
+        onClick={onClick}
+        disabled={disabled}
+        className={`flex items-center gap-1.5 h-8 ${label ? 'px-2.5' : 'w-8 justify-center'} rounded-lg text-xs cursor-pointer transition-colors disabled:opacity-30 disabled:cursor-not-allowed hover:bg-white/10`}
+        style={{ color: 'var(--ui-text)' }}
+      >
+        {icon}
+        {label && <span className="whitespace-nowrap hidden xl:inline">{label}</span>}
+      </button>
+    );
+
+    const menuBtn = (key: 'file' | 'export' | 'view', label: string, icon: React.ReactNode, id: string) => (
+      <button
+        id={id}
+        data-menu-root
+        onClick={() => setModernMenu(modernMenu === key ? null : key)}
+        className="flex items-center gap-1.5 h-8 px-2.5 rounded-lg text-xs cursor-pointer transition-colors hover:bg-white/10"
+        style={modernMenu === key ? { background: 'var(--ui-accent-soft)', color: 'var(--ui-accent)' } : { color: 'var(--ui-text)' }}
+      >
+        {icon}
+        <span className="whitespace-nowrap hidden lg:inline">{label}</span>
+        <ChevronDown className="w-3 h-3 opacity-60" />
+      </button>
+    );
+
+    const popover = (key: 'file' | 'export' | 'view', content: React.ReactNode, width = 'w-80') => modernMenu === key && (
+      <>
+        <div
+          data-menu-root
+          id={`menu-${key}`}
+          className={`absolute right-0 top-full mt-2 ${width} max-h-[75vh] overflow-y-auto p-3 z-50 shadow-2xl ${isPolished ? 'glass' : ''}`}
+          style={isPolished ? { borderRadius: 16 } : { background: 'var(--ui-surface)', border: '1px solid var(--ui-border)', borderRadius: 12 }}
+        >
+          {content}
+        </div>
+      </>
+    );
+
+    const fileMenu = (
+      <div className="space-y-1 text-xs" style={{ color: 'var(--ui-text)' }}>
+        {[
+          { id: 'save-project-btn', label: '儲存專案（JSON）', icon: <Save className="w-4 h-4" />, onClick: handleSaveProject },
+          { id: 'load-project-btn', label: '開啟專案…', icon: <FolderOpen className="w-4 h-4" />, onClick: () => fileInputRef.current?.click() },
+          { id: 'menu-template-btn', label: '載入十字路口範本', icon: <MapPin className="w-4 h-4" />, onClick: handleLoadDemo },
+          { id: 'menu-clear-btn', label: appMode === 'cad' ? '清空畫布…' : '清除所有軌跡', icon: <Trash2 className="w-4 h-4 text-red-400" />, onClick: () => (appMode === 'cad' ? handleClearCanvas() : handleSimClearAll()) },
+        ].map(item => (
+          <button key={item.id} id={item.id} onClick={() => { item.onClick(); setModernMenu(null); }} className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg cursor-pointer hover:bg-white/10 text-left">
+            {item.icon}<span>{item.label}</span>
+          </button>
+        ))}
+        <p className="text-[10.5px] px-2.5 pt-2" style={{ color: 'var(--ui-muted)', borderTop: '1px solid var(--ui-border)' }}>
+          {isDirty ? '有尚未存檔的變更；內容已自動暫存在此瀏覽器。' : '所有變更都已儲存。'}
+        </p>
+      </div>
+    );
+
+    const modeSwitch = (
+      <div className={`flex items-center p-0.5 ${isPolished ? 'rounded-full' : 'rounded-lg'}`} style={{ background: isPolished ? 'rgba(255,255,255,0.06)' : 'var(--ui-surface2)', border: '1px solid var(--ui-border)' }}>
+        {([['cad', 'CAD 繪圖'], ['simulation', '軌跡模擬']] as const).map(([m, label]) => {
+          const active = appMode === m;
+          return (
+            <button
+              key={m}
+              id={`mode-${m}`}
+              onClick={() => handleModeChange(m)}
+              className={`px-3.5 py-1 text-xs font-bold whitespace-nowrap cursor-pointer transition-all ${isPolished ? 'rounded-full' : 'rounded-md'} ${active && isPolished ? 'accent-gradient' : ''}`}
+              style={active ? (isPolished ? {} : { background: 'var(--ui-accent)', color: 'var(--ui-accent-text)' }) : { color: 'var(--ui-muted)' }}
+            >
+              {label}
+            </button>
+          );
+        })}
+      </div>
+    );
+
+    const history = (
+      <>
+        {iconBtn('undo-btn', '復原（Ctrl+Z）', <RotateCcw className="w-4 h-4" />, appMode === 'cad' ? handleUndo : handleSimUndoLastNode, appMode === 'cad' ? historyStack.length === 0 : simRawPoints.length === 0, isGuided ? '復原' : undefined)}
+        {iconBtn('redo-btn', '重做（Ctrl+Y）', <RotateCw className="w-4 h-4" />, handleRedo, redoStack.length === 0, isGuided ? '重做' : undefined)}
+      </>
+    );
+
+    const dirtyBadge = (
+      <span className="text-[10.5px] hidden lg:flex items-center gap-1 whitespace-nowrap" style={{ color: 'var(--ui-muted)' }} title={isDirty ? '已自動暫存於瀏覽器，建議另存專案檔' : '已儲存'}>
+        <span className="w-1.5 h-1.5 rounded-full" style={{ background: isDirty ? '#f59e0b' : '#22c55e' }} />
+        {isDirty ? '已自動暫存' : '已儲存'}
+      </span>
+    );
+
+    const projectNameInput = (
+      <input
+        id="project-name-header"
+        value={projectName}
+        onChange={e => setProjectName(e.target.value)}
+        className="hidden md:block bg-transparent text-xs font-medium outline-none px-1.5 py-1 rounded-md hover:bg-white/5 focus:bg-white/5 w-32 xl:w-40 truncate"
+        style={{ color: 'var(--ui-text)' }}
+        title="圖名（會用於匯出檔名與圖框）"
+      />
+    );
+
+    const viewPanel = (
+      <div className="space-y-4">
+        <SettingsPanel v={viewSettings} />
+        {v === 'minimal' && appMode === 'cad' && (
+          <div style={{ borderTop: '1px solid var(--ui-border)' }} className="pt-3">
+            <LayerPanel elements={elements} hidden={hiddenLayers} onToggle={toggleLayer} onShowAll={() => setHiddenLayers([])} />
+          </div>
+        )}
+      </div>
+    );
+
+    const rightTabs = (
+      <div className="flex gap-1 p-1 m-3 mb-0 rounded-lg" style={{ background: 'var(--ui-surface2)' }}>
+        {([['props', '屬性'], ['layers', '圖層'], ['qty', '數量']] as const).map(([k, label]) => (
+          <button key={k} id={`right-tab-${k}`} onClick={() => setRightTab(k)} className={`flex-1 py-1.5 text-xs cursor-pointer transition-all ${isPolished ? 'rounded-lg' : 'rounded-md'} ${rightTab === k && isPolished ? 'accent-gradient' : ''}`}
+            style={rightTab === k ? (isPolished ? {} : { background: 'var(--ui-accent)', color: 'var(--ui-accent-text)', fontWeight: 700 }) : { color: 'var(--ui-muted)' }}>
+            {label}
+          </button>
+        ))}
+      </div>
+    );
+
+    const rightBody = appMode === 'cad'
+      ? (rightTab === 'props'
+          ? (hasSelection || hasToolConfig
+              ? propsPanelEl
+              : <div className="p-6 text-center text-xs" style={{ color: 'var(--ui-muted)' }}>
+                  <div className="text-3xl mb-2">⌖</div>
+                  點選圖面上的標線即可在這裡調整尺寸、座標與規格。
+                  <div className="mt-3 text-[11px] leading-relaxed">小技巧：框選可多選；Delete 刪除；Shift 拖曳鎖定方向；Esc 結束繪製。</div>
+                </div>)
+          : rightTab === 'layers'
+            ? <div className="p-3"><LayerPanel elements={elements} hidden={hiddenLayers} onToggle={toggleLayer} onShowAll={() => setHiddenLayers([])} /></div>
+            : <div className="p-3"><QuantityPanel elements={visibleElements} onExport={handleExportQuantities} /></div>)
+      : simRightPanelEl;
+
+    const fileInput = <input type="file" ref={fileInputRef} accept=".json" onChange={handleLoadProject} style={{ display: 'none' }} />;
+    const arrowBar = appMode === 'cad' && activeTool === 'road_arrow' && (
+      <ArrowTypeBar value={roadArrowConfig.arrowType} onChange={(t) => setRoadArrowConfig({ ...roadArrowConfig, arrowType: t as any })} style={{ top: isPolished ? 76 : 12 }} />
+    );
+
+    // ---------------- C・美觀：滿版畫布＋浮動玻璃面板 ----------------
+    if (isPolished) {
+      return (
+        <div id="webtrafficcad-app-root" className="ui-polished relative h-screen w-screen overflow-hidden font-sans" style={{ background: 'radial-gradient(1200px 600px at 20% -10%, #1e1b4b 0%, transparent 60%), radial-gradient(900px 500px at 110% 110%, #083344 0%, transparent 55%), #0b1020', color: 'var(--ui-text)' }}>
+          {fileInput}
+          <div className="absolute inset-0 flex">{canvasAreaEl}</div>
+          {arrowBar}
+
+          {/* 頂部浮動列 */}
+          <div className="absolute top-3 left-1/2 -translate-x-1/2 z-40 glass rounded-full pl-4 pr-1.5 py-1.5 flex items-center gap-2 max-w-[calc(100vw-24px)]">
+            <span className="w-2.5 h-2.5 rounded-full accent-gradient shrink-0" />
+            <span className="text-[13px] font-bold tracking-wide whitespace-nowrap">WebTrafficCAD</span>
+            <span className="w-px h-5" style={{ background: 'var(--ui-border)' }} />
+            {projectNameInput}
+            {dirtyBadge}
+            <span className="w-px h-5" style={{ background: 'var(--ui-border)' }} />
+            {modeSwitch}
+            <span className="w-px h-5" style={{ background: 'var(--ui-border)' }} />
+            {history}
+            <div className="relative">{menuBtn('file', '檔案', <FolderOpen className="w-4 h-4" />, 'menu-file-btn')}{popover('file', fileMenu, 'w-64')}</div>
+            <div className="relative">{menuBtn('view', '檢視', <Grid className="w-4 h-4" />, 'menu-view-btn')}{popover('view', viewPanel)}</div>
+            <div className="relative">
+              <button id="export-dropdown-toggle-btn" data-menu-root onClick={() => setModernMenu(modernMenu === 'export' ? null : 'export')} className="flex items-center gap-1.5 h-8 px-3.5 rounded-full text-xs font-bold whitespace-nowrap cursor-pointer accent-gradient shadow-lg">
+                <Download className="w-4 h-4" /> 匯出
+              </button>
+              {popover('export', exportPanelEl)}
+            </div>
+            <StylePicker value={uiStyle} onChange={setUiStyle} compact buttonClassName="w-8 h-8 rounded-full flex items-center justify-center cursor-pointer hover:bg-white/10" />
+          </div>
+
+          {/* 模擬模式左側面板 */}
+          {appMode === 'simulation' && (
+            <div className="absolute left-3 top-20 bottom-28 z-30 glass rounded-2xl overflow-hidden">{simLeftPanelEl}</div>
+          )}
+
+          {/* 右側浮動屬性卡 */}
+          {polishedPanelVisible ? (
+            <div id="right-property-panel" className="absolute right-3 top-20 bottom-28 w-[336px] z-30 glass rounded-2xl flex flex-col overflow-hidden">
+              <div className="flex items-center">
+                <div className="flex-1">{appMode === 'cad' && rightTabs}</div>
+                <button onClick={() => setIsRightPanelOpen(false)} className="mr-3 mt-3 p-1 rounded-md hover:bg-white/10 cursor-pointer" title="收合"><ChevronRight className="w-4 h-4" /></button>
+              </div>
+              <div className="flex-1 overflow-y-auto">{rightBody}</div>
+            </div>
+          ) : appMode === 'cad' && (
+            <div className="absolute right-3 top-20 z-30 flex flex-col gap-2">
+              <button id="open-layers-btn" onClick={() => { setIsRightPanelOpen(true); setRightTab('layers'); }} className="glass rounded-xl w-10 h-10 flex items-center justify-center cursor-pointer" title="圖層"><Layers className="w-4 h-4" /></button>
+              <button id="open-qty-btn" onClick={() => { setIsRightPanelOpen(true); setRightTab('qty'); }} className="glass rounded-xl w-10 h-10 flex items-center justify-center cursor-pointer" title="數量"><Ruler className="w-4 h-4" /></button>
+            </div>
+          )}
+
+          {/* 底部工具 Dock */}
+          {appMode === 'cad' && <PolishedDock activeTool={activeTool} setActiveTool={(t) => { setActiveTool(t); if (t !== 'select') setIsRightPanelOpen(true); }} onLoadTemplate={handleLoadDemo} />}
+
+          {sharedOverlaysEl}
+        </div>
+      );
+    }
+
+    // ---------------- A・簡潔 / B・直覺：上方列＋左工具＋右面板 ----------------
+    return (
+      <div id="webtrafficcad-app-root" className={`ui-${v} flex flex-col h-screen w-screen overflow-hidden font-sans`} style={{ background: 'var(--ui-bg)', color: 'var(--ui-text)' }}>
+        {fileInput}
+        <header className={`flex items-center gap-2 px-3 shrink-0 z-20 ${isGuided ? 'h-12' : 'h-11'}`} style={{ background: 'var(--ui-surface)', borderBottom: '1px solid var(--ui-border)' }}>
+          <span className="text-[13px] font-bold tracking-wide whitespace-nowrap" style={{ color: 'var(--ui-accent)' }}>{isGuided ? 'WebTrafficCAD' : 'WTC'}</span>
+          {projectNameInput}
+          {dirtyBadge}
+          <div className="flex-1" />
+          {modeSwitch}
+          <div className="flex-1" />
+          {history}
+          <span className="w-px h-5 mx-1" style={{ background: 'var(--ui-border)' }} />
+          {isGuided ? (
+            <>
+              {iconBtn('save-project-btn', '儲存專案（JSON）', <Save className="w-4 h-4" />, handleSaveProject, false, '儲存')}
+              {iconBtn('load-project-btn', '開啟專案（JSON）', <FolderOpen className="w-4 h-4" />, () => fileInputRef.current?.click(), false, '開啟')}
+              {iconBtn('clear-btn', appMode === 'cad' ? '清空畫布' : '清除所有軌跡', <Trash2 className="w-4 h-4 text-red-400" />, () => (appMode === 'cad' ? handleClearCanvas() : handleSimClearAll()), appMode === 'cad' ? elements.length === 0 : false, '清空')}
+            </>
+          ) : (
+            <div className="relative">{menuBtn('file', '檔案', <FolderOpen className="w-4 h-4" />, 'menu-file-btn')}{popover('file', fileMenu, 'w-64')}</div>
+          )}
+          <div className="relative">{menuBtn('view', isGuided ? '鎖點與底圖' : '檢視', <Grid className="w-4 h-4" />, 'menu-view-btn')}{popover('view', viewPanel)}</div>
+          <div className="relative">
+            <button id="export-dropdown-toggle-btn" data-menu-root onClick={() => setModernMenu(modernMenu === 'export' ? null : 'export')} className="flex items-center gap-1.5 h-8 px-3 rounded-lg text-xs font-bold whitespace-nowrap cursor-pointer" style={{ background: 'var(--ui-accent)', color: 'var(--ui-accent-text)' }}>
+              <Download className="w-4 h-4" /> 匯出
+            </button>
+            {popover('export', exportPanelEl)}
+          </div>
+          <StylePicker value={uiStyle} onChange={setUiStyle} compact={!isGuided} buttonClassName="flex items-center gap-1.5 h-8 px-2 rounded-lg text-xs cursor-pointer hover:bg-white/10" />
+        </header>
+
+        <div className="flex flex-1 min-h-0 relative">
+          {appMode === 'cad'
+            ? (isGuided
+                ? <GuidedToolSidebar activeTool={activeTool} setActiveTool={setActiveTool} onLoadTemplate={handleLoadDemo} />
+                : <MinimalToolRail activeTool={activeTool} setActiveTool={setActiveTool} onLoadTemplate={handleLoadDemo} />)
+            : simLeftPanelEl}
+
+          <div className="flex-1 min-w-0 h-full relative flex">
+            {canvasAreaEl}
+            {arrowBar}
+          </div>
+
+          {(isGuided || minimalPanelVisible) && (
+            <div id="right-property-panel" className={`${isGuided ? 'w-80' : 'w-72'} h-full shrink-0 flex flex-col`} style={{ background: 'var(--ui-surface)', borderLeft: '1px solid var(--ui-border)' }}>
+              {appMode === 'cad' && (isGuided ? rightTabs : (
+                <div className="flex items-center justify-between px-3 pt-2">
+                  <span className="text-[11px] font-bold" style={{ color: 'var(--ui-muted)' }}>{rightTab === 'props' ? '屬性' : rightTab === 'layers' ? '圖層' : '數量'}</span>
+                  <button onClick={() => { setSelectedElement(null); setSelectedElementIds([]); setRightTab('props'); if (hasToolConfig) setActiveTool('select'); }} className="p-1 rounded hover:bg-white/10 cursor-pointer" title="關閉"><X className="w-3.5 h-3.5" /></button>
+                </div>
+              ))}
+              <div className="flex-1 overflow-y-auto">{rightBody}</div>
+            </div>
+          )}
+        </div>
+
+        {/* 簡潔風格：底部細狀態列（圖層、數量捷徑） */}
+        {v === 'minimal' && appMode === 'cad' && (
+          <footer className="h-7 shrink-0 flex items-center gap-4 px-3 text-[11px]" style={{ background: 'var(--ui-surface)', borderTop: '1px solid var(--ui-border)', color: 'var(--ui-muted)' }}>
+            <span>{elements.length} 個物件{hiddenLayers.length > 0 ? `（${hiddenLayers.length} 個圖層隱藏）` : ''}</span>
+            <button id="footer-layers-btn" onClick={() => setRightTab(rightTab === 'layers' ? 'props' : 'layers')} className="cursor-pointer hover:underline">圖層</button>
+            <button id="footer-qty-btn" onClick={() => setRightTab(rightTab === 'qty' ? 'props' : 'qty')} className="cursor-pointer hover:underline">數量</button>
+          </footer>
+        )}
+
+        {sharedOverlaysEl}
+      </div>
+    );
+  };
+
+  if (uiStyle !== 'classic') {
+    return renderModernLayout();
+  }
+
+  return (
+    <div id="webtrafficcad-app-root" className="flex flex-col h-screen w-screen bg-[#0a0b0e] text-slate-300 overflow-hidden font-sans">
+      {/* CAD App Elegant Top Header */}
+      <header className="flex items-center justify-between px-4 xl:px-6 py-3 bg-[#14161c] border-b border-[#2d3039] shrink-0 select-none h-12 z-20">
+        <div className="flex items-center gap-6 shrink-0">
+          <div>
+            <h1 className="text-sm font-black tracking-wider uppercase bg-gradient-to-r from-blue-500 to-indigo-300 bg-clip-text text-transparent">
+              WebTrafficCAD
+            </h1>
+          </div>
+
+          {/* App Mode Switcher (左右合體按鈕) */}
+          {modeSwitchEl}
+        </div>
+
+        {/* Global Control Group: Undo, Redo, Exports, and Background Image Management */}
+        {/* 視窗較窄時隱藏按鈕文字（保留圖示與提示），避免與左側模式切換重疊 */}
+        <div className="flex items-center gap-3 shrink-0 pl-4">
+          {historyBtnsEl}
+          <div className="h-4 w-px bg-[#2d3039]" />
+          {fileBtnsEl}
+          <div className="h-4 w-px bg-[#2d3039]" />
+          {classicExportEl}
+          <div className="h-4 w-px bg-[#2d3039]" />
+          {gridPopoverEl}
+          {snapPopoverEl}
+          <div className="h-4 w-px bg-[#2d3039]" />
+          {bgManagerEl}
+
+          <div className="h-4 w-px bg-[#2d3039]" />
+          <StylePicker value={uiStyle} onChange={setUiStyle} />
+
+        </div>
+      </header>
+
+      {/* Main CAD Interactive Workspace Grid */}
+      <div className="flex flex-1 min-h-0 w-full relative">
+        {/* Left Sidebar (CAD Toolbar / Simulation control) */}
+        {appMode === 'cad' ? classicToolbarEl : simLeftPanelEl}
+
+        {/* Central CAD Infinite Canvas */}
+        {canvasAreaEl}
+
+        {/* Collapsible Wrapper for Right Details Panel */}
+        <div 
+          id="props-collapsible-wrapper"
+          className={`relative h-full flex shrink-0 transition-all duration-300 ease-in-out select-none bg-[#14161c] ${
+            isPropsCollapsed ? 'w-0' : 'w-80 border-l border-[#2d3039]'
+          }`}
+        >
+          {/* Smooth overlay vertical collapse button */}
+          <button
+            id="toggle-props-panel-btn"
+            onClick={() => setIsPropsCollapsed(!isPropsCollapsed)}
+            className="absolute top-1/2 -left-3.5 -translate-y-1/2 z-35 flex items-center justify-center w-3.5 h-12 bg-[#1f2229] hover:bg-slate-800 border border-[#2d3039] hover:text-white rounded-l-md cursor-pointer transition-all text-slate-400 font-bold"
+            title={isPropsCollapsed ? '展開右側屬性控制台' : '隱藏右側屬性控制台'}
+          >
+            {isPropsCollapsed ? (
+              <ChevronLeft className="w-3 h-3 text-slate-400 hover:text-white" />
+            ) : (
+              <ChevronRight className="w-3 h-3 text-slate-400 hover:text-white" />
+            )}
+          </button>
+
+          <div className="w-80 h-full overflow-y-auto">
+            {appMode === 'cad' ? propsPanelEl : simRightPanelEl}
+          </div>
+        </div>
+      </div>
+      {sharedOverlaysEl}
     </div>
   );
 }

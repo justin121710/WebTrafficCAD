@@ -24,7 +24,13 @@ export type CadTool =
   | 'road_arrow'      // Road markings direction arrows
   | 'measurement'     // Distance measuring tool
   | 'angular_dimension' // Angle dimensioning tool
-  | 'arc_3point';      // 3-point arc drawing tool
+  | 'arc_3point'       // 3-point arc drawing tool
+  | 'red_solid'        // 禁止臨時停車線（紅實線）
+  | 'yellow_solid'     // 禁止停車線（黃實線）
+  | 'grid_box'         // 網狀線（黃色交叉斜紋）
+  | 'moto_box'         // 機車停等區
+  | 'moto_turn_box'    // 機車待轉區
+  | 'road_text';       // 路面標字
 
 export interface Point2D {
   x: number; // in meters (World coordinate)
@@ -39,13 +45,13 @@ export interface ViewportState {
 
 export interface BaseElement {
   id: string;
-  type: 'guideline' | 'yellow_double' | 'white_double' | 'white_dashed' | 'yellow_dashed' | 'white_solid' | 'three_center_curve' | 'island' | 'text' | 'smart_path' | 'sketch_circle' | 'crosswalk' | 'BuildingLine' | 'crossing_dashed' | 'stop_line' | 'yield_line' | 'Sidewalk' | 'parking_space' | 'bicycle_lane' | 'reversible_lane' | 'parking_zone' | 'road_arrow' | 'measurement' | 'angular_dimension';
+  type: 'guideline' | 'yellow_double' | 'white_double' | 'white_dashed' | 'yellow_dashed' | 'white_solid' | 'three_center_curve' | 'island' | 'text' | 'smart_path' | 'sketch_circle' | 'crosswalk' | 'BuildingLine' | 'crossing_dashed' | 'stop_line' | 'yield_line' | 'Sidewalk' | 'parking_space' | 'bicycle_lane' | 'reversible_lane' | 'parking_zone' | 'road_arrow' | 'measurement' | 'angular_dimension' | 'red_solid' | 'yellow_solid' | 'moto_box' | 'moto_turn_box' | 'road_text';
   color?: string;
   lineWidth?: number; // in meters or pixels
 }
 
 export interface LineElement extends BaseElement {
-  type: 'guideline' | 'yellow_double' | 'white_double' | 'white_dashed' | 'yellow_dashed' | 'white_solid' | 'crossing_dashed' | 'stop_line' | 'yield_line' | 'Sidewalk' | 'reversible_lane';
+  type: 'guideline' | 'yellow_double' | 'white_double' | 'white_dashed' | 'yellow_dashed' | 'white_solid' | 'crossing_dashed' | 'stop_line' | 'yield_line' | 'Sidewalk' | 'reversible_lane' | 'red_solid' | 'yellow_solid';
   p1?: Point2D;
   p2?: Point2D;
   points?: Point2D[];
@@ -89,6 +95,36 @@ export interface IslandElement extends BaseElement {
   hasHatching: boolean; // Is filled with 45-degree striping?
   laneWidth: number; // The offset width used for generation
   designVehicle: 'passenger' | 'semi_trailer' | 'articulated';
+  /** 'single' = 槽化線斜紋；'cross' = 網狀線交叉斜紋 */
+  hatchPattern?: 'single' | 'cross';
+  /** 斜紋間距（m） */
+  hatchSpacing?: number;
+  /** 斜紋角度（度） */
+  hatchAngle?: number;
+}
+
+export interface MotoBoxElement extends BaseElement {
+  type: 'moto_box' | 'moto_turn_box';
+  /** 前緣（靠停止線）兩端點 */
+  p1: Point2D;
+  p2: Point2D;
+  /** 深度（m），往 p1→p2 左側延伸 */
+  depth: number;
+  label?: string;
+  fill?: boolean;
+}
+
+export interface RoadTextElement extends BaseElement {
+  type: 'road_text';
+  /** 第一個字（最靠近駕駛人）的中心 */
+  p: Point2D;
+  text: string;
+  /** 字高（m） */
+  charHeight: number;
+  /** 行車方向（rad，逆時針，0 = 朝東） */
+  angle: number;
+  widthFactor?: number;
+  charGap?: number;
 }
 
 export interface TextElement extends BaseElement {
@@ -96,6 +132,7 @@ export interface TextElement extends BaseElement {
   p: Point2D;
   text: string;
   fontSize: number; // in meters
+  angle?: number;   // rad
 }
 
 export interface SmartPathElement extends BaseElement {
@@ -201,7 +238,9 @@ export type CadElement =
   | ParkingZoneElement
   | RoadArrowElement
   | MeasurementElement
-  | AngularDimensionElement;
+  | AngularDimensionElement
+  | MotoBoxElement
+  | RoadTextElement;
 
 export interface SnapTarget {
   point: Point2D;
