@@ -33,7 +33,7 @@ import {
 } from './utils/vehicleSimulator';
 import Toolbar from './components/Toolbar';
 import PropsPanel from './components/PropsPanel';
-import CadCanvas from './components/CadCanvas';
+import CadCanvas, { transformElement, getElementBoundingBox } from './components/CadCanvas';
 import { exportElementsToDXF } from './dxf';
 import { renderElementsToPng } from './exportPng';
 import { computeQuantities, layerKeyOf } from './markings';
@@ -1488,6 +1488,72 @@ export default function App() {
     showToast('數量計算表已匯出（CSV）', 'success');
   };
 
+  // ---------- 複製／貼上／旋轉 ----------
+  const clipboardRef = useRef<CadElement[]>([]);
+  const pasteCountRef = useRef<number>(0);
+  const [canPaste, setCanPaste] = useState<boolean>(false);
+  const getSelectedElements = (): CadElement[] => {
+    const ids = selectedElementIds.length > 0 ? selectedElementIds : (selectedElement ? [selectedElement.id] : []);
+    return elements.filter(el => ids.includes(el.id));
+  };
+  const cloneWithOffset = (els: CadElement[], d: number): CadElement[] =>
+    els.map(el => ({ ...transformElement(JSON.parse(JSON.stringify(el)), d, -d, 0, { x: 0, y: 0 }), id: `${el.type}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}` }));
+  const addAndSelect = (added: CadElement[]) => {
+    if (!added.length) return;
+    saveHistory(elements);
+    setElements(prev => [...prev, ...added]);
+    setSelectedElement(added[0]);
+    setSelectedElementIds(added.length > 1 ? added.map(el => el.id) : []);
+    setActiveTool('select');
+  };
+  const handleContextAction = (action: 'copy' | 'paste' | 'duplicate' | 'rotate90' | 'rotate-90' | 'delete') => {
+    const sel = getSelectedElements();
+    if (action === 'copy') {
+      if (!sel.length) return;
+      clipboardRef.current = JSON.parse(JSON.stringify(sel));
+      pasteCountRef.current = 0;
+      setCanPaste(true);
+      showToast(`已複製 ${sel.length} 個物件`, 'info');
+    } else if (action === 'paste') {
+      if (!clipboardRef.current.length) return;
+      pasteCountRef.current += 1;
+      addAndSelect(cloneWithOffset(clipboardRef.current, 2 * pasteCountRef.current));
+    } else if (action === 'duplicate') {
+      addAndSelect(cloneWithOffset(sel, 2));
+    } else if (action === 'rotate90' || action === 'rotate-90') {
+      if (!sel.length) return;
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      sel.forEach(el => { const b = getElementBoundingBox(el); minX = Math.min(minX, b.minX); minY = Math.min(minY, b.minY); maxX = Math.max(maxX, b.maxX); maxY = Math.max(maxY, b.maxY); });
+      const c = { x: (minX + maxX) / 2, y: (minY + maxY) / 2 };
+      const ang = action === 'rotate90' ? Math.PI / 2 : -Math.PI / 2;
+      const ids = sel.map(el => el.id);
+      saveHistory(elements);
+      const next = elements.map(el => (ids.includes(el.id) ? transformElement(el, 0, 0, ang, c) : el));
+      setElements(next);
+      if (selectedElement) setSelectedElement(next.find(el => el.id === selectedElement.id) || null);
+    } else if (action === 'delete') {
+      if (!sel.length) return;
+      saveHistory(elements);
+      const ids = sel.map(el => el.id);
+      setElements(prev => prev.filter(el => !ids.includes(el.id)));
+      setSelectedElement(null);
+      setSelectedElementIds([]);
+    }
+  };
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (appMode !== 'cad') return;
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      if (!(e.ctrlKey || e.metaKey)) return;
+      const k = e.key.toLowerCase();
+      if (k === 'c') handleContextAction('copy');
+      else if (k === 'v') { e.preventDefault(); handleContextAction('paste'); }
+      else if (k === 'd') { e.preventDefault(); handleContextAction('duplicate'); }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  });
+
   // ---------- 自動儲存 ----------
   // 啟動時檢查是否有上次未存檔的自動儲存
   useEffect(() => {
@@ -2338,6 +2404,8 @@ export default function App() {
   const canvasAreaEl = (
         <div className="flex-1 h-full min-w-0 relative flex flex-col">
           <CadCanvas 
+            onContextAction={handleContextAction}
+            canPaste={canPaste}
             insets={canvasInsets}
             canvasBackground={uiStyle === 'polished' ? '#0c1222' : uiStyle === 'minimal' ? '#0f1012' : '#101216'}
             fitRequest={fitRequest}

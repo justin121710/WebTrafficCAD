@@ -813,7 +813,7 @@ function getSelectedYieldLineSign(state: any, clickWorldPt: Point2D): number {
   return distA <= distB ? 1 : -1;
 }
 
-function transformElement(
+export function transformElement(
   el: any,
   dx: number,
   dy: number,
@@ -871,14 +871,14 @@ function transformElement(
   if (copy.p) copy.p = tx(copy.p);
 
   // 旋轉時同步更新具方向性的物件
-  if (angleRad && (copy.type === 'road_arrow' || copy.type === 'road_text' || copy.type === 'text')) {
+  if (angleRad && (copy.type === 'road_arrow' || copy.type === 'road_text' || copy.type === 'text' || (copy.type === 'parking_space' && copy.angle !== undefined))) {
     copy.angle = (copy.angle || 0) + angleRad;
   }
 
   return copy;
 }
 
-function getElementBoundingBox(el: any): { minX: number; maxX: number; minY: number; maxY: number } {
+export function getElementBoundingBox(el: any): { minX: number; maxX: number; minY: number; maxY: number } {
   const collect: Point2D[] = [];
   if (el.p1) collect.push(el.p1);
   if (el.p2) collect.push(el.p2);
@@ -928,6 +928,9 @@ function getElementBoundingBox(el: any): { minX: number; maxX: number; minY: num
 }
 
 interface CadCanvasProps {
+  /** 右鍵選單動作 */
+  onContextAction?: (action: 'copy' | 'paste' | 'duplicate' | 'rotate90' | 'rotate-90' | 'delete') => void;
+  canPaste?: boolean;
   /** 畫布底色（依介面風格） */
   canvasBackground?: string;
   /** 畫布上浮動面板佔用的邊距（px），讓提示、狀態列、比例尺避開 */
@@ -1043,6 +1046,8 @@ interface CadCanvasProps {
 }
 
 export default function CadCanvas({
+  onContextAction,
+  canPaste = false,
   canvasBackground = '#101216',
   insets = { top: 0, right: 0, bottom: 0, left: 0 },
   fitRequest,
@@ -1187,6 +1192,7 @@ export default function CadCanvas({
   // Interactive drawings draft states (used by polygon channels & circles)
   const [draftPoints, setDraftPoints] = useState<Point2D[]>([]);
   // 內嵌文字輸入框（文字標註／路面標字）
+  const [contextMenu, setContextMenu] = useState<{ sx: number; sy: number } | null>(null);
   const [textDraft, setTextDraft] = useState<{ kind: 'text' | 'road_text'; p: Point2D; sx: number; sy: number; value: string } | null>(null);
   const lastRoadTextRef = useRef<string>('慢');
 
@@ -2958,6 +2964,12 @@ export default function CadCanvas({
     }
 
     if (e.button === 2) {
+      // 沒有進行中的繪製且有選取物件時，開啟右鍵選單
+      if (spPoints.length === 0 && draftPoints.length === 0 && onContextAction && appMode === 'cad' && (selectedElement || selectedElementIds.length > 0 || canPaste)) {
+        setContextMenu({ sx, sy });
+        e.preventDefault();
+        return;
+      }
       // Right click to cancel or complete
       if (spPoints.length === 1) {
         setSpPoints([]);
@@ -2975,7 +2987,21 @@ export default function CadCanvas({
 
     if (e.button !== 0) return; // Only process left clicks below
 
-    const clickPt = snapTarget ? snapTarget.point : screenToWorld(sx, sy);
+    // 點擊當下重新計算鎖點（觸控／手寫筆點擊前沒有游標移動，不能沿用上一次的鎖點結果）
+    const rawClickPt = screenToWorld(sx, sy);
+    const freshSnap = computeSnapPoint(rawClickPt, sx, sy);
+    let clickPt = freshSnap ? freshSnap.point : rawClickPt;
+    // Shift 正交鎖定：與預覽一致地套用到實際點下的位置
+    if (e.shiftKey) {
+      const prev = isLineOrPathTool(activeTool) && spPoints.length > 0
+        ? spPoints[spPoints.length - 1]
+        : (activeTool === 'crosswalk' && draftPoints.length > 0 ? draftPoints[draftPoints.length - 1] : null);
+      if (prev) {
+        clickPt = Math.abs(clickPt.x - prev.x) >= Math.abs(clickPt.y - prev.y)
+          ? { x: clickPt.x, y: prev.y }
+          : { x: prev.x, y: clickPt.y };
+      }
+    }
 
     if (yieldLineDecisionState) {
       if (e.button === 0) {
@@ -7509,6 +7535,32 @@ export default function CadCanvas({
           <div className="absolute right-0 bottom-0 w-[1px] h-1.5 bg-white"></div>
         </div>
       </div>
+
+      {contextMenu && onContextAction && (
+        <>
+          <div className="absolute inset-0 z-40" onPointerDown={() => setContextMenu(null)} onContextMenu={(e) => e.preventDefault()} />
+          <div id="canvas-context-menu" className="absolute z-50 w-44 py-1 rounded-lg bg-zinc-900/95 border border-zinc-700 shadow-2xl text-xs text-zinc-200" style={{ left: contextMenu.sx, top: contextMenu.sy }}>
+            {([
+              ['copy', '複製', 'Ctrl+C', !!(selectedElement || selectedElementIds.length)],
+              ['paste', '貼上', 'Ctrl+V', canPaste],
+              ['duplicate', '原地複製', 'Ctrl+D', !!(selectedElement || selectedElementIds.length)],
+              ['rotate90', '逆時針旋轉 90°', '', !!(selectedElement || selectedElementIds.length)],
+              ['rotate-90', '順時針旋轉 90°', '', !!(selectedElement || selectedElementIds.length)],
+              ['delete', '刪除', 'Delete', !!(selectedElement || selectedElementIds.length)],
+            ] as const).map(([action, label, key, enabled]) => (
+              <button
+                key={action}
+                id={`ctx-${action}`}
+                disabled={!enabled}
+                onClick={() => { onContextAction(action); setContextMenu(null); }}
+                className={`w-full flex items-center justify-between px-3 py-1.5 text-left cursor-pointer disabled:opacity-30 disabled:cursor-default hover:bg-white/10 ${action === 'delete' ? 'text-red-400' : ''}`}
+              >
+                <span>{label}</span><span className="text-[10px] text-zinc-500">{key}</span>
+              </button>
+            ))}
+          </div>
+        </>
+      )}
 
       {textDraft && (
         <div
