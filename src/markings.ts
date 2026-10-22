@@ -544,7 +544,8 @@ export function getElementPrimitives(el: CadElement, opts: PrimitiveOptions = {}
       P.push({ kind: 'line', pts: c, closed: true, width: S.motoBoxBorderWidth, color: 'white', layer: L('moto_box') });
       if (e.fill) P.push({ kind: 'poly', pts: c, fill: 'moto', fillAlpha: 0.35, layer: L('moto_box') });
       const mx = (c[0].x + c[2].x) / 2, my = (c[0].y + c[2].y) / 2;
-      const ang = Math.atan2(c[1].y - c[0].y, c[1].x - c[0].x);
+      // 文字字頭朝向路口（與深度方向相反），讓停等的駕駛人正向閱讀
+      const ang = Math.atan2(c[0].y - c[1].y, c[0].x - c[1].x);
       const label = e.label || (e.type === 'moto_turn_box' ? '機車待轉' : '機車停等區');
       const width = distance(c[0], c[1]);
       const size = Math.min(e.depth * 0.45, (width / Math.max(1, label.length)) * 0.9);
@@ -639,4 +640,51 @@ export function computeQuantities(elements: CadElement[]) {
     bump(key, len, area);
   });
   return Array.from(rows.entries()).map(([key, r]) => ({ key, ...r }));
+}
+
+/**
+ * 推測某點所在車道的行車方向（rad）。
+ * 1. 優先找最近的分向限制線／分向線：台灣靠右行駛，點在中心線右側即與線同向。
+ * 2. 否則對齊最近的任一縱向標線，方向取最接近 fallbackHeading 者。
+ */
+export function suggestHeading(pt: Point2D, elements: CadElement[], fallbackHeading = Math.PI / 2, maxDist = 20): number | null {
+  const nearest = (types: string[]) => {
+    let best: { d: number; dir: number; side: number } | null = null;
+    elements.forEach(el => {
+      if (!types.includes(el.type)) return;
+      const pts = centerline(el, 20);
+      for (let i = 0; i < pts.length - 1; i++) {
+        const a = pts[i], b = pts[i + 1];
+        const dx = b.x - a.x, dy = b.y - a.y;
+        const len2 = dx * dx + dy * dy;
+        if (len2 < 1e-9) continue;
+        const t = Math.max(0, Math.min(1, ((pt.x - a.x) * dx + (pt.y - a.y) * dy) / len2));
+        const fx = a.x + dx * t, fy = a.y + dy * t;
+        const d = Math.hypot(pt.x - fx, pt.y - fy);
+        if (d <= maxDist && (!best || d < best.d)) {
+          best = { d, dir: Math.atan2(dy, dx), side: dx * (pt.y - a.y) - dy * (pt.x - a.x) };
+        }
+      }
+    });
+    return best as { d: number; dir: number; side: number } | null;
+  };
+  const center = nearest(['yellow_double', 'yellow_dashed']);
+  if (center) return center.side < 0 ? center.dir : center.dir + Math.PI;
+  const lane = nearest(['white_dashed', 'white_solid', 'white_double', 'reversible_lane']);
+  if (!lane) return null;
+  const diff = (a: number) => Math.abs(Math.atan2(Math.sin(a - fallbackHeading), Math.cos(a - fallbackHeading)));
+  return diff(lane.dir) <= diff(lane.dir + Math.PI) ? lane.dir : lane.dir + Math.PI;
+}
+
+/** 物件所屬圖層鍵（圖層面板、顯示切換使用） */
+export function layerKeyOf(el: CadElement): string {
+  const t = el.type as string;
+  if (t === 'island') return (el as any).hatchPattern === 'cross' ? 'grid_box' : 'island';
+  if (t === 'parking_space' || t === 'parking_zone') return 'parking';
+  if (t === 'moto_turn_box') return 'moto_box';
+  if (t === 'measurement' || t === 'angular_dimension') return 'annot';
+  if (t === 'guideline' || t === 'sketch_circle') return 'guide';
+  if (t === 'three_center_curve') return 'curve';
+  if (t === 'smart_path') return 'path';
+  return LAYERS[t] ? t : 'guide';
 }

@@ -25,7 +25,7 @@ interface ToolbarProps {
 }
 
 // Render dynamic custom professional vector Traffic CAD SVGs
-function renderToolIcon(id: CadTool) {
+export function renderToolIcon(id: CadTool) {
   switch (id) {
     case 'select':
       return (
@@ -257,6 +257,51 @@ function renderToolIcon(id: CadTool) {
         </svg>
       );
 
+    case 'red_solid':
+      return (
+        <svg viewBox="0 0 24 24" className="w-[24px] h-[24px]" fill="none" strokeWidth="3">
+          <line x1="4" y1="18" x2="20" y2="18" stroke="#ef4444" />
+          <rect x="4" y="5" width="16" height="9" rx="1.5" stroke="currentColor" strokeWidth="1.2" />
+        </svg>
+      );
+    case 'yellow_solid':
+      return (
+        <svg viewBox="0 0 24 24" className="w-[24px] h-[24px]" fill="none" strokeWidth="3">
+          <line x1="4" y1="18" x2="20" y2="18" stroke="#FFCC00" />
+          <rect x="4" y="5" width="16" height="9" rx="1.5" stroke="currentColor" strokeWidth="1.2" />
+        </svg>
+      );
+    case 'grid_box':
+      return (
+        <svg viewBox="0 0 24 24" className="w-[24px] h-[24px]" fill="none" stroke="#FFCC00" strokeWidth="1.3">
+          <rect x="4" y="4" width="16" height="16" />
+          <path d="M4 12L12 4M4 20L20 4M12 20L20 12M4 12L12 20M4 4L20 20M12 4L20 12" />
+        </svg>
+      );
+    case 'moto_box':
+    case 'moto_turn_box':
+      return (
+        <svg viewBox="0 0 24 24" className="w-[24px] h-[24px]" fill="none" stroke="currentColor" strokeWidth="1.5">
+          <rect x="3" y="6" width="18" height="12" rx="1" />
+          <circle cx="8" cy="14" r="1.8" />
+          <circle cx="16" cy="14" r="1.8" />
+          <path d="M8 14l3-4h3l2 4" />
+          {id === 'moto_turn_box' && <path d="M20 3v3h-3" strokeWidth="1.2" />}
+        </svg>
+      );
+    case 'road_text':
+      return (
+        <svg viewBox="0 0 24 24" className="w-[24px] h-[24px]" fill="currentColor" stroke="none">
+          <text x="12" y="17" textAnchor="middle" fontSize="13" fontWeight="700" transform="scale(0.8 1) translate(3 0)">慢</text>
+        </svg>
+      );
+    case 'text_label':
+      return (
+        <svg viewBox="0 0 24 24" className="w-[24px] h-[24px]" fill="none" stroke="currentColor" strokeWidth="1.6">
+          <path d="M5 6h14M12 6v13M9 19h6" />
+        </svg>
+      );
+
     default:
       return null;
   }
@@ -284,28 +329,34 @@ export default function Toolbar({
     {
       title: "標線",
       items: [
-        { id: 'yellow_double' as CadTool, desc: '雙黃實線（分向限制線）' },
-        { id: 'white_double' as CadTool, desc: '雙白實線（禁止變換車道線）' },
-        { id: 'white_solid' as CadTool, desc: '車道邊線：15cm白色實線' },
-        { id: 'white_dashed' as CadTool, desc: '白虛線（4m實線、6m空隙）' },
-        { id: 'yellow_dashed' as CadTool, desc: '車道黃虛線（4m實線、6m空隙）' },
-        { id: 'crossing_dashed' as CadTool, desc: '附加車道虛線/穿越線：30cm寬' },
-        { id: 'stop_line' as CadTool, desc: '停止線：30-40cm白色實線' },
-        { id: 'yield_line' as CadTool, desc: '讓路線：尖角朝下的倒白色三角形標線組' },
-        { id: 'BuildingLine' as CadTool, desc: '建築線：地籍或人行道邊界建築參考線' },
-        { id: 'reversible_lane' as CadTool, desc: '調撥車道線：雙排平行虛線' }
+        { id: 'yellow_double' as CadTool, desc: '分向限制線（雙黃實線）' },
+        { id: 'white_double' as CadTool, desc: '雙白實線' },
+        { id: 'white_solid' as CadTool, desc: '路面邊線：15 cm 白實線' },
+        { id: 'white_dashed' as CadTool, desc: '車道線：白虛線（4 m 實線、6 m 間距）' },
+        { id: 'yellow_dashed' as CadTool, desc: '分向線：黃虛線（4 m 實線、6 m 間距）' },
+        { id: 'crossing_dashed' as CadTool, desc: '穿越虛線／路口指示線：30 cm 寬' },
+        { id: 'stop_line' as CadTool, desc: '停止線：30～40 cm 白實線' },
+        { id: 'yield_line' as CadTool, desc: '讓路線：兩排方塊＋倒三角形' },
+        { id: 'BuildingLine' as CadTool, desc: '建築線：地籍或人行道邊界參考線' },
+        { id: 'reversible_lane' as CadTool, desc: '調撥車道線：雙白虛線' },
+        { id: 'red_solid' as CadTool, desc: '禁止臨時停車線：紅實線' },
+        { id: 'yellow_solid' as CadTool, desc: '禁止停車線：黃實線' }
       ]
     },
     {
       title: "區塊",
       items: [
-        { id: 'Sidewalk' as CadTool, desc: '人行道鋪面：多邊形貝茲圓滑人行步道區' },
-        { id: 'channelization' as CadTool, desc: '槽化線：導流島與 45° 填充斜紋標線' },
-        { id: 'crosswalk' as CadTool, desc: '行穿線 / 斑馬線：40cm線寬40cm間隙之枕木紋' },
-        { id: 'bicycle_lane' as CadTool, desc: '腳踏車道：品紅色專用車道鋪面' },
-        { id: 'parking_space' as CadTool, desc: '停車格：汽車、機車位印章繪製與屬性控制' },
-        { id: 'parking_zone' as CadTool, desc: '停車區：沿著鋼筆線自動平鋪車格' },
-        { id: 'road_arrow' as CadTool, desc: '指向線箭頭：路面方向指示印章' }
+        { id: 'Sidewalk' as CadTool, desc: '人行道鋪面：多邊形區域' },
+        { id: 'channelization' as CadTool, desc: '槽化線：外框與斜紋（白／黃）' },
+        { id: 'crosswalk' as CadTool, desc: '行人穿越道線（枕木紋）：依序點四點' },
+        { id: 'bicycle_lane' as CadTool, desc: '自行車道：粉紅色鋪面' },
+        { id: 'parking_space' as CadTool, desc: '停車格：汽車、機車位印章' },
+        { id: 'parking_zone' as CadTool, desc: '停車區：沿路徑自動排列車格' },
+        { id: 'road_arrow' as CadTool, desc: '指向線：點擊自動對齊車道方向' },
+        { id: 'grid_box' as CadTool, desc: '網狀線：黃色交叉斜紋' },
+        { id: 'moto_box' as CadTool, desc: '機車停等區：依序點三點' },
+        { id: 'moto_turn_box' as CadTool, desc: '機車待轉區：依序點三點' },
+        { id: 'road_text' as CadTool, desc: '路面標字：慢、停、公車專用…' }
       ]
     },
     {
@@ -314,8 +365,9 @@ export default function Toolbar({
         { id: 'measurement' as CadTool, desc: '測距工具：測量兩點距離，支援對齊其他線段與垂線吸附' },
         { id: 'angular_dimension' as CadTool, desc: '角度標註：點選夾角頂點與兩線端點，標示並測量夾角' },
         { id: 'arc_3point' as CadTool, desc: '三點圓弧：依序點選起點、圓弧上一點及終點繪製圓弧標線' },
-        { id: 'guideline' as CadTool, desc: '對齊輔助線：3cm白色實線' },
-        { id: 'sketch_circle' as CadTool, desc: '輔助圓：畫圓輔助與圓角半徑標定' }
+        { id: 'guideline' as CadTool, desc: '輔助線：對齊用，不出圖' },
+        { id: 'sketch_circle' as CadTool, desc: '輔助圓：畫圓輔助與圓角半徑標定' },
+        { id: 'text_label' as CadTool, desc: '文字標註：點擊後輸入文字' }
       ]
     }
   ];
@@ -382,6 +434,15 @@ export default function Toolbar({
           ))}
         </div>
       </div>
+
+      <button
+        id="load-template-btn"
+        onClick={onLoadDemo}
+        className="mt-3 w-full py-2 text-[10px] font-bold rounded-lg border border-[#2d3039] text-slate-400 hover:text-cyan-300 hover:border-cyan-500/50 bg-[#0f1115]/40 cursor-pointer"
+        title="載入十字路口範本，快速開始"
+      >
+        載入範本
+      </button>
     </div>
 
   );

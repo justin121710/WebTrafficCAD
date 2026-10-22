@@ -93,3 +93,53 @@ button.sim-color-picker-btn {
 
 
 
+
+/* ===================== 介面風格（UI style）色彩變數 ===================== */
+.ui-classic {
+  --ui-bg: #0a0b0e; --ui-surface: #14161c; --ui-surface2: #1f2229; --ui-border: #2d3039;
+  --ui-text: #e2e8f0; --ui-muted: #94a3b8; --ui-accent: #3b82f6; --ui-accent-text: #ffffff;
+  --ui-accent-soft: rgba(59, 130, 246, 0.14); --ui-radius: 8px;
+}
+/* A・簡潔：石墨灰、細邊框、單一藍色強調 */
+.ui-minimal {
+  --ui-bg: #0d0e10; --ui-surface: #141518; --ui-surface2: #1c1d21; --ui-border: #26272c;
+  --ui-text: #e7e8ea; --ui-muted: #8b8f98; --ui-accent: #4f8cff; --ui-accent-text: #ffffff;
+  --ui-accent-soft: rgba(79, 140, 255, 0.14); --ui-radius: 8px;
+}
+/* B・直覺：較亮的藍灰底、青綠強調、較大點擊範圍 */
+.ui-guided {
+  --ui-bg: #0f1217; --ui-surface: #161a21; --ui-surface2: #1e232c; --ui-border: #2a313c;
+  --ui-text: #e6edf3; --ui-muted: #9aa7b5; --ui-accent: #14b8a6; --ui-accent-text: #04201d;
+  --ui-accent-soft: rgba(20, 184, 166, 0.15); --ui-radius: 10px;
+}
+/* C・美觀：深藍漸層、玻璃面板、靛青漸層強調 */
+.ui-polished {
+  --ui-bg: #0b1020; --ui-surface: rgba(19, 24, 38, 0.74); --ui-surface2: rgba(44, 54, 78, 0.55); --ui-border: rgba(148, 163, 184, 0.18);
+  --ui-text: #eef2ff; --ui-muted: #a5b0c8; --ui-accent: #818cf8; --ui-accent-text: #ffffff;
+  --ui-accent-soft: rgba(129, 140, 248, 0.18); --ui-radius: 16px;
+}
+.ui-polished .glass {
+  background: var(--ui-surface);
+  backdrop-filter: blur(18px) saturate(140%);
+  -webkit-backdrop-filter: blur(18px) saturate(140%);
+  border: 1px solid var(--ui-border);
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+.ui-polished .accent-gradient {
+  background: linear-gradient(135deg, #6366f1 0%, #22d3ee 100%);
+  color: #fff;
+}
+.ui-tip {
+  pointer-events: none;
+  position: absolute;
+  z-index: 60;
+  white-space: nowrap;
+  background: #000000e6;
+  color: #f1f5f9;
+  font-size: 11px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+.group:hover > .ui-tip { opacity: 1; }
