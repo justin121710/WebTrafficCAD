@@ -3,7 +3,6 @@ import { CadElement, CadTool, IslandElement, TextElement, Waypoint, VehicleConfi
 import { 
   calculateWidening, 
   generateChannelizingIsland, 
-  exportToDXF, 
   sampleCubicBezier, 
   getLineBezierRepresentation, 
   getPathOffsetCurves, 
@@ -35,6 +34,10 @@ import {
 import Toolbar from './components/Toolbar';
 import PropsPanel from './components/PropsPanel';
 import CadCanvas from './components/CadCanvas';
+import { exportElementsToDXF } from './dxf';
+import { renderElementsToPng } from './exportPng';
+import { computeQuantities } from './markings';
+import { PaletteName } from './renderPrimitives';
 import { Compass, Info, CheckCircle2, RotateCcw, RotateCw, Image as ImageIcon, Download, Upload, Trash2, Ruler, X, Grid, ChevronLeft, ChevronRight, Play, Pause, Sliders, Layers, Truck, Lock, Unlock, GitBranch, MapPin, Save, FolderOpen, ChevronDown, PenTool, Paintbrush } from 'lucide-react';
 
 const normalizeColor = (c: string): string => {
@@ -916,6 +919,14 @@ export default function App() {
   const [designVehicle, setDesignVehicle] = useState<'passenger' | 'semi_trailer' | 'articulated'>('semi_trailer');
   const [bgImage, setBgImage] = useState<any>(null);
   const [exportedImage, setExportedImage] = useState<string | null>(null);
+  const [projectName, setProjectName] = useState<string>('未命名路口配置');
+  const [exportOptions, setExportOptions] = useState<{ palette: PaletteName; includeConstruction: boolean; includeAnnotations: boolean; titleBlock: boolean }>({
+    palette: 'print',
+    includeConstruction: false,
+    includeAnnotations: true,
+    titleBlock: true,
+  });
+  const projectFileBase = () => `${(projectName || 'WebTrafficCAD').replace(/[\\/:*?"<>|]/g, '_')}_${new Date().toISOString().slice(0, 10)}`;
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isExportDropdownOpen, setIsExportDropdownOpen] = useState<boolean>(false);
 
@@ -1419,618 +1430,76 @@ export default function App() {
     event.target.value = '';
   };
 
-  // Export CAD Geometry as vector text AutoCAD DXF file trigger
-  const handleExportDXF = () => {
+  const downloadBlob = (blob: Blob, filename: string) => {
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
 
+  // 匯出 DXF：與畫布共用同一份幾何（具線寬、精確虛線、完整圖層）
+  const handleExportDXF = () => {
     if (elements.length === 0) {
       showToast('當前畫布為空，無幾何資料可以匯出為 DXF！', 'error');
       return;
     }
-
     try {
-      const dxfContent = exportToDXF(elements);
-      const blob = new Blob([dxfContent], { type: 'application/dxf;charset=utf-8;' });
-      const url = URL.createObjectURL(blob);
-      
-      const link = document.createElement('a');
-      link.href = url;
-      link.setAttribute('download', `WebTrafficCAD_Design_${new Date().toISOString().slice(0, 10)}.dxf`);
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
+      const dxfContent = exportElementsToDXF(elements, {
+        includeConstruction: exportOptions.includeConstruction,
+        includeAnnotations: exportOptions.includeAnnotations,
+      });
+      downloadBlob(new Blob([dxfContent], { type: 'application/dxf' }), `${projectFileBase()}.dxf`);
+      showToast('DXF 已匯出（單位：公尺，圖層依標線類型分層）', 'success');
     } catch (e) {
-      showToast('匯出 DXF 發生異常，請確認幾何點位符合格式！', 'error');
+      console.error(e);
+      showToast('匯出 DXF 發生異常：' + (e as Error).message, 'error');
     }
   };
 
-  // Export high resolution PNG following the 10% bounding box padding calculations
-  const handleExportPNG = () => {
-    try {
-      if (elements.length === 0 && !bgImage) {
-        showToast('當前畫布為空，無底圖與幾何資料可以匯出為圖片！', 'error');
-        return;
-      }
-
-      // 1. Calculate physical coordinate bounding box extremes
-      let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-
-      const updateBounds = (p: { x: number; y: number }) => {
-        if (p && typeof p.x === 'number' && typeof p.y === 'number') {
-          if (p.x < minX) minX = p.x;
-          if (p.x > maxX) maxX = p.x;
-          if (p.y < minY) minY = p.y;
-          if (p.y > maxY) maxY = p.y;
-        }
-      };
-
-      // Include background image bounds
-      if (bgImage && bgImage.widthMeters && bgImage.heightMeters) {
-        updateBounds({ x: bgImage.x - bgImage.widthMeters / 2, y: bgImage.y - bgImage.heightMeters / 2 });
-        updateBounds({ x: bgImage.x + bgImage.widthMeters / 2, y: bgImage.y + bgImage.heightMeters / 2 });
-      }
-
-      elements.forEach(el => {
-        if (el.type === 'island') {
-          const island = el as any;
-          if (island.points && island.points.length > 0) {
-            const hasBezier = island.cpLeft && island.cpRight && island.cpLeft.length === island.points.length;
-            const bPoints = hasBezier 
-              ? sampleClosedBezierLoop(island.points, island.cpLeft, island.cpRight, 20)
-              : island.points;
-            bPoints.forEach(updateBounds);
-          }
-        } else if (el.type === 'crosswalk') {
-          const cw = el as any;
-          if (cw.pA1) updateBounds(cw.pA1);
-          if (cw.pA2) updateBounds(cw.pA2);
-          if (cw.pB1) updateBounds(cw.pB1);
-          if (cw.pB2) updateBounds(cw.pB2);
-        } else if (el.type === 'three_center_curve') {
-          const curve = el as any;
-          if (curve.points && curve.points.length > 0) {
-            curve.points.forEach(updateBounds);
-          }
-        } else if (el.type === 'text') {
-          const txt = el as any;
-          if (txt.p) {
-            updateBounds(txt.p);
-            updateBounds({ x: txt.p.x - 3, y: txt.p.y - 1 });
-            updateBounds({ x: txt.p.x + 3, y: txt.p.y + 1 });
-          }
-        } else if (el.type === 'sketch_circle') {
-          const circ = el as any;
-          if (circ.center && circ.radius !== undefined) {
-            updateBounds({ x: circ.center.x - circ.radius, y: circ.center.y });
-            updateBounds({ x: circ.center.x + circ.radius, y: circ.center.y });
-            updateBounds({ x: circ.center.x, y: circ.center.y - circ.radius });
-            updateBounds({ x: circ.center.x, y: circ.center.y + circ.radius });
-          }
-        } else {
-          const path = el as any;
-          if (path.points && path.points.length > 0) {
-            if (path.points.length === 1) {
-              updateBounds(path.points[0]);
-            } else {
-              for (let j = 0; j < path.points.length - 1; j++) {
-                const pStart = path.points[j];
-                const cpStart = (path.cpRight && path.cpRight[j]) || pStart;
-                const cpEnd = (path.cpLeft && path.cpLeft[j + 1]) || path.points[j + 1];
-                const pEnd = path.points[j + 1];
-                const samples = sampleCubicBezier(pStart, cpStart, cpEnd, pEnd, 15);
-                samples.forEach(updateBounds);
-              }
-            }
-          } else if (path.p1 && path.p2) {
-            updateBounds(path.p1);
-            updateBounds(path.p2);
-          }
-        }
-      });
-
-      // 2. Add 10% safety padding margin as requested
-      const wRaw = (maxX !== -Infinity && minX !== Infinity) ? (maxX - minX) : 0;
-      const hRaw = (maxY !== -Infinity && minY !== Infinity) ? (maxY - minY) : 0;
-      
-      const activeWRaw = wRaw > 0 ? wRaw : 20;
-      const activeHRaw = hRaw > 0 ? hRaw : 20;
-
-      const wOffset = activeWRaw * 0.10;
-      const hOffset = activeHRaw * 0.10;
-
-      const finalMinX = (minX === Infinity) ? -20 : minX - wOffset;
-      const finalMaxX = (maxX === -Infinity) ? 20 : maxX + wOffset;
-      const finalMinY = (minY === Infinity) ? -20 : minY - hOffset;
-      const finalMaxY = (maxY === -Infinity) ? 20 : maxY + hOffset;
-
-      let finalW = finalMaxX - finalMinX;
-      let finalH = finalMaxY - finalMinY;
-
-      if (isNaN(finalW) || finalW <= 0.001) finalW = 40;
-      if (isNaN(finalH) || finalH <= 0.001) finalH = 40;
-
-      // 3. Create high resolution offscreen canvas
-      const imgWidth = 2048;
-      const imgHeight = Math.max(512, Math.round(imgWidth * (finalH / finalW)));
-
-      const offscreen = document.createElement('canvas');
-      offscreen.width = imgWidth;
-      offscreen.height = imgHeight;
-      const ctx = offscreen.getContext('2d');
-      if (!ctx) {
-        showToast('無法取得 2D Canvas Context！', 'error');
-        return;
-      }
-
-      // Fill dark Blueprint blueprint theme background
-      ctx.fillStyle = '#0f1115';
-      ctx.fillRect(0, 0, imgWidth, imgHeight);
-
-      // Zoom mapping ratios
-      const zoom = imgWidth / finalW;
-      const worldToScreen = (wx: number, wy: number) => {
-        const sx = (wx - finalMinX) * zoom;
-        const sy = imgHeight - (wy - finalMinY) * zoom;
-        return { x: sx, y: sy };
-      };
-
-      const drawElementsAndSave = () => {
-        try {
-          // Draw reference grid ONLY if there's no background image or if it's calibrated
-          const shouldShowGrid = !bgImage || bgImage.isCalibrated;
-          if (shouldShowGrid) {
-            ctx.strokeStyle = 'rgba(255, 255, 255, 0.04)';
-            ctx.lineWidth = 1;
-            for (let x = Math.floor(finalMinX); x <= Math.ceil(finalMaxX); x += 2) {
-              ctx.beginPath();
-              const s1 = worldToScreen(x, finalMinY);
-              const s2 = worldToScreen(x, finalMaxY);
-              ctx.moveTo(s1.x, s1.y);
-              ctx.lineTo(s2.x, s2.y);
-              ctx.stroke();
-            }
-            for (let y = Math.floor(finalMinY); y <= Math.ceil(finalMaxY); y += 2) {
-              ctx.beginPath();
-              const s1 = worldToScreen(finalMinX, y);
-              const s2 = worldToScreen(finalMaxX, y);
-              ctx.moveTo(s1.x, s1.y);
-              ctx.lineTo(s2.x, s2.y);
-              ctx.stroke();
-            }
-          }
-
-          // Render elements with constant offsets
-          elements.forEach(el => {
-            if (el.type === 'island') {
-              const island = el as IslandElement;
-              if (island.points && island.points.length > 0) {
-                const hasBezier = island.cpLeft && island.cpRight && island.cpLeft.length === island.points.length;
-                const boundaryPoints = hasBezier 
-                  ? sampleClosedBezierLoop(island.points, island.cpLeft, island.cpRight, 20)
-                  : island.points;
-
-                ctx.beginPath();
-                boundaryPoints.forEach((pt, idx) => {
-                  const s = worldToScreen(pt.x, pt.y);
-                  if (idx === 0) ctx.moveTo(s.x, s.y);
-                  else ctx.lineTo(s.x, s.y);
-                });
-                ctx.closePath();
-                ctx.fillStyle = 'rgba(15, 23, 42, 0.75)';
-                ctx.fill();
-                ctx.strokeStyle = island.color || '#ffffff';
-                ctx.lineWidth = Math.max(1.5, zoom * 0.1);
-                ctx.stroke();
-
-                if (island.hasHatching && boundaryPoints.length >= 3) {
-                  const hatching = generateHatchingLines(boundaryPoints, 0.45, 45);
-                  ctx.strokeStyle = island.color || 'rgba(255, 255, 255, 0.75)';
-                  ctx.lineWidth = Math.max(1.5, zoom * 0.12);
-                  ctx.beginPath();
-                  hatching.forEach(hl => {
-                    const s1 = worldToScreen(hl.p1.x, hl.p1.y);
-                    const s2 = worldToScreen(hl.p2.x, hl.p2.y);
-                    ctx.moveTo(s1.x, s1.y);
-                    ctx.lineTo(s2.x, s2.y);
-                  });
-                  ctx.stroke();
-                }
-              }
-            } else if (el.type === 'crosswalk') {
-              const cw = el as any;
-              const stripeWidth = cw.stripeWidth ?? 0.4;
-              const stripeGap = cw.stripeGap ?? 0.4;
-              const stripes = generateCrosswalkStripes(cw.pA1, cw.pA2, cw.pB1, cw.pB2, stripeWidth, stripeGap);
-              ctx.save();
-              ctx.fillStyle = 'rgba(255, 255, 255, 0.95)';
-              stripes.forEach((stripe) => {
-                ctx.beginPath();
-                const s1 = worldToScreen(stripe.p1.x, stripe.p1.y);
-                const s2 = worldToScreen(stripe.p2.x, stripe.p2.y);
-                const s3 = worldToScreen(stripe.p3.x, stripe.p3.y);
-                const s4 = worldToScreen(stripe.p4.x, stripe.p4.y);
-                ctx.moveTo(s1.x, s1.y);
-                ctx.lineTo(s2.x, s2.y);
-                ctx.lineTo(s3.x, s3.y);
-                ctx.lineTo(s4.x, s4.y);
-                ctx.closePath();
-                ctx.fill();
-              });
-              ctx.restore();
-            } else if (el.type === 'parking_space') {
-              const pk = el as any;
-              const L = pk.length || 5.0;
-              const W = pk.width || 2.0;
-              const angle = pk.angle !== undefined ? pk.angle : Math.atan2(pk.p2.y - pk.p1.y, pk.p2.x - pk.p1.x);
-
-              const s1 = worldToScreen(pk.p1.x, pk.p1.y);
-
-              ctx.save();
-              ctx.translate(s1.x, s1.y);
-              ctx.rotate(-angle);
-
-              ctx.lineCap = 'round';
-              ctx.lineJoin = 'round';
-              ctx.strokeStyle = '#ffffff';
-              ctx.lineWidth = Math.max(1.5, zoom * 0.1);
-              ctx.fillStyle = 'rgba(255, 255, 255, 0.05)';
-
-              ctx.beginPath();
-              ctx.moveTo(0, 0);
-              ctx.lineTo(L * zoom, 0);
-              ctx.lineTo(L * zoom, -W * zoom);
-              ctx.lineTo(0, -W * zoom);
-              ctx.closePath();
-              ctx.fill();
-              ctx.stroke();
-
-              if (zoom > 7) {
-                ctx.fillStyle = 'rgba(255, 255, 255, 0.55)';
-                const fontSizePx = Math.max(8, zoom * 0.25);
-                ctx.font = `${fontSizePx}px sans-serif`;
-                ctx.textAlign = 'center';
-                ctx.textBaseline = 'middle';
-                ctx.fillText(`${pk.slotType === 'car' ? '汽車' : '機車'} ${W}x${L}m`, (L / 2) * zoom, -(W / 2) * zoom);
-              }
-              ctx.restore();
-            } else if (el.type === 'parking_zone') {
-              const zone = el as any;
-              const ref = getLineBezierRepresentation(zone);
-              if (ref) {
-                ctx.save();
-                ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
-                ctx.lineWidth = Math.max(1.0, zoom * 0.05);
-                ctx.setLineDash([4, 6]);
-                ctx.beginPath();
-                const segPts = getPathOffsetCurves(ref.points, ref.cpLeft, ref.cpRight, 0, 25);
-                segPts.forEach((pt, j) => {
-                  const s = worldToScreen(pt.x, pt.y);
-                  if (j === 0) ctx.moveTo(s.x, s.y);
-                  else ctx.lineTo(s.x, s.y);
-                });
-                ctx.stroke();
-                ctx.restore();
-              }
-
-              const slots = generateParkingZoneSlots(zone);
-              slots.forEach((slot) => {
-                ctx.save();
-                ctx.lineCap = 'round';
-                ctx.lineJoin = 'round';
-                ctx.strokeStyle = '#ffffff';
-                ctx.lineWidth = Math.max(1.5, zoom * 0.1);
-                ctx.fillStyle = 'rgba(255, 255, 255, 0.05)';
-
-                const s1 = worldToScreen(slot.corners[0].x, slot.corners[0].y);
-                const s2 = worldToScreen(slot.corners[1].x, slot.corners[1].y);
-                const s3 = worldToScreen(slot.corners[2].x, slot.corners[2].y);
-                const s4 = worldToScreen(slot.corners[3].x, slot.corners[3].y);
-
-                ctx.beginPath();
-                ctx.moveTo(s1.x, s1.y);
-                ctx.lineTo(s2.x, s2.y);
-                ctx.lineTo(s3.x, s3.y);
-                ctx.lineTo(s4.x, s4.y);
-                ctx.closePath();
-                ctx.fill();
-                ctx.stroke();
-
-                if (zoom > 7) {
-                  ctx.fillStyle = 'rgba(255, 255, 255, 0.55)';
-                  const fontSizePx = Math.max(8, zoom * 0.25);
-                  ctx.font = `${fontSizePx}px sans-serif`;
-                  ctx.textAlign = 'center';
-                  ctx.textBaseline = 'middle';
-                  const cx = (s1.x + s2.x + s3.x + s4.x) / 4;
-                  const cy = (s1.y + s2.y + s3.y + s4.y) / 4;
-                  ctx.fillText(`${slot.slotType === 'car' ? '汽車' : '機車'} ${slot.width}x${slot.length}m`, cx, cy);
-                }
-                ctx.restore();
-              });
-            } else if (el.type === 'three_center_curve') {
-              const curve = el as any;
-              if (curve.points && curve.points.length > 0) {
-                ctx.save();
-                ctx.strokeStyle = '#3b82f6';
-                ctx.lineWidth = Math.max(2, zoom * 0.15);
-                ctx.lineCap = 'square';
-                ctx.lineJoin = 'miter';
-                ctx.beginPath();
-                for (let i = 0; i < curve.points.length; i++) {
-                  const sPt = worldToScreen(curve.points[i].x, curve.points[i].y);
-                  if (i === 0) ctx.moveTo(sPt.x, sPt.y);
-                  else ctx.lineTo(sPt.x, sPt.y);
-                }
-                ctx.stroke();
-                ctx.restore();
-              }
-            } else if (el.type === 'text') {
-              const txt = el as TextElement;
-              const s = worldToScreen(txt.p.x, txt.p.y);
-              ctx.fillStyle = '#e2e8f0';
-              const fontSizePx = Math.max(12, txt.fontSize * zoom);
-              ctx.font = `${fontSizePx}px sans-serif`;
-              ctx.textBaseline = 'middle';
-              ctx.textAlign = 'center';
-              ctx.fillText(txt.text, s.x, s.y);
-            } else if (el.type === 'sketch_circle') {
-              const circ = el as any;
-              const s = worldToScreen(circ.center.x, circ.center.y);
-              ctx.strokeStyle = 'rgba(14, 165, 233, 0.35)'; // translucent blue
-              ctx.lineWidth = Math.max(1.0, zoom * 0.05);
-              ctx.setLineDash([Math.max(5, zoom * 0.1), Math.max(5, zoom * 0.1)]);
-              ctx.beginPath();
-              ctx.arc(s.x, s.y, circ.radius * zoom, 0, 2 * Math.PI);
-              ctx.stroke();
-              ctx.setLineDash([]);
-            } else {
-              const line = el as any;
-              const ref = getLineBezierRepresentation(line);
-              if (ref && ref.points && ref.points.length > 0) {
-                ctx.lineCap = 'butt';
-                ctx.setLineDash([]);
-                
-                if (el.type === 'guideline') {
-                  ctx.strokeStyle = 'rgba(56, 189, 248, 0.5)';
-                  ctx.setLineDash([5, 8]);
-                  ctx.lineWidth = Math.max(1.5, zoom * 0.08);
-                  ctx.beginPath();
-                  const segPts = getPathOffsetCurves(ref.points, ref.cpLeft, ref.cpRight, 0, 25);
-                  segPts.forEach((pt, j) => {
-                    const s = worldToScreen(pt.x, pt.y);
-                    if (j === 0) ctx.moveTo(s.x, s.y);
-                    else ctx.lineTo(s.x, s.y);
-                  });
-                  ctx.stroke();
-                  ctx.setLineDash([]);
-                } else if (el.type === 'yellow_double') {
-                  ctx.strokeStyle = '#f59e0b';
-                  ctx.lineWidth = Math.max(1.5, zoom * 0.1);
-                  
-                  const leftOffset = getPathOffsetCurves(ref.points, ref.cpLeft, ref.cpRight, 0.1, 25);
-                  const rightOffset = getPathOffsetCurves(ref.points, ref.cpLeft, ref.cpRight, -0.1, 25);
-                  
-                  ctx.beginPath();
-                  leftOffset.forEach((pt, j) => {
-                    const s = worldToScreen(pt.x, pt.y);
-                    if (j === 0) ctx.moveTo(s.x, s.y);
-                    else ctx.lineTo(s.x, s.y);
-                  });
-                  ctx.stroke();
-                  
-                  ctx.beginPath();
-                  rightOffset.forEach((pt, j) => {
-                    const s = worldToScreen(pt.x, pt.y);
-                    if (j === 0) ctx.moveTo(s.x, s.y);
-                    else ctx.lineTo(s.x, s.y);
-                  });
-                  ctx.stroke();
-                } else if (el.type === 'white_dashed') {
-                  ctx.strokeStyle = '#ffffff';
-                  ctx.lineWidth = el.isLeftTurnGuide ? Math.max(1.5, zoom * 0.3) : Math.max(1.5, zoom * 0.12);
-                  ctx.setLineDash(el.isLeftTurnGuide ? [zoom * 1.0, zoom * 2.0] : [zoom * 4.0, zoom * 6.0]);
-                  ctx.beginPath();
-                  const segPts = getPathOffsetCurves(ref.points, ref.cpLeft, ref.cpRight, 0, 25);
-                  segPts.forEach((pt, j) => {
-                    const s = worldToScreen(pt.x, pt.y);
-                    if (j === 0) ctx.moveTo(s.x, s.y);
-                    else ctx.lineTo(s.x, s.y);
-                  });
-                  ctx.stroke();
-                  ctx.setLineDash([]);
-                } else if (el.type === 'yellow_dashed') {
-                  ctx.strokeStyle = '#eab308'; // Yellow-500 yellow_dashed
-                  ctx.lineWidth = el.isLeftTurnGuide ? Math.max(1.5, zoom * 0.3) : Math.max(1.5, zoom * 0.12);
-                  ctx.setLineDash(el.isLeftTurnGuide ? [zoom * 1.0, zoom * 2.0] : [zoom * 4.0, zoom * 6.0]);
-                  ctx.beginPath();
-                  const segPts = getPathOffsetCurves(ref.points, ref.cpLeft, ref.cpRight, 0, 25);
-                  segPts.forEach((pt, j) => {
-                    const s = worldToScreen(pt.x, pt.y);
-                    if (j === 0) ctx.moveTo(s.x, s.y);
-                    else ctx.lineTo(s.x, s.y);
-                  });
-                  ctx.stroke();
-                  ctx.setLineDash([]);
-                } else if (el.type === 'white_solid') {
-                  ctx.strokeStyle = '#ffffff';
-                  ctx.lineWidth = Math.max(1.5, zoom * 0.15);
-                  ctx.beginPath();
-                  const segPts = getPathOffsetCurves(ref.points, ref.cpLeft, ref.cpRight, 0, 25);
-                  segPts.forEach((pt, j) => {
-                    const s = worldToScreen(pt.x, pt.y);
-                    if (j === 0) ctx.moveTo(s.x, s.y);
-                    else ctx.lineTo(s.x, s.y);
-                  });
-                  ctx.stroke();
-                } else if (el.type === 'smart_path') {
-                  ctx.strokeStyle = '#06b6d4';
-                  ctx.lineWidth = Math.max(1.5, zoom * 0.15);
-                  ctx.beginPath();
-                  const segPts = getPathOffsetCurves(ref.points, ref.cpLeft, ref.cpRight, 0, 25);
-                  segPts.forEach((pt, j) => {
-                    const s = worldToScreen(pt.x, pt.y);
-                    if (j === 0) ctx.moveTo(s.x, s.y);
-                    else ctx.lineTo(s.x, s.y);
-                  });
-                  ctx.stroke();
-                } else if (el.type === 'crossing_dashed') {
-                  ctx.strokeStyle = '#ffffff';
-                  ctx.lineWidth = Math.max(3.0, zoom * 0.3);
-                  ctx.setLineDash([zoom * 1.0, zoom * 2.0]);
-                  ctx.beginPath();
-                  const segPts = getPathOffsetCurves(ref.points, ref.cpLeft, ref.cpRight, 0, 25);
-                  segPts.forEach((pt, j) => {
-                    const s = worldToScreen(pt.x, pt.y);
-                    if (j === 0) ctx.moveTo(s.x, s.y);
-                    else ctx.lineTo(s.x, s.y);
-                  });
-                  ctx.stroke();
-                  ctx.setLineDash([]);
-                } else if (el.type === 'stop_line') {
-                  ctx.strokeStyle = '#ffffff';
-                  ctx.lineWidth = Math.max(3.5, zoom * 0.35);
-                  ctx.beginPath();
-                  const segPts = getPathOffsetCurves(ref.points, ref.cpLeft, ref.cpRight, 0, 25);
-                  segPts.forEach((pt, j) => {
-                    const s = worldToScreen(pt.x, pt.y);
-                    if (j === 0) ctx.moveTo(s.x, s.y);
-                    else ctx.lineTo(s.x, s.y);
-                  });
-                  ctx.stroke();
-                } else if (el.type === 'BuildingLine') {
-                  ctx.strokeStyle = '#00ffff';
-                  ctx.lineWidth = Math.max(1.5, zoom * 0.12);
-                  ctx.beginPath();
-                  const segPts = getPathOffsetCurves(ref.points, ref.cpLeft, ref.cpRight, 0, 25);
-                  segPts.forEach((pt, j) => {
-                    const s = worldToScreen(pt.x, pt.y);
-                    if (j === 0) ctx.moveTo(s.x, s.y);
-                    else ctx.lineTo(s.x, s.y);
-                  });
-                  ctx.stroke();
-                } else if (el.type === 'Sidewalk') {
-                  const segPts = getPathOffsetCurves(ref.points, ref.cpLeft, ref.cpRight, 0, 30);
-                  if (segPts.length >= 2) {
-                    ctx.save();
-                    ctx.fillStyle = '#A9A9A9';
-                    ctx.strokeStyle = '#1e293b';
-                    ctx.lineWidth = Math.max(1.5, zoom * 0.1);
-                    ctx.beginPath();
-                    segPts.forEach((pt, idx) => {
-                      const s = worldToScreen(pt.x, pt.y);
-                      if (idx === 0) ctx.moveTo(s.x, s.y);
-                      else ctx.lineTo(s.x, s.y);
-                    });
-                    ctx.closePath();
-                    ctx.fill();
-                    ctx.stroke();
-                    ctx.restore();
-                  }
-                } else if (el.type === 'yield_line') {
-                  const segPts = getPathOffsetCurves(ref.points, ref.cpLeft, ref.cpRight, 0, 30);
-                  if (segPts.length >= 2) {
-                    const cumulativeDist: number[] = [0];
-                    let totalLen = 0;
-                    for (let k = 1; k < segPts.length; k++) {
-                      totalLen += distance(segPts[k - 1], segPts[k]);
-                      cumulativeDist.push(totalLen);
-                    }
-
-                    const spacing = 0.65;
-                    const W = 0.40;
-                    const H = 0.55;
-
-                    ctx.save();
-                    ctx.fillStyle = '#ffffff';
-                    ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
-                    ctx.lineWidth = 1;
-
-                    for (let d = spacing / 2; d < totalLen; d += spacing) {
-                      let idx = 0;
-                      while (idx < cumulativeDist.length - 2 && cumulativeDist[idx + 1] < d) {
-                        idx++;
-                      }
-                      const segLen = cumulativeDist[idx + 1] - cumulativeDist[idx];
-                      const t = segLen > 0.0001 ? (d - cumulativeDist[idx]) / segLen : 0;
-                      
-                      const C = lerp(segPts[idx], segPts[idx + 1], t);
-                      const rawTangent = { x: segPts[idx + 1].x - segPts[idx].x, y: segPts[idx + 1].y - segPts[idx].y };
-                      const tangent = normalize(rawTangent);
-                      const normal = { x: -tangent.y, y: tangent.x };
-
-                      const B1 = { x: C.x - tangent.x * (W / 2), y: C.y - tangent.y * (W / 2) };
-                      const B2 = { x: C.x + tangent.x * (W / 2), y: C.y + tangent.y * (W / 2) };
-                      const V = { x: C.x + normal.x * H, y: C.y + normal.y * H };
-
-                      const b1S = worldToScreen(B1.x, B1.y);
-                      const b2S = worldToScreen(B2.x, B2.y);
-                      const vS = worldToScreen(V.x, V.y);
-
-                      ctx.beginPath();
-                      ctx.moveTo(b1S.x, b1S.y);
-                      ctx.lineTo(b2S.x, b2S.y);
-                      ctx.lineTo(vS.x, vS.y);
-                      ctx.closePath();
-                      ctx.fill();
-                      ctx.stroke();
-                    }
-                    ctx.restore();
-                  }
-                }
-              }
-            }
-          });
-
-          // 4. Download png file trigger and set exported image state modal
-          const dataUrl = offscreen.toDataURL('image/png');
-          setExportedImage(dataUrl);
-
-          // Try automatic download trigger as well
-          try {
-            const a = document.createElement('a');
-            a.href = dataUrl;
-            a.download = `WebTrafficCAD_Blueprint_${new Date().toISOString().slice(0, 10)}.png`;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-          } catch (downloadErr) {
-            console.warn("Auto automatic file download blocked or failed, relying on fallback dialog.", downloadErr);
-          }
-        } catch (innerErr) {
-          showToast('渲染工程圖或轉換為圖片時發生錯誤：' + (innerErr as Error).message, 'error');
-        }
-      };
-
-      if (bgImage && bgImage.src) {
-        const bgImg = new Image();
-        if (!bgImage.src.startsWith('data:')) {
-          bgImg.crossOrigin = "anonymous"; // Safe mode for canvas save
-        }
-        bgImg.onload = () => {
-          // Draw image onto canvas based on its world coordinates
-          const tl = worldToScreen(bgImage.x - bgImage.widthMeters / 2, bgImage.y + bgImage.heightMeters / 2); // Top left
-          const br = worldToScreen(bgImage.x + bgImage.widthMeters / 2, bgImage.y - bgImage.heightMeters / 2); // Bottom right
-          const sW = br.x - tl.x;
-          const sH = br.y - tl.y;
-          
-          ctx.save();
-          ctx.globalAlpha = bgImage.opacity !== undefined ? bgImage.opacity : 0.5;
-          ctx.drawImage(bgImg, tl.x, tl.y, sW, sH);
-          ctx.restore();
-          
-          drawElementsAndSave();
-        };
-        bgImg.onerror = (err) => {
-          console.warn("Background image failed to load for high-res PNG export, using fallback", err);
-          drawElementsAndSave(); // fallback
-        };
-        bgImg.src = bgImage.src;
-      } else {
-        drawElementsAndSave();
-      }
-    } catch (outerErr) {
-      showToast('準備匯出功能時發生錯誤：' + (outerErr as Error).message, 'error');
+  // 匯出 PNG：與畫布共用同一份幾何，可選白底列印與圖框
+  const handleExportPNG = async () => {
+    if (elements.length === 0 && !bgImage) {
+      showToast('當前畫布為空，無底圖與幾何資料可以匯出為圖片！', 'error');
+      return;
     }
+    try {
+      const dataUrl = await renderElementsToPng(elements, {
+        palette: exportOptions.palette,
+        includeConstruction: exportOptions.includeConstruction,
+        includeAnnotations: exportOptions.includeAnnotations,
+        titleBlock: exportOptions.titleBlock,
+        title: projectName,
+        bgImage,
+      });
+      setExportedImage(dataUrl);
+      const a = document.createElement('a');
+      a.href = dataUrl;
+      a.download = `${projectFileBase()}.png`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    } catch (e) {
+      showToast('渲染工程圖時發生錯誤：' + (e as Error).message, 'error');
+    }
+  };
+
+  // 匯出數量計算表（CSV，Excel 可直接開啟）
+  const handleExportQuantities = () => {
+    const rows = computeQuantities(elements);
+    if (rows.length === 0) {
+      showToast('目前沒有可計算數量的標線。', 'error');
+      return;
+    }
+    const lines = ['項目,物件數,實線長度(m),塗佈面積(m2)'];
+    rows.forEach(r => lines.push(`${r.name},${r.count},${r.length.toFixed(2)},${r.area.toFixed(2)}`));
+    const totalArea = rows.reduce((s, r) => s + r.area, 0);
+    lines.push(`合計,,,${totalArea.toFixed(2)}`);
+    downloadBlob(new Blob(['\ufeff' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' }), `${projectFileBase()}_數量表.csv`);
+    showToast('數量計算表已匯出（CSV）', 'success');
   };
 
   return (

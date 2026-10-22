@@ -51,6 +51,8 @@ import {
   solveThreeCenteredCurve
 } from '../geometry';
 import { arrowData } from '../arrowData';
+import { getElementPrimitives } from '../markings';
+import { renderPrimitives } from '../renderPrimitives';
 import { calculateIntersectionCurve } from '../utils/pathInterpolator';
 import { calculateCorners, calculateTrailerCorners } from '../utils/vehicleSimulator';
 import { Search, Ruler } from 'lucide-react';
@@ -4385,274 +4387,18 @@ export default function CadCanvas({
         el.type === 'crossing_dashed' ||
         el.type === 'stop_line' ||
         el.type === 'yield_line' || 
-        el.type === 'Sidewalk'
+        el.type === 'Sidewalk' ||
+        el.type === 'red_solid' ||
+        el.type === 'yellow_solid'
       ) {
         const line = el as any;
         const ref = getLineBezierRepresentation(line);
 
         if (ref) {
-          ctx.lineCap = 'butt';
-          ctx.lineJoin = 'round';
-          ctx.miterLimit = 10;
-          ctx.setLineDash([]);
-
-          if (el.type === 'guideline') {
-            ctx.strokeStyle = 'rgba(56, 189, 248, 0.6)';
-            ctx.setLineDash([4, 6]);
-            ctx.lineWidth = Math.max(1.5, zoom * 0.08);
-
-            const segPts = getPathOffsetCurves(ref.points, ref.cpLeft, ref.cpRight, 0, 25);
-            ctx.beginPath();
-            segPts.forEach((pt, idx) => {
-              const s = worldToScreen(pt.x, pt.y);
-              if (idx === 0) ctx.moveTo(s.x, s.y);
-              else ctx.lineTo(s.x, s.y);
-            });
-            ctx.stroke();
-            ctx.setLineDash([]);
-          } else if (el.type === 'yellow_double') {
-            ctx.strokeStyle = yellowColor;
-            ctx.lineWidth = Math.max(1.5, zoom * 0.1);
-
-            const leftOffset = getPathOffsetCurves(ref.points, ref.cpLeft, ref.cpRight, 0.08, 25);
-            const rightOffset = getPathOffsetCurves(ref.points, ref.cpLeft, ref.cpRight, -0.08, 25);
-
-            ctx.beginPath();
-            leftOffset.forEach((pt, idx) => {
-              const s = worldToScreen(pt.x, pt.y);
-              if (idx === 0) ctx.moveTo(s.x, s.y);
-              else ctx.lineTo(s.x, s.y);
-            });
-            ctx.stroke();
-
-            ctx.beginPath();
-            rightOffset.forEach((pt, idx) => {
-              const s = worldToScreen(pt.x, pt.y);
-              if (idx === 0) ctx.moveTo(s.x, s.y);
-              else ctx.lineTo(s.x, s.y);
-            });
-            ctx.stroke();
-          } else if (el.type === 'white_double') {
-            ctx.strokeStyle = primaryLineColor;
-            ctx.lineWidth = Math.max(1.5, zoom * 0.1);
-
-            const leftOffset = getPathOffsetCurves(ref.points, ref.cpLeft, ref.cpRight, 0.08, 25);
-            const rightOffset = getPathOffsetCurves(ref.points, ref.cpLeft, ref.cpRight, -0.08, 25);
-
-            ctx.beginPath();
-            leftOffset.forEach((pt, idx) => {
-              const s = worldToScreen(pt.x, pt.y);
-              if (idx === 0) ctx.moveTo(s.x, s.y);
-              else ctx.lineTo(s.x, s.y);
-            });
-            ctx.stroke();
-
-            ctx.beginPath();
-            rightOffset.forEach((pt, idx) => {
-              const s = worldToScreen(pt.x, pt.y);
-              if (idx === 0) ctx.moveTo(s.x, s.y);
-              else ctx.lineTo(s.x, s.y);
-            });
-            ctx.stroke();
-          } else if (el.type === 'white_dashed') {
-            const isLeftTurnGuide = (el as any).isLeftTurnGuide;
-            ctx.strokeStyle = primaryLineColor;
-            if (isLeftTurnGuide) {
-              ctx.lineWidth = Math.max(3.0, zoom * 0.3);
-              ctx.setLineDash([zoom * 1.0, zoom * 2.0]);
-            } else {
-              ctx.lineWidth = Math.max(1.5, zoom * 0.1);
-              ctx.setLineDash([zoom * 4.0, zoom * 6.0]);
-            }
-
-            const segPts = getPathOffsetCurves(ref.points, ref.cpLeft, ref.cpRight, 0, 25);
-            ctx.beginPath();
-            segPts.forEach((pt, idx) => {
-              const s = worldToScreen(pt.x, pt.y);
-              if (idx === 0) ctx.moveTo(s.x, s.y);
-              else ctx.lineTo(s.x, s.y);
-            });
-            ctx.stroke();
-            ctx.setLineDash([]);
-          } else if (el.type === 'yellow_dashed') {
-            const isLeftTurnGuide = (el as any).isLeftTurnGuide;
-            ctx.strokeStyle = yellowDashedColor; // yellow color
-            if (isLeftTurnGuide) {
-              ctx.lineWidth = Math.max(3.0, zoom * 0.3);
-              ctx.setLineDash([zoom * 1.0, zoom * 2.0]);
-            } else {
-              ctx.lineWidth = Math.max(1.5, zoom * 0.1);
-              ctx.setLineDash([zoom * 4.0, zoom * 6.0]);
-            }
-
-            const segPts = getPathOffsetCurves(ref.points, ref.cpLeft, ref.cpRight, 0, 25);
-            ctx.beginPath();
-            segPts.forEach((pt, idx) => {
-              const s = worldToScreen(pt.x, pt.y);
-              if (idx === 0) ctx.moveTo(s.x, s.y);
-              else ctx.lineTo(s.x, s.y);
-            });
-            ctx.stroke();
-            ctx.setLineDash([]);
-          } else if (el.type === 'white_solid') {
-            ctx.strokeStyle = primaryLineColor;
-            // Width 15cm
-            ctx.lineWidth = Math.max(2, zoom * 0.15);
-
-            const segPts = getPathOffsetCurves(ref.points, ref.cpLeft, ref.cpRight, 0, 25);
-            ctx.beginPath();
-            segPts.forEach((pt, idx) => {
-              const s = worldToScreen(pt.x, pt.y);
-              if (idx === 0) ctx.moveTo(s.x, s.y);
-              else ctx.lineTo(s.x, s.y);
-            });
-            ctx.stroke();
-          } else if (el.type === 'crossing_dashed') {
-            // crossing_dashed (30cm wide line, cycle: 1m solid line and 2m gap)
-            ctx.strokeStyle = primaryLineColor;
-            ctx.lineWidth = Math.max(3.0, zoom * 0.3);
-            ctx.setLineDash([zoom * 1.0, zoom * 2.0]);
-
-            const segPts = getPathOffsetCurves(ref.points, ref.cpLeft, ref.cpRight, 0, 25);
-            ctx.beginPath();
-            segPts.forEach((pt, idx) => {
-              const s = worldToScreen(pt.x, pt.y);
-              if (idx === 0) ctx.moveTo(s.x, s.y);
-              else ctx.lineTo(s.x, s.y);
-            });
-            ctx.stroke();
-            ctx.setLineDash([]);
-          } else if (el.type === 'stop_line') {
-            // stop_line (30cm - 40cm wide white solid, we use 35cm/0.35m)
-            ctx.strokeStyle = primaryLineColor;
-            ctx.lineWidth = Math.max(3.5, zoom * 0.35);
-
-            const segPts = getPathOffsetCurves(ref.points, ref.cpLeft, ref.cpRight, 0, 25);
-            ctx.beginPath();
-            segPts.forEach((pt, idx) => {
-              const s = worldToScreen(pt.x, pt.y);
-              if (idx === 0) ctx.moveTo(s.x, s.y);
-              else ctx.lineTo(s.x, s.y);
-            });
-            ctx.stroke();
-          } else if (el.type === 'yield_line') {
-            // 使用符合台灣交通工程標線法規之讓路線專用繪製邏輯
-            drawYieldLineBezier(ctx, ref.points, ref.cpLeft, ref.cpRight, (el as any).sgn ?? 1, zoom, worldToScreen);
-          } else if (el.type === 'reversible_lane') {
-            // 新增調撥車道線，樣式為雙白虛線
-            // 單線寬 10cm (0.1m)，內側間隔 10cm (0.1m) -> 中心間距 20公分 (0.2m) -> 左右各 offset 0.1m
-            // 採用標準車道虛線比例（如實線 4m、空白 6m）
-            ctx.save();
-            ctx.strokeStyle = primaryLineColor;
-            ctx.lineWidth = Math.max(1.0, zoom * 0.1); // 線寬 10公分 (0.1m)
-            ctx.setLineDash([zoom * 4.0, zoom * 6.0]); // 4米實線, 6米空白
-
-            const leftOffset = getPathOffsetCurves(ref.points, ref.cpLeft, ref.cpRight, 0.1, 25);
-            const rightOffset = getPathOffsetCurves(ref.points, ref.cpLeft, ref.cpRight, -0.1, 25);
-
-            ctx.beginPath();
-            leftOffset.forEach((pt, idx) => {
-              const s = worldToScreen(pt.x, pt.y);
-              if (idx === 0) ctx.moveTo(s.x, s.y);
-              else ctx.lineTo(s.x, s.y);
-            });
-            ctx.stroke();
-
-            ctx.beginPath();
-            rightOffset.forEach((pt, idx) => {
-              const s = worldToScreen(pt.x, pt.y);
-              if (idx === 0) ctx.moveTo(s.x, s.y);
-              else ctx.lineTo(s.x, s.y);
-            });
-            ctx.stroke();
-            ctx.restore();
-          } else if (el.type === 'bicycle_lane') {
-            // 新增腳踏車道(粉紅色)，繪製方法如同車流軌跡，但只留下車流軌跡的底色，點選時出現軌跡，不需要出現腳踏車體。
-            const laneWidth = (el as any).width || 1.5;
-            const halfW = laneWidth / 2;
-
-            const leftOffset = getPathOffsetCurves(ref.points, ref.cpLeft, ref.cpRight, -halfW, 40);
-            const rightOffset = getPathOffsetCurves(ref.points, ref.cpLeft, ref.cpRight, halfW, 40);
-
-            if (leftOffset.length >= 2 && rightOffset.length >= 2) {
-              ctx.save();
-              ctx.fillStyle = isSelected ? 'rgba(244, 114, 182, 0.40)' : 'rgba(244, 114, 182, 0.20)'; // pink backdrop fill
-              ctx.strokeStyle = '#f472b6'; // pink outer borders
-              ctx.lineWidth = Math.max(1.0, zoom * 0.05);
-
-              ctx.beginPath();
-              // Left border trace
-              leftOffset.forEach((pt, idx) => {
-                const s = worldToScreen(pt.x, pt.y);
-                if (idx === 0) ctx.moveTo(s.x, s.y);
-                else ctx.lineTo(s.x, s.y);
-              });
-              // Right border trace back
-              for (let i = rightOffset.length - 1; i >= 0; i--) {
-                const s = worldToScreen(rightOffset[i].x, rightOffset[i].y);
-                ctx.lineTo(s.x, s.y);
-              }
-              ctx.closePath();
-              ctx.fill();
-              ctx.stroke();
-
-              // Selected lane path track
-              if (isSelected) {
-                ctx.strokeStyle = '#ec4899'; // deep pink active path track
-                ctx.lineWidth = Math.max(1.5, zoom * 0.04);
-                ctx.setLineDash([zoom * 0.2, zoom * 0.3]);
-
-                const centerPts = getPathOffsetCurves(ref.points, ref.cpLeft, ref.cpRight, 0, 30);
-                ctx.beginPath();
-                centerPts.forEach((pt, idx) => {
-                  const s = worldToScreen(pt.x, pt.y);
-                  if (idx === 0) ctx.moveTo(s.x, s.y);
-                  else ctx.lineTo(s.x, s.y);
-                });
-                ctx.stroke();
-              }
-              ctx.restore();
-            }
-          } else if (el.type === 'Sidewalk') {
-            // Sidewalk pavement: Solid gray fill + 10cm dark border envelope
-            const segPts = getPathOffsetCurves(ref.points, ref.cpLeft, ref.cpRight, 0, 30);
-            if (segPts.length >= 2) {
-              ctx.save();
-              ctx.fillStyle = '#A9A9A9'; // Engineering gray pavement fill
-              ctx.strokeStyle = '#1e293b'; // 10cm dark gray border
-              ctx.lineWidth = Math.max(1.5, zoom * 0.1); // 10cm border
-
-              ctx.beginPath();
-              segPts.forEach((pt, idx) => {
-                const s = worldToScreen(pt.x, pt.y);
-                if (idx === 0) ctx.moveTo(s.x, s.y);
-                else ctx.lineTo(s.x, s.y);
-              });
-              
-              // Close the sidewalk polygon back to start
-              const startS = worldToScreen(segPts[0].x, segPts[0].y);
-              ctx.lineTo(startS.x, startS.y);
-              ctx.closePath();
-
-              // Fill pavement
-              ctx.fill();
-              
-              // Draw outer border
-              ctx.stroke();
-              ctx.restore();
-            }
-          } else if (el.type === 'BuildingLine') {
-            ctx.strokeStyle = '#00ffff';
-            ctx.lineWidth = 2.5;
-
-            const segPts = getPathOffsetCurves(ref.points, ref.cpLeft, ref.cpRight, 0, 25);
-            ctx.beginPath();
-            segPts.forEach((pt, idx) => {
-              const s = worldToScreen(pt.x, pt.y);
-              if (idx === 0) ctx.moveTo(s.x, s.y);
-              else ctx.lineTo(s.x, s.y);
-            });
-            ctx.stroke();
+          // 標線本體：與 PNG／DXF 匯出共用同一份幾何（src/markings.ts）
+          renderPrimitives(ctx, getElementPrimitives(el), { zoom, w2s: worldToScreen, palette: 'screen' });
+          if (isSelected && el.type === 'bicycle_lane') {
+            renderPrimitives(ctx, getElementPrimitives(el), { zoom, w2s: worldToScreen, palette: 'screen', overrideColor: '#ec4899' });
           }
 
           // Render anchors and symmetric guidelines if selected!
@@ -4795,24 +4541,8 @@ export default function CadCanvas({
         ctx.fillStyle = 'rgba(15, 23, 42, 0.55)';
         ctx.fill();
 
-        ctx.strokeStyle = (island.color || whiteColor);
-        ctx.lineWidth = Math.max(1.5, zoom * 0.1);
-        ctx.stroke();
-
-        if (island.hasHatching && boundaryPoints.length >= 3) {
-          const hatching = generateHatchingLines(boundaryPoints, 0.45, 45);
-          
-          ctx.strokeStyle = island.color || 'rgba(255, 255, 255, 0.75)';
-          ctx.lineWidth = Math.max(1.5, zoom * 0.12);
-          ctx.beginPath();
-          hatching.forEach((line) => {
-            const s1 = worldToScreen(line.p1.x, line.p1.y);
-            const s2 = worldToScreen(line.p2.x, line.p2.y);
-            ctx.moveTo(s1.x, s1.y);
-            ctx.lineTo(s2.x, s2.y);
-          });
-          ctx.stroke();
-        }
+        // 外框與斜紋：與匯出共用同一份幾何（間距、線寬可於屬性面板調整）
+        renderPrimitives(ctx, getElementPrimitives(el), { zoom, w2s: worldToScreen, palette: 'screen' });
 
         if (isSelected) {
           const ref = getLineBezierRepresentation(island);
