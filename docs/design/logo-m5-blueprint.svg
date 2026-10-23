@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="WebTrafficCAD">
+  <title>WebTrafficCAD：網格圖紙上的路口</title>
+  <defs><clipPath id="tile"><rect width="64" height="64" rx="12"/></clipPath></defs>
+  <g clip-path="url(#tile)">
+    <rect width="64" height="64" fill="#1d2127"/>
+    <path d="M8 0V64M16 0V64M24 0V64M32 0V64M40 0V64M48 0V64M56 0V64M0 8H64M0 16H64M0 24H64M0 32H64M0 40H64M0 48H64M0 56H64" fill="none" stroke="#2b2f35" stroke-width="1"/>
+    <path d="M0 22H64V42H0Z M22 0H42V64H22Z" fill="#3a3d42"/>
+    <path d="M0 22H22V0 M42 0V22H64 M64 42H42V64 M22 64V42H0" fill="none" stroke="#f2f3f5" stroke-width="2.4" stroke-linejoin="miter"/>
+    <path d="M32 0V12M32 52V64M0 32H12M52 32H64" fill="none" stroke="#f2b705" stroke-width="2.2" stroke-dasharray="4 3"/>
+    <path d="M24.5 13.5V20.5M28.5 13.5V20.5M32.5 13.5V20.5M36.5 13.5V20.5M24.5 43.5V50.5M28.5 43.5V50.5M32.5 43.5V50.5M36.5 43.5V50.5M13.5 24.5H20.5M13.5 28.5H20.5M13.5 32.5H20.5M13.5 36.5H20.5M43.5 24.5H50.5M43.5 28.5H50.5M43.5 32.5H50.5M43.5 36.5H50.5" fill="none" stroke="#f2f3f5" stroke-width="2"/>
+  </g>
+</svg>

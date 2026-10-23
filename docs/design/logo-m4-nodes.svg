@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="WebTrafficCAD">
+  <title>WebTrafficCAD：節點編輯車道曲線</title>
+  <defs><clipPath id="tile"><rect width="64" height="64" rx="12"/></clipPath></defs>
+  <g clip-path="url(#tile)">
+    <rect width="64" height="64" fill="#1d2127"/>
+    <path d="M10 66V52C10 30 54 34 54 12V-2" fill="none" stroke="#3a3d42" stroke-width="14"/>
+    <path d="M10 66V52C10 30 54 34 54 12V-2" fill="none" stroke="#f2b705" stroke-width="2.4" stroke-dasharray="5 4"/>
+    <path d="M18.4 36.8L45.6 27.2" fill="none" stroke="#f2f3f5" stroke-width="1.4"/>
+    <path d="M6.5 48.5H13.5V55.5H6.5Z M28.5 28.5H35.5V35.5H28.5Z M50.5 8.5H57.5V15.5H50.5Z" fill="#f2f3f5"/>
+    <path d="M16.4 34.8H20.4V38.8H16.4Z M43.6 25.2H47.6V29.2H43.6Z" fill="#1d2127" stroke="#f2f3f5" stroke-width="1.4"/>
+  </g>
+</svg>

@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="WebTrafficCAD">
+  <title>WebTrafficCAD：三角板與車道</title>
+  <defs><clipPath id="tile"><rect width="64" height="64" rx="12"/></clipPath></defs>
+  <g clip-path="url(#tile)">
+    <rect width="64" height="64" fill="#1d2127"/>
+    <path d="M10 10L54 54H10Z M18 28V46H36Z" fill="#3a3d42" fill-rule="evenodd"/>
+    <path d="M10 10L54 54H10Z" fill="none" stroke="#f2f3f5" stroke-width="2.4" stroke-linejoin="miter"/>
+    <path d="M10 14H15M10 18H13M10 22H15M10 26H13M10 30H15M10 34H13M10 38H15M10 42H13M10 46H15M10 50H13" fill="none" stroke="#f2f3f5" stroke-width="1.4"/>
+    <path d="M14 19.5L45 50.5" fill="none" stroke="#f2b705" stroke-width="2.6" stroke-dasharray="5 3.5"/>
+  </g>
+</svg>
