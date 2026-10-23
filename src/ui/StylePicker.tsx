@@ -6,7 +6,7 @@ import { UI_STYLES, UiStyle } from './uiStyle';
 function Thumb({ id }: { id: UiStyle }) {
   const bg = '#0f1115';
   const line = '#3b4252';
-  const accent = id === 'minimal' ? '#4f8cff' : id === 'guided' ? '#14b8a6' : id === 'polished' ? '#818cf8' : '#22d3ee';
+  const accent = id === 'minimal' ? '#4f8cff' : id === 'guided' ? '#4a86e8' : id === 'polished' ? '#7c8cf0' : '#3b82f6';
   return (
     <svg viewBox="0 0 160 96" className="w-full rounded-md" style={{ background: bg }}>
       {id === 'classic' && (
@@ -46,16 +46,10 @@ function Thumb({ id }: { id: UiStyle }) {
       )}
       {id === 'polished' && (
         <>
-          <defs>
-            <linearGradient id="pg" x1="0" x2="1">
-              <stop offset="0" stopColor="#6366f1" />
-              <stop offset="1" stopColor="#22d3ee" />
-            </linearGradient>
-          </defs>
           <rect x="45" y="4" width="70" height="9" rx="4.5" fill="#1e2433" stroke="#334155" strokeWidth="0.5" />
-          <rect x="47" y="6" width="20" height="5" rx="2.5" fill="url(#pg)" />
+          <rect x="47" y="6" width="20" height="5" rx="2.5" fill={accent} />
           <rect x="35" y="80" width="90" height="12" rx="6" fill="#1e2433" stroke="#334155" strokeWidth="0.5" />
-          {[0, 1, 2, 3, 4, 5].map(i => <circle key={i} cx={46 + i * 14} cy="86" r="3.2" fill={i === 1 ? 'url(#pg)' : line} />)}
+          {[0, 1, 2, 3, 4, 5].map(i => <circle key={i} cx={46 + i * 14} cy="86" r="3.2" fill={i === 1 ? accent : line} />)}
           <rect x="118" y="18" width="38" height="50" rx="5" fill="#1e2433" stroke="#334155" strokeWidth="0.5" />
         </>
       )}
@@ -82,24 +76,24 @@ export default function StylePicker({ value, onChange, buttonClassName, compact 
       <button
         id="ui-style-picker-btn"
         onClick={() => setOpen(true)}
-        className={buttonClassName || 'flex items-center gap-1.5 h-8 px-3 text-xs rounded border border-violet-500/40 bg-violet-500/10 text-violet-300 hover:bg-violet-500/20 cursor-pointer shrink-0'}
+        className={buttonClassName || 'flex items-center gap-1.5 h-8 px-3 text-xs rounded border border-[#2d3039] bg-[#1f2229] text-slate-300 hover:bg-slate-800 cursor-pointer shrink-0'}
         title="切換介面風格（經典／簡潔／直覺／美觀）"
       >
         <Palette className="w-3.5 h-3.5" />
         {!compact && <span className="hidden xl:inline">介面風格</span>}
       </button>
       {open && (
-        <div className="fixed inset-0 z-[300] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setOpen(false)}>
+        <div className="fixed inset-0 z-[300] bg-black/70 flex items-center justify-center p-4" onClick={() => setOpen(false)}>
           <div
             id="ui-style-picker-dialog"
-            className="w-full max-w-4xl bg-[#14161c] border border-[#2d3039] rounded-2xl shadow-2xl p-5 text-slate-200"
+            className="w-full max-w-4xl bg-[#14161c] border border-[#2d3039] rounded-lg shadow-lg p-5 text-slate-200"
             onClick={e => e.stopPropagation()}
           >
             <div className="flex items-center justify-between mb-1">
               <h2 className="text-base font-bold">選擇介面風格</h2>
               <button onClick={() => setOpen(false)} className="p-1 rounded hover:bg-white/5 cursor-pointer"><X className="w-4 h-4" /></button>
             </div>
-            <p className="text-xs text-slate-400 mb-4">四種版面共用同一套功能與資料，切換不會影響圖面內容；選擇會記在這台電腦的瀏覽器中，隨時可以換回經典版。預設為 B・直覺。</p>
+            <p className="text-xs text-slate-400 mb-4">四種版面功能相同，切換不影響圖面。選擇會記在此瀏覽器。</p>
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
               {UI_STYLES.map(s => {
                 const active = s.id === value;
@@ -108,12 +102,12 @@ export default function StylePicker({ value, onChange, buttonClassName, compact 
                     key={s.id}
                     id={`ui-style-option-${s.id}`}
                     onClick={() => { onChange(s.id); setOpen(false); }}
-                    className={`text-left rounded-xl border p-3 transition-all cursor-pointer ${active ? 'border-violet-400 bg-violet-500/10 ring-1 ring-violet-400/50' : 'border-[#2d3039] hover:border-slate-500 bg-[#0f1115]'}`}
+                    className={`text-left rounded-lg border p-3 transition-all cursor-pointer ${active ? 'border-blue-500 bg-blue-500/10' : 'border-[#2d3039] hover:border-slate-500 bg-[#0f1115]'}`}
                   >
                     <Thumb id={s.id} />
                     <div className="flex items-center justify-between mt-2.5">
                       <span className="text-sm font-bold">{s.name}</span>
-                      {active && <Check className="w-4 h-4 text-violet-300" />}
+                      {active && <Check className="w-4 h-4 text-blue-300" />}
                     </div>
                     <div className="text-[11px] text-slate-400 mt-0.5">{s.tagline}</div>
                     <ul className="mt-2 space-y-0.5">

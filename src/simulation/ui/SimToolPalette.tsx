@@ -131,7 +131,7 @@ export function PolishedSimDock() {
   const def = all.find(t => t.id === tool);
   return (
     <div id="sim-tool-sidebar" className="absolute bottom-5 left-1/2 -translate-x-1/2 z-30 flex flex-col items-center gap-2">
-      <div className="glass rounded-2xl px-2 py-1.5 flex items-center gap-1">
+      <div className="glass rounded-lg px-2 py-1.5 flex items-center gap-1">
         {all.map((t, i) => {
           const active = tool === t.id;
           return (

@@ -261,7 +261,7 @@ export const ARROW_TYPES = [
 
 export function ArrowTypeBar({ value, onChange, style }: { value: string; onChange: (t: string) => void; style?: React.CSSProperties }) {
   return (
-    <div id="arrow-type-bar" className="absolute left-1/2 -translate-x-1/2 z-30 flex items-center gap-1 p-1 rounded-xl shadow-2xl" style={{ background: 'var(--ui-surface)', border: '1px solid var(--ui-border)', backdropFilter: 'blur(12px)', ...style }}>
+    <div id="arrow-type-bar" className="absolute left-1/2 -translate-x-1/2 z-30 flex items-center gap-1 p-1 rounded-xl shadow-lg" style={{ background: 'var(--ui-surface)', border: '1px solid var(--ui-border)', backdropFilter: 'blur(12px)', ...style }}>
       <span className="text-[11px] px-2" style={{ color: 'var(--ui-muted)' }}>箭頭</span>
       {ARROW_TYPES.map(a => (
         <button key={a.type} onClick={() => onChange(a.type)} className="px-2.5 py-1 text-xs rounded-lg cursor-pointer"
@@ -277,8 +277,8 @@ export function ArrowTypeBar({ value, onChange, style }: { value: string; onChan
 export function ConfirmDialog({ dialog, onClose }: { dialog: { title: string; message: string; confirmLabel: string; onConfirm: () => void } | null; onClose: () => void }) {
   if (!dialog) return null;
   return (
-    <div className="fixed inset-0 z-[400] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={onClose}>
-      <div id="confirm-dialog" className="w-full max-w-sm rounded-2xl p-5 shadow-2xl bg-[#14161c] border border-[#2d3039] text-slate-200" onClick={e => e.stopPropagation()}>
+    <div className="fixed inset-0 z-[400] bg-black/60 flex items-center justify-center p-4" onClick={onClose}>
+      <div id="confirm-dialog" className="w-full max-w-sm rounded-lg p-5 shadow-lg bg-[#14161c] border border-[#2d3039] text-slate-200" onClick={e => e.stopPropagation()}>
         <h3 className="text-sm font-bold mb-2">{dialog.title}</h3>
         <p className="text-xs text-slate-400 leading-relaxed">{dialog.message}</p>
         <div className="flex justify-end gap-2 mt-5">
@@ -295,7 +295,7 @@ export function AutosaveBanner({ offer, onRestore, onDiscard }: { offer: { saved
   const n = offer.project?.cad?.elements?.length ?? 0;
   const when = new Date(offer.savedAt).toLocaleString('zh-TW', { hour12: false });
   return (
-    <div id="autosave-banner" className="fixed top-14 left-1/2 -translate-x-1/2 z-[350] flex items-center gap-3 px-4 py-3 rounded-xl shadow-2xl bg-[#14161c] border border-amber-500/50 text-slate-200 text-xs max-w-xl">
+    <div id="autosave-banner" className="fixed top-14 left-1/2 -translate-x-1/2 z-[350] flex items-center gap-3 px-4 py-3 rounded-xl shadow-lg bg-[#14161c] border border-amber-500/50 text-slate-200 text-xs max-w-xl">
       <History className="w-4 h-4 text-amber-400 shrink-0" />
       <span className="flex-1">找到上次自動儲存的內容（{when}，{n} 個物件）。要還原嗎？</span>
       <button id="autosave-restore-btn" onClick={onRestore} className="px-3 py-1 rounded-lg bg-amber-500 text-black font-bold cursor-pointer">還原</button>

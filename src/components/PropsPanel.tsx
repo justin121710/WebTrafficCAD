@@ -20,11 +20,9 @@ import {
   Compass, 
   HelpCircle, 
   Download, 
-  Settings, 
   Type, 
   Check, 
   Grid, 
-  Layers, 
   Triangle 
 } from 'lucide-react';
 
@@ -2387,15 +2385,15 @@ export default function PropsPanel({
             <div className={`p-3 rounded-lg border text-xs leading-snug flex flex-col gap-1 ${
               isSafe 
                 ? 'bg-green-950/20 border-green-800/20 text-green-300' 
-                : 'bg-red-950/20 border-red-800/20 text-red-300 animate-pulse'
+                : 'bg-red-950/20 border-red-800/20 text-red-300'
             }`}>
               <div className="font-bold flex items-center gap-1">
-                <span>{isSafe ? '✅ 安全轉向合格' : '❌ 轉向超限警告'}</span>
+                <span>{isSafe ? '轉角檢核：通過' : '轉角檢核：超過上限'}</span>
               </div>
               <p className="text-[10px] text-slate-400">
                 {isSafe 
-                  ? `符合該車種 (${DESIGN_VEHICLE_LABELS[activeVeh]}) 最大40度轉向角限制。` 
-                  : `警告！車輛瞬間轉角為 ${maxSteeringAngle.toFixed(1)}°，高於法規規範 40° 限制。`}
+                  ? `${DESIGN_VEHICLE_LABELS[activeVeh]}最大轉角未超過 40°。`
+                  : `最大轉角 ${maxSteeringAngle.toFixed(1)}°，超過 40° 上限。`}
               </p>
             </div>
 
@@ -2600,6 +2598,7 @@ export default function PropsPanel({
                 <span>字樣（由近而遠）</span>
                 <input
                   value={rt.text}
+                  onFocus={() => onSaveHistory?.()}
                   onChange={(e) => onUpdateElement({ ...rt, text: e.target.value })}
                   className="w-full bg-[#1f2229] border border-[#2d3039] px-2 py-1 rounded text-white text-sm focus:outline-none focus:border-blue-500"
                 />
@@ -2617,7 +2616,8 @@ export default function PropsPanel({
                 <label key={f.key} className="flex items-center justify-between text-[10.5px] text-slate-400">
                   <span>{f.label}</span>
                   <span className="flex items-center gap-1">
-                    <input type="number" step={f.step} value={f.value}
+                    <input type="number" step={f.step} value={f.value} min={0.05}
+                      onFocus={() => onSaveHistory?.()}
                       onChange={(e) => { const v = parseFloat(e.target.value); if (!isNaN(v) && v > 0) onUpdateElement({ ...rt, [f.key]: v }); }}
                       className="w-16 bg-[#1f2229] border border-[#2d3039] px-1.5 py-0.5 rounded text-white text-right font-mono text-xs focus:outline-none focus:border-blue-500" />
                     <span className="w-3 text-slate-500">{f.unit}</span>
@@ -2628,7 +2628,7 @@ export default function PropsPanel({
                 <button onClick={() => upd({ angle: rt.angle + Math.PI })} className="flex-1 py-1.5 text-[10.5px] rounded border border-[#2d3039] bg-[#1f2229] text-slate-300 hover:text-white cursor-pointer">反向 180°</button>
                 <button onClick={() => upd({ color: rt.color === 'yellow' ? 'white' : 'yellow' })} className="flex-1 py-1.5 text-[10.5px] rounded border border-[#2d3039] bg-[#1f2229] text-slate-300 hover:text-white cursor-pointer">{rt.color === 'yellow' ? '改為白色' : '改為黃色'}</button>
               </div>
-              <p className="text-[9.5px] text-slate-500">字高、寬高比預設為常見值，請依設置規則或地方規範調整。</p>
+              <p className="text-[9.5px] text-slate-500">字高為沿行車方向的長度，字寬＝字高 × 寬高比。連續英數字（如 50）合為一格。預設為常用值，請依設置規則或地方規範調整。</p>
             </div>
             <button onClick={() => { onSaveHistory?.(); onDeleteElement(rt.id); }} className="w-full py-2 bg-red-950/20 text-red-400 border border-red-950/40 hover:bg-red-950/40 text-xs rounded">刪除此標字</button>
           </div>
@@ -2677,7 +2677,7 @@ export default function PropsPanel({
         const arrow = selectedElement as any;
         const arrowType = arrow.arrowType;
         const length = arrow.length;
-        const angleDeg = Math.round((arrow.angle * 180) / Math.PI);
+        const angleDeg = ((Math.round((arrow.angle * 180) / Math.PI) % 360) + 540) % 360 - 180;
         const arrowLabels: Record<string, string> = {
           straight: '直行',
           left: '左轉',
@@ -2938,29 +2938,16 @@ export default function PropsPanel({
 };
 
   return (
-    <div id="right-property-panel" className={`w-full h-full p-4 flex flex-col select-none ${
-      'bg-[#14161c] text-slate-300'
-    }`}>
+    <div
+      id="right-property-panel"
+      className="w-full h-full p-4 flex flex-col select-none bg-[#14161c] text-slate-300"
+      // 開始修改任何欄位前先記錄一筆復原點（相同內容不會重複記錄）
+      onFocusCapture={(e) => { const t = e.target as HTMLElement; if (t.matches('input, select, textarea')) onSaveHistory?.(); }}
+      onPointerDownCapture={(e) => { const t = e.target as HTMLElement; if (t.matches('input[type="range"], button')) onSaveHistory?.(); }}
+    >
       <div className="space-y-5 overflow-y-auto flex-1 pr-1">
         
-        {/* Module Title */}
-        <div className={`flex items-center gap-2 border-b pb-3 ${
-          'border-[#2d3039]'
-        }`}>
-          <Settings className={`w-4 h-4 text-slate-500`} />
-          <h3 className={`text-xs font-bold uppercase tracking-widest ${
-            'text-slate-300'
-          }`}>屬性控制台</h3>
-        </div>
-
-        {/* Selected Element Controls (Render Dynamic) */}
-        <div className="pt-1 space-y-2">
-          <div className="flex items-center gap-1.5 mb-1">
-            <Layers className={`w-3.5 h-3.5 text-slate-500`} />
-            <h4 className={`text-[11px] font-bold uppercase tracking-wider ${
-              'text-slate-500'
-            }`}>所選 CAD 特徵點控制</h4>
-          </div>
+        <div className="space-y-2">
           {renderSelectedElementProps()}
         </div>
 

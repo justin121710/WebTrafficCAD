@@ -66,12 +66,12 @@ export default function SimHud({ bottom = 0, polished }: { bottom?: number; poli
   return (
     <>
     {compact && showMore && (
-      <div id="sim-hud-more-panel" className={`absolute left-1/2 -translate-x-1/2 z-30 flex flex-wrap items-center justify-center gap-2 px-3 py-2 shadow-2xl max-w-[calc(100%-24px)] ${polished ? 'glass rounded-2xl' : 'rounded-xl'}`}
+      <div id="sim-hud-more-panel" className={`absolute left-1/2 -translate-x-1/2 z-30 flex flex-wrap items-center justify-center gap-2 px-3 py-2 shadow-lg max-w-[calc(100%-24px)] ${polished ? 'glass rounded-lg' : 'rounded-xl'}`}
         style={{ bottom: bottom + 44 + 60, ...panelStyle }}>
         {extra}
       </div>
     )}
-    <div ref={ref} id="sim-hud" className={`absolute left-1/2 -translate-x-1/2 z-30 flex items-center gap-2 px-3 py-2 shadow-2xl max-w-[calc(100%-24px)] overflow-x-auto ${polished ? 'glass rounded-2xl' : 'rounded-xl'}`}
+    <div ref={ref} id="sim-hud" className={`absolute left-1/2 -translate-x-1/2 z-30 flex items-center gap-2 px-3 py-2 shadow-lg max-w-[calc(100%-24px)] overflow-x-auto ${polished ? 'glass rounded-lg' : 'rounded-xl'}`}
       style={{ bottom: bottom + 44, ...panelStyle }}>
       <button id="sim-play-btn" onClick={() => store.togglePlay()} title={store.playing ? '暫停（Space）' : '播放（Space）'}
         className={`w-8 h-8 shrink-0 rounded-full flex items-center justify-center cursor-pointer ${polished && store.playing ? 'accent-gradient' : ''}`}

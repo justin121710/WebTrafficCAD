@@ -38,7 +38,7 @@ import StylePicker from './ui/StylePicker';
 import { MinimalToolRail, GuidedToolSidebar, PolishedDock } from './ui/ToolPalette';
 import { ExportPanel, SettingsPanel, LayerPanel, QuantityPanel, ArrowTypeBar, ConfirmDialog, AutosaveBanner, ViewSettings, Toggle } from './ui/Panels';
 import { PaletteName } from './renderPrimitives';
-import { Compass, Info, CheckCircle2, RotateCcw, RotateCw, Image as ImageIcon, Download, Upload, Trash2, Ruler, X, Grid, ChevronLeft, ChevronRight, Play, Pause, Sliders, Layers, Truck, Lock, Unlock, GitBranch, MapPin, Save, FolderOpen, ChevronDown, PenTool, Paintbrush } from 'lucide-react';
+import { Compass, Info, CheckCircle2, AlertTriangle, RotateCcw, RotateCw, Image as ImageIcon, Download, Upload, Trash2, Ruler, X, Grid, ChevronLeft, ChevronRight, Play, Pause, Sliders, Layers, Truck, Lock, Unlock, GitBranch, MapPin, Save, FolderOpen, ChevronDown, PenTool, Paintbrush } from 'lucide-react';
 
 export default function App() {
   // App Mode State: 'cad' | 'simulation' (預設為 'cad')
@@ -179,7 +179,7 @@ export default function App() {
       } else if (isCmdOrCtrl && e.key.toLowerCase() === 'y') {
         e.preventDefault();
         handleRedo();
-      } else if (e.key.toLowerCase() === 'v') {
+      } else if (!isCmdOrCtrl && !e.altKey && e.key.toLowerCase() === 'v') {
         e.preventDefault();
         setActiveTool('select');
       } else if (activeTool === 'select' && (selectedElement || selectedElementIds.length > 0) && (e.key === 'Delete' || e.key === 'Backspace')) {
@@ -278,10 +278,11 @@ export default function App() {
   }, [isExportDropdownOpen]);
 
   const saveHistory = (currentElements: CadElement[]) => {
-
     try {
-      const clone = JSON.parse(JSON.stringify(currentElements));
-      setHistoryStack(prev => [...prev, clone]);
+      const json = JSON.stringify(currentElements);
+      const clone = JSON.parse(json);
+      // 與上一筆相同（例如屬性面板聚焦後未修改）不重複記錄，避免多按一次復原才有反應
+      setHistoryStack(prev => (prev.length && JSON.stringify(prev[prev.length - 1]) === json ? prev : [...prev, clone]));
       setRedoStack([]);
     } catch (e) {
       setHistoryStack(prev => [...prev, [...currentElements]]);
@@ -536,10 +537,10 @@ export default function App() {
       document.body.removeChild(link);
       URL.revokeObjectURL(url);
       setIsDirty(false);
-      showToast('專案已儲存為 JSON 檔！', 'success');
+      showToast('已儲存專案檔（JSON）。', 'success');
     } catch (e) {
       console.error(e);
-      showToast('儲存專案時發生錯誤！', 'error');
+      showToast('儲存專案失敗。', 'error');
     }
   };
 
@@ -553,14 +554,14 @@ export default function App() {
       try {
         const json = JSON.parse(e.target?.result as string);
         if (!applyProjectData(json)) {
-          showToast('無效的專案檔案格式！', 'error');
+          showToast('不是有效的專案檔。', 'error');
           return;
         }
         setIsDirty(false);
-        showToast('專案已成功匯入！', 'success');
+        showToast('已開啟專案。', 'success');
       } catch (err) {
         console.error(err);
-        showToast('解析專案檔案失敗，請確保是合法的 JSON 專案檔！', 'error');
+        showToast('無法讀取這個檔案，請選擇 WebTrafficCAD 的 JSON 專案檔。', 'error');
       }
     };
     reader.readAsText(file);
@@ -589,7 +590,7 @@ export default function App() {
 
   const handleExportDXF = () => {
     if (elements.length === 0 && !hasSimExport()) {
-      showToast('當前畫布為空，無幾何資料可以匯出為 DXF！', 'error');
+      showToast('圖面上沒有物件，無法匯出 DXF。', 'error');
       return;
     }
     try {
@@ -602,14 +603,14 @@ export default function App() {
       showToast('DXF 已匯出（單位：公尺，圖層依標線類型分層）', 'success');
     } catch (e) {
       console.error(e);
-      showToast('匯出 DXF 發生異常：' + (e as Error).message, 'error');
+      showToast('匯出 DXF 失敗：' + (e as Error).message, 'error');
     }
   };
 
   // 匯出 PNG：與畫布共用同一份幾何，可選白底列印與圖框
   const handleExportPNG = async () => {
     if (elements.length === 0 && !bgImage && !hasSimExport()) {
-      showToast('當前畫布為空，無底圖與幾何資料可以匯出為圖片！', 'error');
+      showToast('圖面上沒有物件，無法匯出 PNG。', 'error');
       return;
     }
     try {
@@ -631,7 +632,7 @@ export default function App() {
       a.click();
       document.body.removeChild(a);
     } catch (e) {
-      showToast('渲染工程圖時發生錯誤：' + (e as Error).message, 'error');
+      showToast('匯出 PNG 失敗：' + (e as Error).message, 'error');
     }
   };
 
@@ -1018,19 +1019,21 @@ export default function App() {
               title="網格背景配置與尺寸間距設定"
             >
               <Grid className="w-3.5 h-3.5 text-blue-400" />
-              <span className="hidden xl:inline">網格背景設定</span>
+              <span className="hidden xl:inline">網格</span>
             </button>
 
             {isGridSettingsOpen && (
+              <>
+              <div className="fixed inset-0 z-40 cursor-default" onClick={() => setIsGridSettingsOpen(false)} />
               <div 
                 id="grid-settings-popup"
-                className="absolute right-0 mt-2 w-64 bg-[#14161c] border border-[#2d3039] rounded-lg p-3.5 shadow-2xl z-50 text-left space-y-3"
+                className="absolute right-0 mt-2 w-64 bg-[#14161c] border border-[#2d3039] rounded-lg p-3.5 shadow-lg z-50 text-left space-y-3"
                 style={{ top: '100%' }}
               >
                 <div className="flex items-center justify-between border-b border-[#2d3039] pb-2 mb-1">
                   <span className="text-xs font-bold text-slate-200 flex items-center gap-1">
                     <Grid className="w-3.5 h-3.5 text-blue-400" />
-                    <span>背景細部網格設定</span>
+                    <span>網格</span>
                   </span>
                   <button 
                     onClick={() => setIsGridSettingsOpen(false)}
@@ -1061,7 +1064,7 @@ export default function App() {
                     {/* Minor Grid Input */}
                     <div className="space-y-1">
                       <div className="flex justify-between text-[11px]">
-                        <span className="text-slate-400">細網格間距 (Minor)</span>
+                        <span className="text-slate-400">細網格間距</span>
                         <span className="text-blue-400 font-bold font-mono">
                           {minorGridInterval === 0 ? "無" : `${minorGridInterval} m`}
                         </span>
@@ -1091,7 +1094,7 @@ export default function App() {
                     {/* Major Grid Input */}
                     <div className="space-y-1">
                       <div className="flex justify-between text-[11px]">
-                        <span className="text-slate-400">粗網格間距 (Major)</span>
+                        <span className="text-slate-400">粗網格間距</span>
                         <span className="text-blue-400 font-bold font-mono">
                           {majorGridInterval === 0 ? "無" : `${majorGridInterval} m`}
                         </span>
@@ -1118,6 +1121,7 @@ export default function App() {
                   </>
                 )}
               </div>
+              </>
             )}
           </div>
   );
@@ -1131,13 +1135,13 @@ export default function App() {
               }}
               className={`flex items-center gap-1.5 h-8 px-3 text-xs rounded transition-all cursor-pointer font-medium ${
                 isSnapSettingsOpen || (snapToGrid || snapToEndpoint || snapToMidpoint || snapToNearest || snapToIntersection)
-                  ? 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/40 shadow-[0_0_8px_rgba(0,255,255,0.15)] bg-[#1e222b]'
+                  ? 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/40'
                   : 'bg-[#1f2229] border border-[#2d3039] hover:bg-slate-800 text-slate-300'
               }`}
               title="鎖點設定 (Snap Settings)"
             >
               <Compass className="w-3.5 h-3.5 text-cyan-400" />
-              <span className="hidden xl:inline">SNAP 鎖點設定</span>
+              <span className="hidden xl:inline">鎖點</span>
             </button>
 
             {isSnapSettingsOpen && (
@@ -1149,13 +1153,13 @@ export default function App() {
                 />
                 <div 
                   id="snap-checkboxes-header-popup"
-                  className="absolute right-0 mt-2 w-48 bg-[#14161c] border border-[#2d3039] rounded-lg p-3.5 shadow-2xl z-50 text-left space-y-2.5 text-xs select-none"
+                  className="absolute right-0 mt-2 w-48 bg-[#14161c] border border-[#2d3039] rounded-lg p-3.5 shadow-lg z-50 text-left space-y-2.5 text-xs select-none"
                   style={{ top: '100%' }}
                 >
                   <div className="flex items-center justify-between border-b border-[#2d3039] pb-2 mb-1">
                     <span className="text-xs font-bold text-slate-200 flex items-center gap-1">
                       <Compass className="w-3.5 h-3.5 text-cyan-400" />
-                      <span>鎖點功能 (Snap)</span>
+                      <span>鎖點</span>
                     </span>
                     <button 
                       onClick={() => setIsSnapSettingsOpen(false)}
@@ -1168,7 +1172,7 @@ export default function App() {
                     onClick={() => setSnapToGrid(!snapToGrid)} 
                     className="flex items-center justify-between w-full hover:bg-[#1f2229] p-1.5 rounded-md transition-colors text-slate-300 hover:text-white text-left cursor-pointer"
                   >
-                    <span>網格鎖點 (Grid)</span>
+                    <span>網格</span>
                     <span className={`text-[9px] font-extrabold px-1.5 py-0.5 rounded ${snapToGrid ? 'bg-cyan-500/20 text-cyan-400' : 'bg-slate-800 text-slate-500'}`}>
                       {snapToGrid ? 'ON' : 'OFF'}
                     </span>
@@ -1177,7 +1181,7 @@ export default function App() {
                     onClick={() => setSnapToEndpoint(!snapToEndpoint)} 
                     className="flex items-center justify-between w-full hover:bg-[#1f2229] p-1.5 rounded-md transition-colors text-slate-300 hover:text-white text-left cursor-pointer"
                   >
-                    <span>端點鎖點 (Endpoint)</span>
+                    <span>端點</span>
                     <span className={`text-[9px] font-extrabold px-1.5 py-0.5 rounded ${snapToEndpoint ? 'bg-cyan-500/20 text-cyan-400' : 'bg-slate-800 text-slate-500'}`}>
                       {snapToEndpoint ? 'ON' : 'OFF'}
                     </span>
@@ -1186,7 +1190,7 @@ export default function App() {
                     onClick={() => setSnapToMidpoint(!snapToMidpoint)} 
                     className="flex items-center justify-between w-full hover:bg-[#1f2229] p-1.5 rounded-md transition-colors text-slate-300 hover:text-white text-left cursor-pointer"
                   >
-                    <span>中點鎖點 (Midpoint)</span>
+                    <span>中點</span>
                     <span className={`text-[9px] font-extrabold px-1.5 py-0.5 rounded ${snapToMidpoint ? 'bg-cyan-500/20 text-cyan-400' : 'bg-slate-800 text-slate-500'}`}>
                       {snapToMidpoint ? 'ON' : 'OFF'}
                     </span>
@@ -1195,7 +1199,7 @@ export default function App() {
                     onClick={() => setSnapToNearest(!snapToNearest)} 
                     className="flex items-center justify-between w-full hover:bg-[#1f2229] p-1.5 rounded-md transition-colors text-slate-300 hover:text-white text-left cursor-pointer"
                   >
-                    <span>最近鎖點 (Nearest)</span>
+                    <span>最近點</span>
                     <span className={`text-[9px] font-extrabold px-1.5 py-0.5 rounded ${snapToNearest ? 'bg-cyan-500/20 text-cyan-400' : 'bg-slate-800 text-slate-500'}`}>
                       {snapToNearest ? 'ON' : 'OFF'}
                     </span>
@@ -1204,7 +1208,7 @@ export default function App() {
                     onClick={() => setSnapToIntersection(!snapToIntersection)} 
                     className="flex items-center justify-between w-full hover:bg-[#1f2229] p-1.5 rounded-md transition-colors text-slate-300 hover:text-white text-left cursor-pointer"
                   >
-                    <span>交點鎖點 (Intersection)</span>
+                    <span>交點</span>
                     <span className={`text-[9px] font-extrabold px-1.5 py-0.5 rounded ${snapToIntersection ? 'bg-cyan-500/20 text-cyan-400' : 'bg-slate-800 text-slate-500'}`}>
                       {snapToIntersection ? 'ON' : 'OFF'}
                     </span>
@@ -1254,7 +1258,7 @@ export default function App() {
             <div className="flex items-center gap-2 bg-[#0f1115] border border-[#2d3039] rounded px-2.5 h-8 text-xs select-none">
               <div className="flex items-center gap-1 max-w-[150px] shrink-0">
                 <span className="text-[10px] text-zinc-400 font-bold truncate" title={bgImage.fileName || "底圖已載入"}>
-                  📁 {bgImage.fileName || "底圖"}
+                  {bgImage.fileName || "底圖"}
                 </span>
                 <span className="text-[9px] text-zinc-500 whitespace-nowrap hidden sm:inline">
                   ({bgImage.widthMeters.toFixed(1)}m × {bgImage.heightMeters.toFixed(1)}m)
@@ -1292,7 +1296,7 @@ export default function App() {
                   className="flex items-center gap-1 px-2 h-5 text-[10px] bg-red-950 hover:bg-red-900 border border-red-500/25 rounded text-red-200 font-medium transition-colors cursor-pointer"
                   title="取消比例尺校正"
                 >
-                  <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse inline-block animate-pulse" />
+                  <span className="w-1.5 h-1.5 rounded-full bg-red-500 inline-block" />
                   <span>取消校正</span>
                 </button>
               ) : (
@@ -1317,7 +1321,7 @@ export default function App() {
                   if (activeTool === 'map_scale') setActiveTool('select');
                 }}
                 className="p-1 text-zinc-500 hover:text-red-400 hover:bg-red-950/30 rounded transition-colors cursor-pointer ml-1"
-                title="清除藍圖底圖"
+                title="移除底圖"
               >
                 <Trash2 className="w-3.5 h-3.5" />
               </button>
@@ -1345,7 +1349,7 @@ export default function App() {
             />
             {/* Floating style selector for road_arrow - Rendered outside Toolbar to prevent boundary clipping */}
             {activeTool === 'road_arrow' && (
-              <div className="flex flex-col gap-1.5 p-2.5 bg-[#1f2229] border border-[#2d3039] rounded-lg w-[115px] absolute left-[153px] top-[290px] z-50 shadow-2xl shadow-black/80 animate-fade-in">
+              <div className="flex flex-col gap-1.5 p-2.5 bg-[#1f2229] border border-[#2d3039] rounded-lg w-[115px] absolute left-[153px] top-[290px] z-50 shadow-lg shadow-black/80 animate-fade-in">
                 <span className="text-[10px] font-bold text-cyan-400 border-b border-[#2d3039]/50 pb-1 text-center">箭頭樣式</span>
                 <div className="flex flex-col gap-1.5 w-full mt-1.5">
                   {[
@@ -1365,7 +1369,7 @@ export default function App() {
                       }} 
                       className={`px-2 py-1 rounded text-[11px] font-bold cursor-pointer text-left transition-all ${
                         roadArrowConfig.arrowType === item.type 
-                          ? 'bg-gradient-to-r from-blue-500 to-cyan-500 text-white shadow-md shadow-blue-500/20' 
+                          ? 'bg-blue-600 text-white' 
                           : 'text-slate-300 hover:bg-[#252830] hover:text-white'
                       }`} 
                     >
@@ -1386,7 +1390,7 @@ export default function App() {
             onContextAction={handleContextAction}
             canPaste={canPaste}
             insets={canvasInsets}
-            canvasBackground={uiStyle === 'polished' ? '#0c1222' : uiStyle === 'minimal' ? '#0f1012' : '#101216'}
+            canvasBackground={uiStyle === 'polished' ? '#0e1116' : uiStyle === 'minimal' ? '#0f1012' : '#111214'}
             fitRequest={fitRequest}
             snapToIntersection={snapToIntersection}
             elements={visibleElements}
@@ -1508,35 +1512,28 @@ export default function App() {
       <AutosaveBanner offer={autosaveOffer} onRestore={handleRestoreAutosave} onDiscard={handleDiscardAutosave} />
 
       {exportedImage && (
-        <div className="fixed inset-0 bg-black/85 flex items-center justify-center p-4 z-[150] backdrop-blur-sm">
-          <div className="bg-[#14161c] border border-zinc-800 rounded-2xl p-5 max-w-4xl w-full flex flex-col gap-4 shadow-2xl">
+        <div className="fixed inset-0 bg-black/75 flex items-center justify-center p-4 z-[150]">
+          <div className="bg-[#14161c] border border-zinc-800 rounded-lg p-4 max-w-4xl w-full flex flex-col gap-3 shadow-xl">
             <div className="flex justify-between items-center pb-2 border-b border-zinc-800">
-              <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                <span>📸 匯出道路標線幾何工程圖</span>
-                <span className="text-[10px] bg-emerald-500/15 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded-full font-normal">高解析藍圖</span>
-              </h3>
-              <button 
+              <h3 className="text-sm font-bold text-white">PNG 預覽</h3>
+              <button
                 onClick={() => setExportedImage(null)}
-                className="text-zinc-400 hover:text-white text-xs font-bold font-mono p-1 px-2.5 bg-zinc-850 hover:bg-zinc-800 rounded-lg transition-colors cursor-pointer"
+                aria-label="關閉"
+                className="text-zinc-400 hover:text-white p-1 rounded hover:bg-white/5 cursor-pointer"
               >
-                ✕ 關閉
+                <X className="w-4 h-4" />
               </button>
             </div>
 
-            <div className="text-xs text-zinc-400 space-y-1">
-              <p className="flex items-center gap-1.5 font-bold text-zinc-300">
-                <span className="text-emerald-400">✓</span> 已嘗試為您自動下載工程圖。
-              </p>
-              <p className="pl-5 text-zinc-400">
-                如果您的瀏覽器阻擋了彈出式下載，請直接對下方預覽圖<span className="text-amber-400 font-bold underline">按右鍵點選「另存圖片」</span>或在行動裝置上長按圖片直接儲存！
-              </p>
-            </div>
+            <p className="text-xs text-zinc-400">
+              檔案已開始下載。若瀏覽器擋下載，可在預覽圖上按右鍵「另存圖片」，行動裝置請長按圖片。
+            </p>
 
-            <div className="flex-1 overflow-auto max-h-[55vh] border border-zinc-850 rounded-xl bg-zinc-950 p-3 flex items-center justify-center">
+            <div className="flex-1 overflow-auto max-h-[60vh] border border-zinc-800 rounded bg-zinc-950 p-2 flex items-center justify-center">
               <img 
                 src={exportedImage} 
                 alt="WebTrafficCAD High Resolution Export" 
-                className="max-h-full max-w-full object-contain rounded shadow-lg border border-zinc-900" 
+                className="max-h-full max-w-full object-contain" 
               />
             </div>
 
@@ -1544,15 +1541,15 @@ export default function App() {
               <a
                 href={exportedImage}
                 download={`TrafficCAD_Blueprint_${new Date().toISOString().slice(0, 10)}.png`}
-                className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs rounded-xl transition-all shadow-lg flex items-center gap-1.5 cursor-pointer"
+                className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs rounded flex items-center gap-1.5 cursor-pointer"
               >
-                💾 下載圖片
+                <Download className="w-3.5 h-3.5" /> 再次下載
               </a>
               <button
                 onClick={() => setExportedImage(null)}
-                className="px-4 py-2 bg-zinc-800 hover:bg-zinc-750 text-zinc-300 hover:text-white font-bold text-xs rounded-xl transition-all cursor-pointer"
+                className="px-3.5 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-white text-xs rounded cursor-pointer"
               >
-                確認關閉
+                關閉
               </button>
             </div>
           </div>
@@ -1561,16 +1558,17 @@ export default function App() {
 
       {/* Embedded Elegant Toast notification */}
       {toast && (
-        <div id="app-toast" className={`fixed ${uiStyle === 'classic' && appMode !== 'simulation' ? 'bottom-6' : 'top-16'} left-1/2 -translate-x-1/2 z-[250] max-w-sm w-full bg-[#14161c] border border-zinc-800 text-zinc-100 px-4 py-3 rounded-2xl shadow-2xl flex items-center gap-3 animate-slide-up duration-350`}>
-          <span className="text-base flex-shrink-0">
-            {toast.type === 'success' ? '🎯' : toast.type === 'error' ? '⚠️' : 'ℹ️'}
-          </span>
-          <p className="text-xs font-semibold leading-relaxed flex-1">{toast.message}</p>
-          <button 
-            onClick={() => setToast(null)} 
-            className="text-zinc-500 hover:text-zinc-300 text-xs font-bold px-1.5 py-0.5 rounded hover:bg-zinc-850 cursor-pointer"
+        <div id="app-toast" role="status" className={`fixed ${uiStyle === 'polished' ? 'bottom-36' : 'bottom-16'} left-1/2 -translate-x-1/2 z-[250] max-w-md bg-[#1b1d22] border border-zinc-700/70 text-zinc-100 pl-3 pr-1.5 py-2 rounded-md shadow-lg flex items-center gap-2.5`}>
+          {toast.type === 'success' ? <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400" />
+            : toast.type === 'error' ? <AlertTriangle className="w-4 h-4 shrink-0 text-amber-400" />
+            : <Info className="w-4 h-4 shrink-0 text-sky-400" />}
+          <p className="text-xs leading-relaxed flex-1">{toast.message}</p>
+          <button
+            onClick={() => setToast(null)}
+            aria-label="關閉"
+            className="text-zinc-500 hover:text-zinc-200 p-1 rounded hover:bg-white/5 cursor-pointer"
           >
-            ✕
+            <X className="w-3.5 h-3.5" />
           </button>
         </div>
       )}
@@ -1618,7 +1616,7 @@ export default function App() {
         <div
           data-menu-root
           id={`menu-${key}`}
-          className={`absolute right-0 top-full mt-2 ${width} max-h-[75vh] overflow-y-auto p-3 z-50 shadow-2xl ${isPolished ? 'glass' : ''}`}
+          className={`absolute right-0 top-full mt-2 ${width} max-h-[75vh] overflow-y-auto p-3 z-50 shadow-lg ${isPolished ? 'glass' : ''}`}
           style={isPolished ? { borderRadius: 16 } : { background: 'var(--ui-surface)', border: '1px solid var(--ui-border)', borderRadius: 12 }}
         >
           {content}
@@ -1732,7 +1730,7 @@ export default function App() {
     // ---------------- C・美觀：滿版畫布＋浮動玻璃面板 ----------------
     if (isPolished) {
       return (
-        <div id="webtrafficcad-app-root" className="ui-polished relative h-screen w-screen overflow-hidden font-sans" style={{ background: 'radial-gradient(1200px 600px at 20% -10%, #1e1b4b 0%, transparent 60%), radial-gradient(900px 500px at 110% 110%, #083344 0%, transparent 55%), #0b1020', color: 'var(--ui-text)' }}>
+        <div id="webtrafficcad-app-root" className="ui-polished relative h-screen w-screen overflow-hidden font-sans" style={{ background: '#0e1116', color: 'var(--ui-text)' }}>
           {fileInput}
           <div className="absolute inset-0 flex">{canvasAreaEl}</div>
           {arrowBar}
@@ -1764,7 +1762,7 @@ export default function App() {
 
           {/* 右側浮動屬性卡 */}
           {polishedPanelVisible ? (
-            <div id="right-property-panel" className="absolute right-3 top-20 bottom-28 w-[336px] z-30 glass rounded-2xl flex flex-col overflow-hidden">
+            <div id="right-property-panel" className="absolute right-3 top-20 bottom-28 w-[336px] z-30 glass rounded-lg flex flex-col overflow-hidden">
               <div className="flex items-center">
                 <div className="flex-1">{appMode === 'cad' && rightTabs}</div>
                 <button onClick={() => setIsRightPanelOpen(false)} className="mr-3 mt-3 p-1 rounded-md hover:bg-white/10 cursor-pointer" title="收合"><ChevronRight className="w-4 h-4" /></button>
@@ -1867,7 +1865,7 @@ export default function App() {
       <header className="flex items-center justify-between px-4 xl:px-6 py-3 bg-[#14161c] border-b border-[#2d3039] shrink-0 select-none h-12 z-20">
         <div className="flex items-center gap-6 shrink-0">
           <div>
-            <h1 className="text-sm font-black tracking-wider uppercase bg-gradient-to-r from-blue-500 to-indigo-300 bg-clip-text text-transparent">
+            <h1 className="text-sm font-bold text-slate-100">
               WebTrafficCAD
             </h1>
           </div>

@@ -1,6 +1,6 @@
 @import "tailwindcss";
 
-/* 自訂全域滾動條樣式，使其與精緻暗色UI風格契合 */
+/* 捲軸：配合深色介面 */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -106,28 +106,28 @@ button.sim-color-picker-btn {
   --ui-text: #e7e8ea; --ui-muted: #8b8f98; --ui-accent: #4f8cff; --ui-accent-text: #ffffff;
   --ui-accent-soft: rgba(79, 140, 255, 0.14); --ui-radius: 8px;
 }
-/* B・直覺：較亮的藍灰底、青綠強調、較大點擊範圍 */
+/* B・直覺：中性深灰底、低彩度藍強調、較大點擊範圍 */
 .ui-guided {
-  --ui-bg: #0f1217; --ui-surface: #161a21; --ui-surface2: #1e232c; --ui-border: #2a313c;
-  --ui-text: #e6edf3; --ui-muted: #9aa7b5; --ui-accent: #14b8a6; --ui-accent-text: #04201d;
-  --ui-accent-soft: rgba(20, 184, 166, 0.15); --ui-radius: 10px;
+  --ui-bg: #111214; --ui-surface: #17181b; --ui-surface2: #202226; --ui-border: #2b2d32;
+  --ui-text: #e4e5e7; --ui-muted: #93969d; --ui-accent: #4a86e8; --ui-accent-text: #ffffff;
+  --ui-accent-soft: rgba(74, 134, 232, 0.14); --ui-radius: 6px;
 }
-/* C・美觀：深藍漸層、玻璃面板、靛青漸層強調 */
+/* C・美觀：深色半透明面板、柔和藍紫強調 */
 .ui-polished {
-  --ui-bg: #0b1020; --ui-surface: rgba(19, 24, 38, 0.74); --ui-surface2: rgba(44, 54, 78, 0.55); --ui-border: rgba(148, 163, 184, 0.18);
-  --ui-text: #eef2ff; --ui-muted: #a5b0c8; --ui-accent: #818cf8; --ui-accent-text: #ffffff;
-  --ui-accent-soft: rgba(129, 140, 248, 0.18); --ui-radius: 16px;
+  --ui-bg: #0e1116; --ui-surface: rgba(22, 25, 31, 0.88); --ui-surface2: rgba(48, 53, 63, 0.6); --ui-border: rgba(148, 156, 170, 0.18);
+  --ui-text: #e9ebef; --ui-muted: #9ca3af; --ui-accent: #7c8cf0; --ui-accent-text: #ffffff;
+  --ui-accent-soft: rgba(124, 140, 240, 0.16); --ui-radius: 10px;
 }
 .ui-polished .glass {
   background: var(--ui-surface);
-  backdrop-filter: blur(18px) saturate(140%);
-  -webkit-backdrop-filter: blur(18px) saturate(140%);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
   border: 1px solid var(--ui-border);
-  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
 }
 .ui-polished .accent-gradient {
-  background: linear-gradient(135deg, #6366f1 0%, #22d3ee 100%);
-  color: #fff;
+  background: var(--ui-accent);
+  color: var(--ui-accent-text);
 }
 .ui-tip {
   pointer-events: none;

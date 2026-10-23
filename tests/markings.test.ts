@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { dashPolyline, polylineLength, getElementPrimitives, computeQuantities, suggestHeading, MARKING_SPEC } from '../src/markings';
+import { dashPolyline, polylineLength, getElementPrimitives, computeQuantities, suggestHeading, MARKING_SPEC, roadTextCells, roadTextOutline } from '../src/markings';
 import { exportElementsToDXF, encodeDxfText } from '../src/dxf';
 import { buildCrossroadTemplate } from '../src/templates';
 import { CadElement } from '../src/types';
@@ -93,4 +93,18 @@ test('十字路口範本：指向線朝向路口、四個機車停等區', () =>
     const toCenter = { x: -a.p.x, y: -a.p.y };
     assert.ok(Math.cos(heading) * toCenter.x + Math.sin(heading) * toCenter.y > 0, '箭頭應朝向路口');
   });
+});
+
+test('路面標字：英數字合為一格，字格沿行車方向排列', () => {
+  const el: any = { id: 't', type: 'road_text', p: { x: 0, y: 0 }, text: '速限50', charHeight: 2.5, widthFactor: 0.4, charGap: 0.5, angle: Math.PI / 2 };
+  const cells = roadTextCells(el);
+  assert.deepEqual(cells.map(c => c.text), ['速', '限', '50']);
+  assert.ok(Math.abs(cells[2].p.x) < 1e-9 && Math.abs(cells[2].p.y - 6) < 1e-9);
+  const prims = getElementPrimitives(el).filter(p => p.kind === 'text') as any[];
+  assert.equal(prims.length, 3);
+  assert.ok(Math.abs(prims[0].cell.w - 1) < 1e-9 && prims[0].cell.h === 2.5);
+  const o = roadTextOutline(el);
+  const ys = o.map(q => q.y), xs = o.map(q => q.x);
+  assert.ok(Math.abs(Math.min(...ys) + 1.25) < 1e-9 && Math.abs(Math.max(...ys) - 7.25) < 1e-9);
+  assert.ok(Math.abs(Math.max(...xs) - 0.5) < 1e-9);
 });

@@ -51,8 +51,8 @@ export function renderToolIcon(id: CadTool) {
     case 'yellow_double':
       return (
         <svg viewBox="0 0 24 24" className="w-[24px] h-[24px]" fill="none" strokeWidth="2.5">
-          <line x1="8" y1="3" x2="8" y2="21" stroke="#FFCC00" />
-          <line x1="16" y1="3" x2="16" y2="21" stroke="#FFCC00" />
+          <line x1="8" y1="3" x2="8" y2="21" stroke="#f5b400" />
+          <line x1="16" y1="3" x2="16" y2="21" stroke="#f5b400" />
         </svg>
       );
     case 'white_double':
@@ -76,7 +76,7 @@ export function renderToolIcon(id: CadTool) {
       );
     case 'yellow_dashed':
       return (
-        <svg viewBox="0 0 24 24" className="w-[24px] h-[24px]" fill="none" stroke="#eab308" strokeWidth="2">
+        <svg viewBox="0 0 24 24" className="w-[24px] h-[24px]" fill="none" stroke="#f5b400" strokeWidth="2">
           <line x1="12" y1="3" x2="12" y2="21" strokeDasharray="5,4" />
         </svg>
       );
@@ -94,34 +94,11 @@ export function renderToolIcon(id: CadTool) {
       );
     case 'yield_line':
       return (
-        <svg viewBox="0 0 147 218" className="w-[24px] h-[24px] object-contain" fill="none" stroke="currentColor" strokeWidth="2" xmlns="http://www.w3.org/2000/svg">
-    <g transform="matrix(1,0,0,1,-971.745112,-1907.965364)">
-        
-        <g transform="matrix(0.229046,0,0,0.114737,786.682476,1832.623466)">
-            <rect x="807.972" y="656.65" width="154.41" height="154.41" fill="currentColor" stroke="none"/>
-        </g>
-        <g transform="matrix(0.229046,0,0,0.114737,786.682476,1868.056537)">
-            <rect x="807.972" y="656.65" width="154.41" height="154.41" fill="currentColor" stroke="none"/>
-        </g>
-        <g transform="matrix(0.229046,0,0,0.114737,842.457538,1832.623466)">
-            <rect x="807.972" y="656.65" width="154.41" height="154.41" fill="currentColor" stroke="none"/>
-        </g>
-        <g transform="matrix(0.229046,0,0,0.114737,898.232599,1832.623466)">
-            <rect x="807.972" y="656.65" width="154.41" height="154.41" fill="currentColor" stroke="none"/>
-        </g>
-        <g transform="matrix(0.229046,0,0,0.114737,842.575708,1868.056537)">
-            <rect x="807.972" y="656.65" width="154.41" height="154.41" fill="currentColor" stroke="none"/>
-        </g>
-        <g transform="matrix(0.229046,0,0,0.114737,898.232599,1868.056537)">
-            <rect x="807.972" y="656.65" width="154.41" height="154.41" fill="currentColor" stroke="none"/>
-        </g>
-        
-        <g transform="matrix(0.976024,0,0,1,23.790491,0)">
-            <path d="M992.271,1985.535L1100.979,1985.535L1046.625,2125.582L992.271,1985.535ZM1014.873,2020.968L1046.625,2106.593L1078.663,2020.968L1014.873,2020.968Z" fill="currentColor" stroke="none"/>
-        </g>
-        
-    </g>
-</svg>
+        <svg viewBox="0 0 24 24" className="w-[24px] h-[24px]" fill="currentColor" stroke="none">
+          {[3, 9, 15].map(x => <rect key={`a${x}`} x={x} y="3" width="4" height="2.2" />)}
+          {[3, 9, 15].map(x => <rect key={`b${x}`} x={x} y="7" width="4" height="2.2" />)}
+          <path d="M5 12h14l-7 10z M8.6 14l3.4 5.2 3.4-5.2z" fillRule="evenodd" />
+        </svg>
       );
     case 'BuildingLine':
       return (
@@ -165,19 +142,16 @@ export function renderToolIcon(id: CadTool) {
       );
     case 'crosswalk':
       return (
-        <svg viewBox="0 0 24 24" className="w-[24px] h-[24px]" fill="none" stroke="currentColor" strokeWidth="1.5">
-          <rect x="3" y="5" width="18" height="14" rx="2" strokeDasharray="2,2" />
-          <rect x="6" y="7" width="2" height="10" fill="currentColor" />
-          <rect x="11" y="7" width="2" height="10" fill="currentColor" />
-          <rect x="16" y="7" width="2" height="10" fill="currentColor" />
-        </svg>
+        <svg viewBox="0 0 24 24" className="w-[24px] h-[24px]" fill="currentColor" stroke="none">
+          {[3, 7.5, 12, 16.5].map(x => <rect key={x} x={x} y="5" width="2.6" height="14" />)}
+                  </svg>
       );
     case 'bicycle_lane':
       return (
-        <svg viewBox="0 0 24 24" className="w-[24px] h-[24px]" fill="none" stroke="currentColor" strokeWidth="1.5">
-          <circle cx="5.5" cy="14" r="2.5" />
-          <circle cx="18.5" cy="14" r="2.5" />
-          <path d="M12 14v-4l3-3M8 10h8" />
+        <svg viewBox="0 0 24 24" className="w-[24px] h-[24px]" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round">
+          <circle cx="5.5" cy="15.5" r="3.5" />
+          <circle cx="18.5" cy="15.5" r="3.5" />
+          <path d="M5.5 15.5L9 9h7l2.5 6.5M9 9l3.5 6.5L16 9M8 6.5h3M15 6.5h2l-1 2.5" />
         </svg>
       );
     case 'parking_space':
@@ -243,8 +217,8 @@ export function renderToolIcon(id: CadTool) {
     case 'angular_dimension':
       return (
         <svg viewBox="0 0 24 24" className="w-[24px] h-[24px]" fill="none" stroke="currentColor" strokeWidth="1.5">
-          <path d="M22 22L12 12L12 2" />
-          <path d="M12 7 A 5 5 0 0 1 19.07 19.07" strokeWidth="1.8" />
+          <path d="M3 20h18M3 20L15 4" strokeLinecap="round" />
+          <path d="M10 20a7 7 0 0 0-2.8-5.6" strokeWidth="1.6" />
         </svg>
       );
     case 'arc_3point':
@@ -267,32 +241,40 @@ export function renderToolIcon(id: CadTool) {
     case 'yellow_solid':
       return (
         <svg viewBox="0 0 24 24" className="w-[24px] h-[24px]" fill="none" strokeWidth="3">
-          <line x1="4" y1="18" x2="20" y2="18" stroke="#FFCC00" />
+          <line x1="4" y1="18" x2="20" y2="18" stroke="#f5b400" />
           <rect x="4" y="5" width="16" height="9" rx="1.5" stroke="currentColor" strokeWidth="1.2" />
         </svg>
       );
     case 'grid_box':
       return (
-        <svg viewBox="0 0 24 24" className="w-[24px] h-[24px]" fill="none" stroke="#FFCC00" strokeWidth="1.3">
+        <svg viewBox="0 0 24 24" className="w-[24px] h-[24px]" fill="none" stroke="#f5b400" strokeWidth="1.3">
           <rect x="4" y="4" width="16" height="16" />
           <path d="M4 12L12 4M4 20L20 4M12 20L20 12M4 12L12 20M4 4L20 20M12 4L20 12" />
         </svg>
       );
     case 'moto_box':
+      return (
+        <svg viewBox="0 0 24 24" className="w-[24px] h-[24px]" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round">
+          <rect x="2.5" y="4" width="19" height="16" rx="1" />
+          <circle cx="7.5" cy="15" r="2" />
+          <circle cx="16.5" cy="15" r="2" />
+          <path d="M9.5 15h4l1.5-4.5h-3M15 10.5l1.5 4.5M10 10.5h2" />
+        </svg>
+      );
     case 'moto_turn_box':
       return (
-        <svg viewBox="0 0 24 24" className="w-[24px] h-[24px]" fill="none" stroke="currentColor" strokeWidth="1.5">
-          <rect x="3" y="6" width="18" height="12" rx="1" />
-          <circle cx="8" cy="14" r="1.8" />
-          <circle cx="16" cy="14" r="1.8" />
-          <path d="M8 14l3-4h3l2 4" />
-          {id === 'moto_turn_box' && <path d="M20 3v3h-3" strokeWidth="1.2" />}
+        <svg viewBox="0 0 24 24" className="w-[24px] h-[24px]" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round">
+          <rect x="2.5" y="9" width="19" height="11" rx="1" />
+          <circle cx="7.5" cy="16.5" r="1.7" />
+          <circle cx="16.5" cy="16.5" r="1.7" />
+          <path d="M9.2 16.5h5.6l-1.3-3.5h-2.5" />
+          <path d="M18 7V5.5a2 2 0 0 0-2-2H8M10 1.5l-2 2 2 2" />
         </svg>
       );
     case 'road_text':
       return (
         <svg viewBox="0 0 24 24" className="w-[24px] h-[24px]" fill="currentColor" stroke="none">
-          <text x="12" y="17" textAnchor="middle" fontSize="13" fontWeight="700" transform="scale(0.8 1) translate(3 0)">慢</text>
+          <text x="12" y="19.5" textAnchor="middle" fontSize="18" fontWeight="700" fontFamily='"Noto Sans TC", "Microsoft JhengHei", sans-serif' transform="translate(12 0) scale(0.62 1) translate(-12 0)">慢</text>
         </svg>
       );
     case 'text_label':
@@ -380,10 +362,7 @@ export default function Toolbar({
       <div className="space-y-4">
         {/* CAD Brand Mini Header */}
         <div className="flex flex-col items-center justify-center py-2 border-b border-[#2d3039]/40 mb-1 text-center">
-          <div className="w-[42px] h-[42px] rounded-lg bg-gradient-to-br from-blue-500 to-cyan-500 flex items-center justify-center font-black text-white text-sm shadow-lg shadow-blue-500/20 mb-1.5 border border-blue-400/20">
-            CAD
-          </div>
-          <span className="text-xs font-black text-cyan-400 tracking-widest uppercase">標線繪製</span>
+          <span className="text-xs font-bold text-slate-300">標線繪製</span>
         </div>
 
         {/* Global Select Pointer Tool at Top */}
@@ -393,7 +372,7 @@ export default function Toolbar({
             onClick={() => setActiveTool('select')}
             className={`w-[42px] h-[42px] rounded-lg flex items-center justify-center transition-all cursor-pointer border ${
               activeTool === 'select'
-                ? 'bg-blue-950/60 text-[#00FFFF] border-[#00FFFF]/80 shadow-[0_0_8px_rgba(0,255,255,0.25)]'
+                ? 'bg-blue-600/20 text-blue-300 border-blue-500/70'
                 : 'text-slate-400 bg-[#0f1115]/30 border-[#2d3039]/20 hover:bg-[#1f2229] hover:text-slate-200 hover:border-[#2d3039]'
             }`}
             title="選擇與修改幾何物件/拖移端點"
@@ -419,7 +398,7 @@ export default function Toolbar({
                         onClick={() => setActiveTool(tool.id)}
                         className={`w-[42px] h-[42px] rounded-lg flex items-center justify-center transition-all border cursor-pointer ${
                           isActive 
-                            ? 'bg-blue-950/60 text-[#00FFFF] border-[#00FFFF]/80 shadow-[0_0_8px_rgba(0,255,255,0.25)]' 
+                            ? 'bg-blue-600/20 text-blue-300 border-blue-500/70' 
                             : 'text-slate-400 bg-[#0f1115]/40 border-[#2d3039]/20 hover:border-[#3b4252] hover:bg-[#1f2229] hover:text-slate-200'
                         }`}
                         title={tool.desc}
@@ -438,7 +417,7 @@ export default function Toolbar({
       <button
         id="load-template-btn"
         onClick={onLoadDemo}
-        className="mt-3 w-full py-2 text-[10px] font-bold rounded-lg border border-[#2d3039] text-slate-400 hover:text-cyan-300 hover:border-cyan-500/50 bg-[#0f1115]/40 cursor-pointer"
+        className="mt-3 w-full py-2 text-[10px] font-bold rounded-lg border border-[#2d3039] text-slate-400 hover:text-slate-200 hover:border-slate-500 bg-[#0f1115]/40 cursor-pointer"
         title="載入十字路口範本，快速開始"
       >
         載入範本

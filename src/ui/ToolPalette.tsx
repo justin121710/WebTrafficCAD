@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Search, MousePointer2, LayoutGrid, ChevronDown, ChevronRight, X, Sparkles } from 'lucide-react';
+import { Search, MousePointer2, LayoutGrid, ChevronDown, ChevronRight, X, LayoutTemplate } from 'lucide-react';
 import { CadTool } from '../types';
 import { renderToolIcon } from '../components/Toolbar';
 import { TOOL_CATEGORIES, ALL_TOOLS, ESSENTIAL_TOOLS, ToolDef } from './toolCatalog';
@@ -57,7 +57,7 @@ export function MinimalToolRail({ activeTool, setActiveTool, onLoadTemplate }: P
       {moreOpen && (
         <>
           <div className="fixed inset-0 z-40" onClick={() => setMoreOpen(false)} />
-          <div id="more-tools-panel" className="absolute left-16 bottom-2 z-50 w-[420px] max-h-[80vh] overflow-y-auto rounded-xl p-3 shadow-2xl" style={{ background: 'var(--ui-surface)', border: '1px solid var(--ui-border)' }}>
+          <div id="more-tools-panel" className="absolute left-16 bottom-2 z-50 w-[420px] max-h-[80vh] overflow-y-auto rounded-xl p-3 shadow-lg" style={{ background: 'var(--ui-surface)', border: '1px solid var(--ui-border)' }}>
             <div className="flex items-center gap-2 px-2 py-1.5 rounded-lg mb-3" style={{ background: 'var(--ui-surface2)' }}>
               <Search className="w-3.5 h-3.5" style={{ color: 'var(--ui-muted)' }} />
               <input autoFocus value={q} onChange={e => setQ(e.target.value)} placeholder="搜尋工具…" className="flex-1 bg-transparent text-xs outline-none" style={{ color: 'var(--ui-text)' }} />
@@ -118,6 +118,7 @@ export function GuidedToolSidebar({ activeTool, setActiveTool, onLoadTemplate }:
             value={q}
             onChange={e => setQ(e.target.value)}
             onKeyDown={e => {
+              if (e.nativeEvent.isComposing) return;
               if (e.key === 'Enter') { const first = filtered[0]?.tools[0]; if (first) { pick(first.id); setQ(''); (e.target as HTMLInputElement).blur(); } }
               if (e.key === 'Escape') { setQ(''); (e.target as HTMLInputElement).blur(); }
             }}
@@ -131,9 +132,9 @@ export function GuidedToolSidebar({ activeTool, setActiveTool, onLoadTemplate }:
           id="tool-btn-select"
           onClick={() => pick('select')}
           className="mt-2 w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[13px] cursor-pointer"
-          style={activeTool === 'select' ? { background: 'var(--ui-accent)', color: 'var(--ui-accent-text)', fontWeight: 700 } : { color: 'var(--ui-text)' }}
+          style={activeTool === 'select' ? { background: 'var(--ui-accent-soft)', color: 'var(--ui-text)', boxShadow: 'inset 3px 0 0 var(--ui-accent)' } : { color: 'var(--ui-text)', border: '1px solid var(--ui-border)' }}
         >
-          <MousePointer2 className="w-4 h-4" /> 選取與編輯 <span className="ml-auto text-[10px] opacity-70">V</span>
+          <MousePointer2 className="w-4 h-4" style={{ color: activeTool === 'select' ? 'var(--ui-accent)' : 'var(--ui-muted)' }} /> 選取與編輯 <kbd className="ml-auto text-[10px] px-1 rounded" style={{ color: 'var(--ui-muted)', border: '1px solid var(--ui-border)' }}>V</kbd>
         </button>
       </div>
       <div className="flex-1 overflow-y-auto px-2 pb-2">
@@ -174,7 +175,7 @@ export function GuidedToolSidebar({ activeTool, setActiveTool, onLoadTemplate }:
       </div>
       <div className="p-3" style={{ borderTop: '1px solid var(--ui-border)' }}>
         <button id="load-template-btn" onClick={onLoadTemplate} className="w-full flex items-center justify-center gap-2 py-2 text-xs rounded-lg cursor-pointer" style={{ border: '1px dashed var(--ui-border)', color: 'var(--ui-muted)' }}>
-          <Sparkles className="w-3.5 h-3.5" /> 從十字路口範本開始
+          <LayoutTemplate className="w-3.5 h-3.5" /> 載入十字路口範本
         </button>
       </div>
     </div>
@@ -198,7 +199,7 @@ export function PolishedDock({ activeTool, setActiveTool, onLoadTemplate }: Prop
     <div id="left-toolbar" className="absolute bottom-5 left-1/2 -translate-x-1/2 z-30 flex flex-col items-center gap-2">
       {openCat && (
         <>
-          <div id="dock-popover" className="glass rounded-2xl p-2.5 flex gap-1.5 flex-wrap justify-center max-w-[640px]">
+          <div id="dock-popover" className="glass rounded-lg p-2.5 flex gap-1.5 flex-wrap justify-center max-w-[640px]">
             {TOOL_CATEGORIES.find(c => c.key === openCat)!.tools.map(t => {
               const active = activeTool === t.id;
               return (
@@ -213,7 +214,7 @@ export function PolishedDock({ activeTool, setActiveTool, onLoadTemplate }: Prop
           </div>
         </>
       )}
-      <div className="glass rounded-2xl px-2 py-1.5 flex items-center gap-1">
+      <div className="glass rounded-lg px-2 py-1.5 flex items-center gap-1">
         <button id="tool-btn-select" onClick={() => { setActiveTool('select'); setOpenCat(null); }} title="選取（V）"
           className={`w-11 h-11 rounded-xl flex items-center justify-center cursor-pointer transition-all ${activeTool === 'select' ? 'accent-gradient shadow-lg' : 'hover:bg-white/10'}`}
           style={activeTool === 'select' ? {} : { color: 'var(--ui-text)' }}>
@@ -234,7 +235,7 @@ export function PolishedDock({ activeTool, setActiveTool, onLoadTemplate }: Prop
         })}
         <div className="w-px h-8 mx-1" style={{ background: 'var(--ui-border)' }} />
         <button id="load-template-btn" onClick={onLoadTemplate} title="載入十字路口範本" className="w-11 h-11 rounded-xl flex items-center justify-center cursor-pointer hover:bg-white/10" style={{ color: 'var(--ui-muted)' }}>
-          <Sparkles className="w-5 h-5" />
+          <LayoutTemplate className="w-5 h-5" />
         </button>
       </div>
       {activeDef && (
