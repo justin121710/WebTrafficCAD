@@ -1,9 +1,9 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="WebTrafficCAD">
-  <title>WebTrafficCAD：斑馬線＋游標（平面）</title>
+  <title>WebTrafficCAD：斑馬線＋游標（Z1）</title>
   <defs><clipPath id="tile"><rect width="64" height="64" rx="12"/></clipPath></defs>
   <g clip-path="url(#tile)">
     <rect width="64" height="64" fill="#1d2127"/>
-    <path d="M6 8H10.6V56H6ZM14 8H18.6V56H14ZM22 8H26.6V56H22ZM30 8H34.6V56H30Z" fill="#f2f3f5"/>
-    <path d="M39 16L39 43.2L46.2 36.48L51 47.2L55.8 45.12L51.16 34.56L60.6 34.56Z" fill="#f2f3f5"/>
+    <path d="M0 2.29H33V6.86H0ZM0 11.43H33V16H0ZM0 20.57H33V25.14H0ZM0 29.71H33V34.29H0ZM0 38.86H33V43.43H0ZM0 48H33V52.57H0ZM0 57.14H33V61.71H0Z" fill="#f2f3f5"/>
+    <path d="M37.67 6.65L37.67 50.85L49.38 39.93L57.17 57.35L64.97 53.97L57.43 36.81L72.78 36.81Z" fill="#f2f3f5"/>
   </g>
 </svg>
