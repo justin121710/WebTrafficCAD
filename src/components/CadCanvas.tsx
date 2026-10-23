@@ -5579,7 +5579,7 @@ export default function CadCanvas({
             case 'road_arrow':
               return { name, desc: '點擊車道中央即放置，會自動對齊車道行車方向；按住往想要的方向拖曳可自訂朝向（Shift 每 15°）。' };
             case 'road_text':
-              return { name, desc: '點擊車道中央，輸入字樣（例：慢、停、公車專用）後按 Enter。字會沿行車方向由近而遠排列。' };
+              return { name, desc: '點擊車道中央（最靠近駕駛人的一字），輸入字樣後按 Enter。字樣往行車方向延伸，順著字頭由上而下閱讀。' };
             case 'text_label':
               return { name, desc: '點擊要放文字的位置，輸入內容後按 Enter（Esc 取消）。' };
             case 'parking_space':

@@ -116,7 +116,7 @@ export interface MotoBoxElement extends BaseElement {
 
 export interface RoadTextElement extends BaseElement {
   type: 'road_text';
-  /** 第一個字（最靠近駕駛人）的中心 */
+  /** 插入點：最後一個字（最靠近駕駛人）的中心；字樣往行車方向延伸，第一個字在最遠處 */
   p: Point2D;
   text: string;
   /** 字高（m） */

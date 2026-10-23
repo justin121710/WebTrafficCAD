@@ -95,11 +95,14 @@ test('十字路口範本：指向線朝向路口、四個機車停等區', () =>
   });
 });
 
-test('路面標字：英數字合為一格，字格沿行車方向排列', () => {
+test('路面標字：英數字合為一格，第一字最遠、最後一字在插入點', () => {
+  // 行車方向朝北（+y），字頭朝北：由上而下讀「速限50」，所以「速」在最北邊
   const el: any = { id: 't', type: 'road_text', p: { x: 0, y: 0 }, text: '速限50', charHeight: 2.5, widthFactor: 0.4, charGap: 0.5, angle: Math.PI / 2 };
   const cells = roadTextCells(el);
   assert.deepEqual(cells.map(c => c.text), ['速', '限', '50']);
-  assert.ok(Math.abs(cells[2].p.x) < 1e-9 && Math.abs(cells[2].p.y - 6) < 1e-9);
+  assert.ok(Math.abs(cells[0].p.x) < 1e-9 && Math.abs(cells[0].p.y - 6) < 1e-9);
+  assert.ok(Math.abs(cells[2].p.y) < 1e-9);
+  assert.ok(cells[0].p.y > cells[1].p.y && cells[1].p.y > cells[2].p.y);
   const prims = getElementPrimitives(el).filter(p => p.kind === 'text') as any[];
   assert.equal(prims.length, 3);
   assert.ok(Math.abs(prims[0].cell.w - 1) < 1e-9 && prims[0].cell.h === 2.5);

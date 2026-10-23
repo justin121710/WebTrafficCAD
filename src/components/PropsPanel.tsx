@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { MARKING_SPEC, MARKING_NAMES, getMotoBoxCorners } from '../markings';
+import { MARKING_SPEC, MARKING_NAMES, getMotoBoxCorners, roadTextSpan } from '../markings';
 import { CadDesignVehicle, cadVehicle, cadMinPathRadius } from '../simulation/vehicles';
 
 /** 設計車種名稱（全介面統一） */
@@ -2595,7 +2595,7 @@ export default function PropsPanel({
             <div className="p-3 bg-[#1f2229]/40 rounded-lg border border-[#2d3039] space-y-3">
               <h4 className="text-xs font-semibold text-slate-300">路面標字</h4>
               <label className="block text-[10.5px] text-slate-400 space-y-1">
-                <span>字樣（由近而遠）</span>
+                <span>字樣（順著字頭由上而下閱讀）</span>
                 <input
                   value={rt.text}
                   onFocus={() => onSaveHistory?.()}
@@ -2625,7 +2625,11 @@ export default function PropsPanel({
                 </label>
               ))}
               <div className="flex gap-2">
-                <button onClick={() => upd({ angle: rt.angle + Math.PI })} className="flex-1 py-1.5 text-[10.5px] rounded border border-[#2d3039] bg-[#1f2229] text-slate-300 hover:text-white cursor-pointer">反向 180°</button>
+                <button onClick={() => {
+                  // 原地反向：最遠的一格變成插入點，標字位置不動
+                  const s = roadTextSpan(rt), a = rt.angle || 0;
+                  upd({ angle: a + Math.PI, p: { x: rt.p.x + Math.cos(a) * s, y: rt.p.y + Math.sin(a) * s } });
+                }} className="flex-1 py-1.5 text-[10.5px] rounded border border-[#2d3039] bg-[#1f2229] text-slate-300 hover:text-white cursor-pointer">反向 180°</button>
                 <button onClick={() => upd({ color: rt.color === 'yellow' ? 'white' : 'yellow' })} className="flex-1 py-1.5 text-[10.5px] rounded border border-[#2d3039] bg-[#1f2229] text-slate-300 hover:text-white cursor-pointer">{rt.color === 'yellow' ? '改為白色' : '改為黃色'}</button>
               </div>
               <p className="text-[9.5px] text-slate-500">字高為沿行車方向的長度，字寬＝字高 × 寬高比。連續英數字（如 50）合為一格。預設為常用值，請依設置規則或地方規範調整。</p>
