@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="WebTrafficCAD">
+  <title>WebTrafficCAD：路口游標</title>
+  <rect width="64" height="64" rx="14" fill="#1d2127"/>
+  <path d="M5 22H15a7 7 0 0 0 7-7V5M59 22H49a7 7 0 0 1-7-7V5M5 42H15a7 7 0 0 1 7 7V59M59 42H49a7 7 0 0 0-7 7V59" fill="none" stroke="#f2f3f5" stroke-width="3" stroke-linecap="round"/>
+  <path d="M32 9V26M32 38V55M9 32H26M38 32H55" fill="none" stroke="#f2b705" stroke-width="2.6" stroke-linecap="round"/>
+  <rect x="27" y="27" width="10" height="10" fill="none" stroke="#4aa3ff" stroke-width="2.6"/>
+</svg>

@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="WebTrafficCAD">
+  <title>WebTrafficCAD：車道尺寸</title>
+  <rect width="64" height="64" rx="14" fill="#1d2127"/>
+  <path d="M17 24V58M47 24V58" fill="none" stroke="#f2f3f5" stroke-width="3.2"/>
+  <path d="M32 27V36M32 45V54" fill="none" stroke="#f2b705" stroke-width="3.2"/>
+  <path d="M17 7V20M47 7V20" fill="none" stroke="#4aa3ff" stroke-width="1.6"/>
+  <path d="M13 13.5H51" fill="none" stroke="#4aa3ff" stroke-width="2"/>
+  <path d="M13.5 17L20.5 10M43.5 17L50.5 10" fill="none" stroke="#4aa3ff" stroke-width="2.8" stroke-linecap="round"/>
+</svg>

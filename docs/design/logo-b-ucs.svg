@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="WebTrafficCAD">
+  <title>WebTrafficCAD：標線座標</title>
+  <rect width="64" height="64" rx="14" fill="#1d2127"/>
+  <path d="M15 44V25H9L18 8L27 25H21V44Z" fill="#f2f3f5"/>
+  <path d="M24 47H44V41L56 50L44 59V53H24Z" fill="#f2b705"/>
+  <rect x="13" y="45" width="10" height="10" fill="#1d2127" stroke="#4aa3ff" stroke-width="2.6"/>
+</svg>
