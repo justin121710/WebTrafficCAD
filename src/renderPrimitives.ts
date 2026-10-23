@@ -49,6 +49,48 @@ function withAlpha(color: string, alpha: number): string {
   return color;
 }
 
+const FONT_STACK = '"Noto Sans TC", "Microsoft JhengHei", "PingFang TC", sans-serif';
+
+/** 以 100px 粗體量測字形墨水範圍（快取），供路面標字填滿字格 */
+const inkCache = new Map<string, { l: number; r: number; a: number; d: number }>();
+function measureInk(ctx: CanvasRenderingContext2D, text: string) {
+  let m = inkCache.get(text);
+  if (!m) {
+    ctx.font = `bold 100px ${FONT_STACK}`;
+    const t = ctx.measureText(text);
+    m = { l: t.actualBoundingBoxLeft, r: t.actualBoundingBoxRight, a: t.actualBoundingBoxAscent, d: t.actualBoundingBoxDescent };
+    if (!(m.l + m.r > 0) || !(m.a + m.d > 0)) {
+      // 舊瀏覽器沒有 actualBoundingBox：以字身框估計
+      const w = t.width || 100;
+      m = { l: 0, r: w, a: 88, d: 12 };
+    }
+    inkCache.set(text, m);
+  }
+  return m;
+}
+/** 字型載入完成後需重新量測 */
+if (typeof document !== 'undefined' && (document as any).fonts?.addEventListener) {
+  (document as any).fonts.addEventListener('loadingdone', () => inkCache.clear());
+}
+
+/**
+ * 路面標字：將字形縮放到字格（w × h，px）。
+ * 中文字以「國」的墨水範圍為基準，避免「一」之類扁字被拉成方塊；英數字組依自身高度填滿，寬度不超過等比例。
+ */
+function drawCellText(ctx: CanvasRenderingContext2D, text: string, wPx: number, hPx: number) {
+  const ascii = /^[A-Za-z0-9.]+$/.test(text);
+  const ref = measureInk(ctx, ascii ? text : '國');
+  const own = ascii ? ref : measureInk(ctx, text);
+  const sy = hPx / (ref.a + ref.d);
+  const sx = ascii ? Math.min(wPx / (own.l + own.r), sy) : wPx / (ref.l + ref.r);
+  ctx.font = `bold 100px ${FONT_STACK}`;
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'alphabetic';
+  ctx.scale(sx, sy);
+  // 水平依字本身墨水置中，垂直依基準字置中
+  ctx.fillText(text, -(own.r - own.l) / 2, (ref.a - ref.d) / 2);
+}
+
 export function renderPrimitives(ctx: CanvasRenderingContext2D, prims: Primitive[], opts: RenderOptions) {
   const pal = PALETTES[opts.palette || 'screen'];
   const { zoom, w2s } = opts;
@@ -84,13 +126,21 @@ export function renderPrimitives(ctx: CanvasRenderingContext2D, prims: Primitive
         ctx.lineWidth = Math.max(1, (pr.strokeWidth ?? 0.1) * zoom);
         ctx.stroke();
       }
+    } else if (pr.kind === 'text' && pr.cell) {
+      const s = w2s(pr.p.x, pr.p.y);
+      const hPx = Math.max((pr.minPx ?? 0) * k, pr.cell.h * zoom);
+      const wPx = hPx * (pr.cell.w / pr.cell.h);
+      ctx.translate(s.x, s.y);
+      ctx.rotate(-(pr.angle || 0));
+      ctx.fillStyle = col(pr.color, pr.css);
+      drawCellText(ctx, pr.text, wPx, hPx);
     } else if (pr.kind === 'text') {
       const s = w2s(pr.p.x, pr.p.y);
       const px = pr.fixedPx ? pr.fixedPx * k : Math.max((pr.minPx ?? 0) * k, pr.size * zoom);
       ctx.translate(s.x, s.y);
       ctx.rotate(-(pr.angle || 0));
       if (pr.widthFactor && pr.widthFactor !== 1) ctx.scale(pr.widthFactor, 1);
-      ctx.font = `${px}px "Noto Sans TC", "Microsoft JhengHei", sans-serif`;
+      ctx.font = `${px}px ${FONT_STACK}`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       if (pr.fixedPx) {

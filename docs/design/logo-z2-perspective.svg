@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="WebTrafficCAD">
+  <title>WebTrafficCAD：斑馬線＋游標（透視）</title>
+  <defs><clipPath id="tile"><rect width="64" height="64" rx="12"/></clipPath></defs>
+  <g clip-path="url(#tile)">
+    <rect width="64" height="64" fill="#1d2127"/>
+    <path d="M2 60H7L13.5 6H11ZM11 60H16L18 6H15.5ZM20 60H25L22.5 6H20ZM29 60H34L27 6H24.5Z" fill="#f2f3f5"/>
+    <path d="M40 14L40 41.2L47.2 34.48L52 45.2L56.8 43.12L52.16 32.56L61.6 32.56Z" fill="#f2f3f5"/>
+  </g>
+</svg>

@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="WebTrafficCAD">
+  <title>WebTrafficCAD：道路上的斑馬線＋游標</title>
+  <defs><clipPath id="tile"><rect width="64" height="64" rx="12"/></clipPath></defs>
+  <g clip-path="url(#tile)">
+    <rect width="64" height="64" fill="#1d2127"/>
+    <path d="M0 10H64V54H0Z" fill="#3a3d42"/>
+    <path d="M0 10H64V12.2H0Z M0 51.8H64V54H0Z" fill="#f2f3f5"/>
+    <path d="M5 15H9.2V49H5ZM12.4 15H16.6V49H12.4ZM19.8 15H24.0V49H19.8ZM27.2 15H31.4V49H27.2Z" fill="#f2f3f5"/>
+    <path d="M42 18L42 43.5L48.75 37.2L53.25 47.25L57.75 45.3L53.4 35.4L62.25 35.4Z" fill="#000000" fill-opacity="0.4" transform="translate(3 5)"/>
+    <path d="M42 18L42 43.5L48.75 37.2L53.25 47.25L57.75 45.3L53.4 35.4L62.25 35.4Z" fill="#f2f3f5"/>
+  </g>
+</svg>

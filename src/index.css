@@ -1,6 +1,6 @@
 @import "tailwindcss";
 
-/* 自訂全域滾動條樣式，使其與精緻暗色UI風格契合 */
+/* 捲軸：配合深色介面 */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -40,7 +40,7 @@ input[type="range"] {
   border-radius: 9999px;
   outline: none;
   cursor: pointer;
-  background-color: #2d3039;
+  background-color: #363b44;
 }
 
 /* Webkit (Chrome/Edge/Safari) 滑動按鈕：統一為 14px 藍色圓鈕，白色邊框，垂直置中 */
@@ -50,8 +50,8 @@ input[type="range"]::-webkit-slider-thumb {
   width: 14px !important;
   height: 14px !important;
   border-radius: 50% !important;
-  background-color: #3b82f6 !important; /* 統一為經典藍色 */
-  border: 2px solid #ffffff !important;
+  background-color: #f2f3f5 !important;
+  border: 2px solid #1d2127 !important;
   box-shadow: 0 1.5px 3px rgba(0, 0, 0, 0.35) !important;
   cursor: pointer;
   margin-top: -4px !important; /* (6px/2 - 14px/2 = -4px) 完美居中 */
@@ -67,8 +67,8 @@ input[type="range"]::-moz-range-thumb {
   width: 14px !important;
   height: 14px !important;
   border-radius: 50% !important;
-  background-color: #3b82f6 !important;
-  border: 2px solid #ffffff !important;
+  background-color: #f2f3f5 !important;
+  border: 2px solid #1d2127 !important;
   box-shadow: 0 1.5px 3px rgba(0, 0, 0, 0.35) !important;
   cursor: pointer;
   transition: transform 0.1s ease;
@@ -94,41 +94,15 @@ button.sim-color-picker-btn {
 
 
 
-/* ===================== 介面風格（UI style）色彩變數 ===================== */
-.ui-classic {
-  --ui-bg: #0a0b0e; --ui-surface: #14161c; --ui-surface2: #1f2229; --ui-border: #2d3039;
-  --ui-text: #e2e8f0; --ui-muted: #94a3b8; --ui-accent: #3b82f6; --ui-accent-text: #ffffff;
-  --ui-accent-soft: rgba(59, 130, 246, 0.14); --ui-radius: 8px;
+/* ===================== 製圖桌介面色彩變數（取自 LOGO：炭灰 #1d2127＋米白 #f2f3f5） ===================== */
+.ui-drafting {
+  --ui-bg: #1d2127; --ui-surface: #22262d; --ui-surface2: #2b3038; --ui-border: #363b44; --ui-border-soft: #2a2e35;
+  --ui-text: #e4e5e8; --ui-strong: #f2f3f5; --ui-muted: #9a9fa8; --ui-accent: #f2f3f5; --ui-accent-text: #1d2127;
+  --ui-accent-soft: rgba(242, 243, 245, 0.10); --ui-radius: 3px; --ui-field: #181b20;
+  --ui-menubar: #181b20; --ui-ribbon: #262a31; --ui-cmd: #15171b; --ui-canvas: #1d2127;
+  font-family: 'Noto Sans TC', 'Microsoft JhengHei', 'PingFang TC', system-ui, sans-serif;
 }
-/* A・簡潔：石墨灰、細邊框、單一藍色強調 */
-.ui-minimal {
-  --ui-bg: #0d0e10; --ui-surface: #141518; --ui-surface2: #1c1d21; --ui-border: #26272c;
-  --ui-text: #e7e8ea; --ui-muted: #8b8f98; --ui-accent: #4f8cff; --ui-accent-text: #ffffff;
-  --ui-accent-soft: rgba(79, 140, 255, 0.14); --ui-radius: 8px;
-}
-/* B・直覺：較亮的藍灰底、青綠強調、較大點擊範圍 */
-.ui-guided {
-  --ui-bg: #0f1217; --ui-surface: #161a21; --ui-surface2: #1e232c; --ui-border: #2a313c;
-  --ui-text: #e6edf3; --ui-muted: #9aa7b5; --ui-accent: #14b8a6; --ui-accent-text: #04201d;
-  --ui-accent-soft: rgba(20, 184, 166, 0.15); --ui-radius: 10px;
-}
-/* C・美觀：深藍漸層、玻璃面板、靛青漸層強調 */
-.ui-polished {
-  --ui-bg: #0b1020; --ui-surface: rgba(19, 24, 38, 0.74); --ui-surface2: rgba(44, 54, 78, 0.55); --ui-border: rgba(148, 163, 184, 0.18);
-  --ui-text: #eef2ff; --ui-muted: #a5b0c8; --ui-accent: #818cf8; --ui-accent-text: #ffffff;
-  --ui-accent-soft: rgba(129, 140, 248, 0.18); --ui-radius: 16px;
-}
-.ui-polished .glass {
-  background: var(--ui-surface);
-  backdrop-filter: blur(18px) saturate(140%);
-  -webkit-backdrop-filter: blur(18px) saturate(140%);
-  border: 1px solid var(--ui-border);
-  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.04);
-}
-.ui-polished .accent-gradient {
-  background: linear-gradient(135deg, #6366f1 0%, #22d3ee 100%);
-  color: #fff;
-}
+.ui-drafting .font-mono { font-family: 'JetBrains Mono', 'Cascadia Mono', Consolas, ui-monospace, monospace; }
 .ui-tip {
   pointer-events: none;
   position: absolute;

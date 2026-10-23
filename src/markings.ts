@@ -113,6 +113,8 @@ export type Primitive = ColorOverride & (
       minPx?: number;
       /** 文字在螢幕像素下的固定大小（標註用），設定時忽略 size */
       fixedPx?: number;
+      /** 路面標字：字形縮放至此字格（m；w 沿基線、h 垂直基線），設定時 size 只作 DXF 字高 */
+      cell?: { w: number; h: number };
     }
   | {
       kind: 'circle';
@@ -499,18 +501,13 @@ export function getElementPrimitives(el: CadElement, opts: PrimitiveOptions = {}
       P.push({ kind: 'text', p: e.p, text: e.text, size: e.fontSize || 1, color: 'text', layer: L('text'), minPx: 9, angle: e.angle || 0 });
       break;
     case 'road_text': {
-      // 路面標字：沿行車方向由近而遠排列，縱長字形
-      const chars: string[] = Array.from(e.text || '');
-      const h = e.charHeight || 2.4;
-      const gap = e.charGap ?? 0.6;
+      // 路面標字：字頭朝行車方向、由上而下閱讀（第一字最遠），每個字填滿一個縱長字格
       const ang = e.angle || 0; // 行車方向（字頭朝向）
-      const fx = Math.cos(ang), fy = Math.sin(ang);
-      chars.forEach((ch, i) => {
-        const s = i * (h + gap);
+      roadTextCells(e).forEach(c => {
         P.push({
-          kind: 'text', p: { x: e.p.x + fx * s, y: e.p.y + fy * s }, text: ch, size: h,
+          kind: 'text', p: c.p, text: c.text, size: c.h,
           color: e.color === 'yellow' ? 'yellow' : 'white', layer: L('road_text'),
-          angle: ang - Math.PI / 2, widthFactor: e.widthFactor ?? 0.4, minPx: 6,
+          angle: ang - Math.PI / 2, widthFactor: c.w / c.h, minPx: 4, cell: { w: c.w, h: c.h },
         });
       });
       break;
@@ -594,6 +591,48 @@ export const PATH_LINE_TYPES = new Set([
   'red_solid', 'yellow_solid',
 ]);
 
+type RoadTextLike = { p: Point2D; text: string; charHeight?: number; widthFactor?: number; charGap?: number; angle?: number };
+
+/** 標字字樣切成字格：連續的英數字（例：速限 50 的「50」）合為一格，其餘每字一格 */
+function roadTextTokens(text: string): string[] {
+  return (text || '').replace(/\s+/g, '').match(/[A-Za-z0-9.]+|./gu) || [];
+}
+
+/**
+ * 路面標字的字格。字頭朝行車方向，字樣由上而下閱讀：第一個字在最遠處，
+ * 最後一個字在插入點 p（最靠近駕駛人）。回傳順序與字樣相同。
+ */
+export function roadTextCells(e: RoadTextLike) {
+  const tokens = roadTextTokens(e.text);
+  const h = e.charHeight || 2.5;
+  const w = h * (e.widthFactor ?? 0.4);
+  const gap = e.charGap ?? 0.6;
+  const fx = Math.cos(e.angle || 0), fy = Math.sin(e.angle || 0);
+  const n = tokens.length;
+  return tokens.map((text, i) => {
+    const s = (n - 1 - i) * (h + gap);
+    return { text, p: { x: e.p.x + fx * s, y: e.p.y + fy * s }, w, h };
+  });
+}
+
+/** 整串標字沿行車方向的長度（第一格中心到最後一格中心，m） */
+export function roadTextSpan(e: RoadTextLike): number {
+  const n = roadTextTokens(e.text).length;
+  return Math.max(0, n - 1) * ((e.charHeight || 2.5) + (e.charGap ?? 0.6));
+}
+
+/** 路面標字的外框四角（m），供選取、框選與縮放全圖使用 */
+export function roadTextOutline(e: RoadTextLike): Point2D[] {
+  const h = e.charHeight || 2.5;
+  const w = h * (e.widthFactor ?? 0.4);
+  const ang = e.angle || 0;
+  const fx = Math.cos(ang), fy = Math.sin(ang); // 沿行車方向
+  const sx = -fy, sy = fx; // 橫向
+  const far = roadTextSpan(e);
+  const pt = (along: number, across: number) => ({ x: e.p.x + fx * along + sx * across, y: e.p.y + fy * along + sy * across });
+  return [pt(-h / 2, -w / 2), pt(far + h / 2, -w / 2), pt(far + h / 2, w / 2), pt(-h / 2, w / 2)];
+}
+
 /** 計算原語外框（m） */
 export function primitivesBounds(prims: Primitive[]) {
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
@@ -605,7 +644,7 @@ export function primitivesBounds(prims: Primitive[]) {
   prims.forEach(pr => {
     if (pr.kind === 'line' || pr.kind === 'poly') pr.pts.forEach(add);
     else if (pr.kind === 'text') {
-      const half = pr.size * Math.max(1, pr.text.length) * 0.5;
+      const half = pr.cell ? Math.max(pr.cell.w, pr.cell.h) / 2 : pr.size * Math.max(1, pr.text.length) * 0.5;
       add({ x: pr.p.x - half, y: pr.p.y - pr.size }); add({ x: pr.p.x + half, y: pr.p.y + pr.size });
     } else { add({ x: pr.c.x - pr.r, y: pr.c.y - pr.r }); add({ x: pr.c.x + pr.r, y: pr.c.y + pr.r }); }
   });

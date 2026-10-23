@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="WebTrafficCAD">
+  <title>WebTrafficCAD</title>
+  <defs><clipPath id="tile"><rect width="64" height="64" rx="12"/></clipPath></defs>
+  <g clip-path="url(#tile)">
+    <rect width="64" height="64" fill="#1d2127"/>
+    <path d="M0 2.8H27V10H0ZM0 15.6H27V22.8H0ZM0 28.4H27V35.6H0ZM0 41.2H27V48.4H0ZM0 54H27V61.2H0Z" fill="#f2f3f5"/>
+    <path d="M37.67 6.65L37.67 50.85L49.38 39.93L57.17 57.35L64.97 53.97L57.43 36.81L72.78 36.81Z" fill="#f2f3f5"/>
+  </g>
+</svg>

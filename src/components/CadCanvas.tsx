@@ -48,7 +48,7 @@ import {
   solveThreeCenteredCurve
 } from '../geometry';
 import { arrowData } from '../arrowData';
-import { getElementPrimitives, suggestHeading, getMotoBoxCorners, MARKING_NAMES, PATH_LINE_TYPES } from '../markings';
+import { getElementPrimitives, suggestHeading, getMotoBoxCorners, MARKING_NAMES, PATH_LINE_TYPES, primitivesBounds, roadTextOutline } from '../markings';
 import { renderPrimitives } from '../renderPrimitives';
 import SimulationLayer from '../simulation/SimulationLayer';
 import { simStore } from '../simulation/store';
@@ -70,6 +70,10 @@ function getParkingSpaceCenter(pk: { p1: Point2D; angle?: number; length?: numbe
 
 function getElementCenter(el: any): Point2D {
   if (el.type === 'parking_space' && el.p1) return getParkingSpaceCenter(el);
+  if (el.type === 'road_text') {
+    const o = roadTextOutline(el);
+    return { x: o.reduce((a, q) => a + q.x, 0) / o.length, y: o.reduce((a, q) => a + q.y, 0) / o.length };
+  }
   if (el.center) return { ...el.center };
   if (el.p) return { ...el.p };
   
@@ -134,6 +138,11 @@ function getElementVertices(el: CadElement): Point2D[] {
       const txt = el as TextElement;
       return [txt.p];
     }
+    case 'road_text':
+      return [(el as any).p];
+    case 'moto_box':
+    case 'moto_turn_box':
+      return getMotoBoxCorners(el);
     case 'smart_path': {
       const sp = el as SmartPathElement;
       return sp.points || [];
@@ -866,6 +875,8 @@ export function getElementBoundingBox(el: any): { minX: number; maxX: number; mi
     const pts = getRoadArrowOutlinePoints(el);
     collect.push(...pts);
   }
+  if (el.type === 'road_text') collect.push(...roadTextOutline(el));
+  if (el.type === 'moto_box' || el.type === 'moto_turn_box') collect.push(...getMotoBoxCorners(el));
 
   if (collect.length === 0) return { minX: 0, maxX: 0, minY: 0, maxY: 0 };
 
@@ -890,6 +901,10 @@ interface CadCanvasProps {
   insets?: { top: number; right: number; bottom: number; left: number };
   /** 數值改變時將視圖縮放至全圖（載入專案／範本時由 App 觸發） */
   fitRequest?: number;
+  /** 游標世界座標與縮放（px/m）變動時通知外層狀態列 */
+  onCursorMove?: (x: number, y: number, zoom: number) => void;
+  /** 由外層狀態列顯示座標時，隱藏畫布內建的座標列 */
+  hideStatusBar?: boolean;
   elements: CadElement[];
   onAddElement: (el: CadElement) => void;
   onUpdateElement: (el: CadElement) => void;
@@ -937,6 +952,8 @@ export default function CadCanvas({
   canvasBackground = '#101216',
   insets = { top: 0, right: 0, bottom: 0, left: 0 },
   fitRequest,
+  onCursorMove,
+  hideStatusBar = false,
   elements,
   onAddElement,
   onUpdateElement,
@@ -989,6 +1006,7 @@ export default function CadCanvas({
   const [isPanning, setIsPanning] = useState(false);
   const [panStart, setPanStart] = useState({ x: 0, y: 0 });
   const [mouseWorld, setMouseWorld] = useState<Point2D>({ x: 0, y: 0 });
+  useEffect(() => { onCursorMove?.(mouseWorld.x, mouseWorld.y, viewport.zoom); }, [mouseWorld, viewport.zoom]);
   const [snapTarget, setSnapTarget] = useState<SnapTarget | null>(null);
 
   // Advanced Tools States and Refs
@@ -1257,48 +1275,8 @@ export default function CadCanvas({
       return;
     }
 
-    let minX = Infinity;
-    let maxX = -Infinity;
-    let minY = Infinity;
-    let maxY = -Infinity;
-
-    const addPoint = (p: Point2D) => {
-      if (p.x < minX) minX = p.x;
-      if (p.x > maxX) maxX = p.x;
-      if (p.y < minY) minY = p.y;
-      if (p.y > maxY) maxY = p.y;
-    };
-
-    elements.forEach(el => {
-      if (el.type === 'guideline' || el.type === 'yellow_double' || el.type === 'white_double' || el.type === 'white_dashed' || el.type === 'yellow_dashed' || el.type === 'white_solid' || el.type === 'red_solid' || el.type === 'yellow_solid' || el.type === 'smart_path' || el.type === 'parking_zone') {
-        const line = el as any;
-        const ref = getLineBezierRepresentation(line);
-        if (ref) {
-          ref.points.forEach((p: Point2D) => addPoint(p));
-        } else if (line.p1 && line.p2) {
-          addPoint(line.p1);
-          addPoint(line.p2);
-        }
-      } else if (el.type === 'sketch_circle') {
-        const circ = el as any;
-        addPoint({ x: circ.center.x - circ.radius, y: circ.center.y });
-        addPoint({ x: circ.center.x + circ.radius, y: circ.center.y });
-        addPoint({ x: circ.center.x, y: circ.center.y - circ.radius });
-        addPoint({ x: circ.center.x, y: circ.center.y + circ.radius });
-      } else if (el.type === 'three_center_curve') {
-        const curve = el as ThreeCenterCurveElement;
-        curve.points.forEach(p => addPoint(p));
-        addPoint(curve.pStart);
-        addPoint(curve.pIntersection);
-        addPoint(curve.pEnd);
-      } else if (el.type === 'island') {
-        const island = el as IslandElement;
-        island.points.forEach(p => addPoint(p));
-      } else if (el.type === 'text') {
-        const txt = el as TextElement;
-        addPoint(txt.p);
-      }
-    });
+    // 以實際繪製的幾何計算範圍，所有標線類型（含標字、行穿線、停等區）一致
+    const { minX, minY, maxX, maxY } = primitivesBounds(elements.flatMap(el => getElementPrimitives(el)));
 
     if (minX === Infinity || minY === Infinity) return;
 
@@ -1383,7 +1361,7 @@ export default function CadCanvas({
           }
         }
       }
-      if (e.key === 'v' || e.key === 'V' || e.code === 'KeyV') {
+      if ((e.key === 'v' || e.key === 'V' || e.code === 'KeyV') && !e.ctrlKey && !e.metaKey && !e.altKey) {
         if (appMode === 'cad') {
           e.preventDefault();
           if (isLineOrPathTool(activeTool) && spPoints.length >= 2) {
@@ -2811,12 +2789,18 @@ export default function CadCanvas({
             minDistanceScreen = 0;
           }
         } else if (el.type === 'text') {
+          // 以文字外框（含旋轉）判斷，長字串點兩端也選得到
           const txt = el as any;
           const screenTxt = worldToScreen(txt.p.x, txt.p.y);
-          const d = Math.hypot(sx - screenTxt.x, sy - screenTxt.y);
-          if (d < minDistanceScreen + 10) {
-            minDistanceScreen = d;
-            selected = el;
+          const px = Math.max(9, (txt.fontSize || 1) * viewport.zoom);
+          const halfW = (Array.from(String(txt.text || '')).reduce((w: number, ch: string) => w + (/[\x00-\x7f]/.test(ch) ? 0.55 : 1), 0) * px) / 2 + 4;
+          const a = txt.angle || 0;
+          const dx = sx - screenTxt.x, dy = sy - screenTxt.y;
+          const u = dx * Math.cos(a) - dy * Math.sin(a);
+          const v = dx * Math.sin(a) + dy * Math.cos(a);
+          if (Math.abs(u) <= halfW && Math.abs(v) <= px / 2 + 4) {
+            const d = Math.hypot(dx, dy) * 0.1;
+            if (d < minDistanceScreen) { minDistanceScreen = d; selected = el; }
           }
         } else if (el.type === 'parking_zone') {
           const zone = el as any;
@@ -2925,7 +2909,22 @@ export default function CadCanvas({
               }
             }
           }
-        } else if (el.type === 'moto_box' || el.type === 'moto_turn_box' || el.type === 'road_text') {
+        } else if (el.type === 'road_text') {
+          // 點在整串標字的外框內（含 4 px 容差）即選取
+          const o = roadTextOutline(el as any).map(q => worldToScreen(q.x, q.y));
+          let inside = false;
+          for (let h = 0, k = o.length - 1; h < o.length; k = h++) {
+            if (((o[h].y > sy) !== (o[k].y > sy)) && (sx < (o[k].x - o[h].x) * (sy - o[h].y) / (o[k].y - o[h].y) + o[h].x)) inside = !inside;
+          }
+          let d = Infinity;
+          for (let h = 0; h < o.length; h++) {
+            const q1 = o[h], q2 = o[(h + 1) % o.length];
+            const dx = q2.x - q1.x, dy = q2.y - q1.y, l2 = dx * dx + dy * dy || 1;
+            const t = Math.max(0, Math.min(1, ((sx - q1.x) * dx + (sy - q1.y) * dy) / l2));
+            d = Math.min(d, Math.hypot(sx - q1.x - dx * t, sy - q1.y - dy * t));
+          }
+          if (inside || d < 4) { selected = el; minDistanceScreen = 0; }
+        } else if (el.type === 'moto_box' || el.type === 'moto_turn_box') {
           // 以幾何原語判斷：點在填滿多邊形內、或靠近文字／外框
           const prims = getElementPrimitives(el);
           for (const pr of prims) {
@@ -3785,13 +3784,15 @@ export default function CadCanvas({
       } else if (el.type === 'text') {
         const txt = el as TextElement;
         const screenPt = worldToScreen(txt.p.x, txt.p.y);
-        ctx.fillStyle = textDrawColor;
         const pxFontSize = Math.max(9, txt.fontSize * zoom);
-        
-        ctx.font = `${pxFontSize}px sans-serif`;
+        ctx.save();
+        ctx.translate(screenPt.x, screenPt.y);
+        ctx.rotate(-(txt.angle || 0));
+        ctx.fillStyle = textDrawColor;
+        ctx.font = `${pxFontSize}px "Noto Sans TC", "Microsoft JhengHei", "PingFang TC", sans-serif`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillText(txt.text, screenPt.x, screenPt.y);
+        ctx.fillText(txt.text, 0, 0);
 
         if (isSelected) {
           const boxw = ctx.measureText(txt.text).width + 12;
@@ -3799,9 +3800,10 @@ export default function CadCanvas({
           ctx.strokeStyle = '#64748b';
           ctx.lineWidth = 1;
           ctx.beginPath();
-          ctx.rect(screenPt.x - boxw/2, screenPt.y - boxh/2, boxw, boxh);
+          ctx.rect(-boxw / 2, -boxh / 2, boxw, boxh);
           ctx.stroke();
         }
+        ctx.restore();
       } else if (el.type === 'smart_path') {
         const sp = el as any;
         const isSelected = appMode === 'cad' && (selectedElement?.id === el.id || selectedElementIds.includes(el.id));
@@ -4084,12 +4086,13 @@ export default function CadCanvas({
           ctx.restore();
 
           if (isSelected) {
+            // 插入點：小方塊，不遮住箭頭本體
             const hs = worldToScreen(arrow.p.x, arrow.p.y);
-            ctx.fillStyle = '#a855f7'; // purple lever
-            ctx.strokeStyle = whiteColor;
+            ctx.fillStyle = '#ffffff';
+            ctx.strokeStyle = '#a855f7';
             ctx.lineWidth = 1.5;
             ctx.beginPath();
-            ctx.arc(hs.x, hs.y, 6.5, 0, 2 * Math.PI);
+            ctx.rect(hs.x - 3.5, hs.y - 3.5, 7, 7);
             ctx.fill();
             ctx.stroke();
           }
@@ -5187,8 +5190,8 @@ export default function CadCanvas({
       ctx.textAlign = 'center';
       const showEquiv = !bgImage || bgImage.isCalibrated;
       const scaleText = showEquiv 
-        ? `📐 像素: ${(curDist * zoom).toFixed(0)} px (相當於 ${curDist.toFixed(2)} 公尺)`
-        : `📐 像素: ${(curDist * zoom).toFixed(0)} px`;
+        ? `${(curDist * zoom).toFixed(0)} px (相當於 ${curDist.toFixed(2)} 公尺)`
+        : `${(curDist * zoom).toFixed(0)} px`;
       ctx.fillText(scaleText, mid.x, mid.y - 12);
       ctx.restore();
     }
@@ -5218,7 +5221,7 @@ export default function CadCanvas({
       ctx.textAlign = 'center';
       ctx.shadowColor = 'rgba(0, 0, 0, 0.8)';
       ctx.shadowBlur = 4;
-      ctx.fillText("✦ 移動游標選擇三角形朝向，左鍵點擊確認 ✦", mouseS.x, mouseS.y - 30);
+      ctx.fillText("移動游標決定三角形朝向，點擊確認", mouseS.x, mouseS.y - 30);
       ctx.restore();
     }
 
@@ -5480,7 +5483,7 @@ export default function CadCanvas({
         <div 
           id="hard-collision-warning-hud"
           style={{ top: 16 + insets.top }}
-          className="absolute top-4 left-1/2 transform -translate-x-1/2 z-33 flex items-center gap-3 px-5 py-3 bg-red-950 border border-red-500 rounded-xl shadow-2xl backdrop-blur-md text-red-200 animate-pulse max-w-xl"
+          className="absolute top-4 left-1/2 transform -translate-x-1/2 z-33 flex items-center gap-3 px-5 py-3 bg-red-950 border border-red-500 rounded-xl shadow-lg text-red-200 max-w-xl"
         >
           <svg className="w-5 h-5 text-red-500 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M12 9v4M12 17h.01M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/></svg>
           <div className="text-xs font-bold leading-snug">
@@ -5493,7 +5496,7 @@ export default function CadCanvas({
         <div 
           id="soft-collision-warning-hud"
           style={{ top: 16 + insets.top }}
-          className="absolute top-4 left-1/2 transform -translate-x-1/2 z-33 flex items-center gap-3 px-5 py-3 bg-yellow-950 border border-yellow-500/80 rounded-xl shadow-2xl backdrop-blur-md text-yellow-100 max-w-xl"
+          className="absolute top-4 left-1/2 transform -translate-x-1/2 z-33 flex items-center gap-3 px-5 py-3 bg-yellow-950 border border-yellow-500/80 rounded-xl shadow-lg text-yellow-100 max-w-xl"
         >
           <svg className="w-5 h-5 text-yellow-500 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M12 9v4M12 17h.01M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/></svg>
           <div className="text-xs font-bold leading-snug">
@@ -5509,7 +5512,7 @@ export default function CadCanvas({
           id="btn-zoom-to-fit"
           onClick={handleZoomToFit}
           title="Zoom to Fit & Center (視窗導正 / 回歸全圖中心)"
-          className="flex items-center justify-center w-10 h-10 rounded-lg bg-zinc-900/90 hover:bg-zinc-800 border border-zinc-800/85 text-zinc-300 hover:text-white shadow-2xl backdrop-blur-md transition-all cursor-pointer"
+          className="flex items-center justify-center w-10 h-10 rounded-lg bg-zinc-900/90 hover:bg-zinc-800 border border-zinc-800/85 text-zinc-300 hover:text-white shadow-lg transition-all cursor-pointer"
         >
           <Search className="w-5 h-5 text-zinc-300" />
         </button>
@@ -5517,7 +5520,7 @@ export default function CadCanvas({
 
       {/* Floating SmartPath Draw Actions Box */}
       {isLineOrPathTool(activeTool) && spPoints.length >= 1 && (
-        <div id="smartpath-floating-draw-bar" style={{ bottom: 64 + insets.bottom }} className={`absolute bottom-16 left-1/2 transform -translate-x-1/2 z-25 flex gap-2 p-2 rounded-xl shadow-2xl backdrop-blur-md ${
+        <div id="smartpath-floating-draw-bar" style={{ bottom: 64 + insets.bottom }} className={`absolute bottom-16 left-1/2 transform -translate-x-1/2 z-25 flex gap-2 p-2 rounded-xl shadow-lg ${
           'bg-zinc-900/95 border border-zinc-800/80'
         }`}>
           <button
@@ -5583,7 +5586,7 @@ export default function CadCanvas({
             case 'road_arrow':
               return { name, desc: '點擊車道中央即放置，會自動對齊車道行車方向；按住往想要的方向拖曳可自訂朝向（Shift 每 15°）。' };
             case 'road_text':
-              return { name, desc: '點擊車道中央，輸入字樣（例：慢、停、公車專用）後按 Enter。字會沿行車方向由近而遠排列。' };
+              return { name, desc: '點擊車道中央（最靠近駕駛人的一字），輸入字樣後按 Enter。字樣往行車方向延伸，順著字頭由上而下閱讀。' };
             case 'text_label':
               return { name, desc: '點擊要放文字的位置，輸入內容後按 Enter（Esc 取消）。' };
             case 'parking_space':
@@ -5605,11 +5608,9 @@ export default function CadCanvas({
 
         const instr = getToolInstruction(activeTool, spPoints.length, draftPoints.length);
         return (
-          <div style={{ top: 16 + insets.top, left: 16 + insets.left }} className={`absolute top-4 left-4 pointer-events-none px-4 py-3 rounded-lg shadow-2xl backdrop-blur-md max-w-sm flex flex-col gap-1 transition-all z-10 ${
-            'bg-zinc-900/90 border border-zinc-800/80'
-          }`}>
-            <h4 className="text-xs font-bold tracking-wider text-zinc-300">
-              ✦ {instr.name}
+          <div style={{ top: 16 + insets.top, left: 16 + insets.left }} className="absolute top-4 left-4 pointer-events-none px-3 py-2 rounded-md max-w-sm flex flex-col gap-0.5 z-10 bg-zinc-900/90 border border-zinc-800">
+            <h4 className="text-xs font-bold text-zinc-300">
+              {instr.name}
             </h4>
             <p className="text-[10px] text-zinc-500 leading-snug">
               {instr.desc}
@@ -5619,13 +5620,13 @@ export default function CadCanvas({
       })()}
 
       {/* Touch Navigation Helpers on Right Bottom corner */}
-      <div id="canvas-status-bar" style={{ bottom: 16 + insets.bottom, left: 16 + insets.left }} className="absolute bottom-4 left-4 flex gap-4 text-[10px] font-mono px-3 py-1.5 rounded-md pointer-events-none backdrop-blur-sm z-10 bg-zinc-900/60 border border-zinc-800/20 text-zinc-500">
+      {!hideStatusBar && <div id="canvas-status-bar" style={{ bottom: 16 + insets.bottom, left: 16 + insets.left }} className="absolute bottom-4 left-4 flex gap-4 text-[10px] font-mono px-3 py-1.5 rounded-md pointer-events-none z-10 bg-zinc-900/60 border border-zinc-800/20 text-zinc-500">
         <span className="text-zinc-300">X {mouseWorld.x.toFixed(2)}　Y {mouseWorld.y.toFixed(2)} m</span>
-        <span>縮放 {Math.round(viewport.zoom * 10)}%</span>
+        <span title="以 96 dpi 螢幕估算的出圖比例">比例 1:{(() => { const n = 3780 / viewport.zoom; const m = Math.pow(10, Math.floor(Math.log10(n)) - 1); return Math.round(n / m) * m; })()}</span>
         <span className="hidden xl:inline">Shift 正交／15°</span>
         <span className="hidden xl:inline">Space 或中鍵 平移</span>
         <span className="hidden xl:inline">Esc 完成／取消</span>
-      </div>
+      </div>}
 
       {/* Dynamic Scale Bar on Right Bottom corner */}
       <div style={{ bottom: 16 + insets.bottom, right: 16 + insets.right }} className="absolute bottom-4 right-4 flex flex-col items-center select-none pointer-events-none z-10 font-mono text-[10px] gap-1 transition-all text-white drop-shadow-[0_1.5px_1.5px_rgba(0,0,0,0.8)]">
@@ -5640,7 +5641,7 @@ export default function CadCanvas({
       {contextMenu && onContextAction && (
         <>
           <div className="absolute inset-0 z-40" onPointerDown={() => setContextMenu(null)} onContextMenu={(e) => e.preventDefault()} />
-          <div id="canvas-context-menu" className="absolute z-50 w-44 py-1 rounded-lg bg-zinc-900/95 border border-zinc-700 shadow-2xl text-xs text-zinc-200" style={{ left: contextMenu.sx, top: contextMenu.sy }}>
+          <div id="canvas-context-menu" className="absolute z-50 w-44 py-1 rounded-lg bg-zinc-900/95 border border-zinc-700 shadow-lg text-xs text-zinc-200" style={{ left: contextMenu.sx, top: contextMenu.sy }}>
             {([
               ['copy', '複製', 'Ctrl+C', !!(selectedElement || selectedElementIds.length)],
               ['paste', '貼上', 'Ctrl+V', canPaste],
@@ -5665,16 +5666,20 @@ export default function CadCanvas({
 
       {textDraft && (
         <div
-          className="absolute z-50 -translate-x-1/2 -translate-y-full flex flex-col gap-1 p-2 rounded-lg bg-zinc-900/95 border border-blue-500/60 shadow-2xl"
-          style={{ left: textDraft.sx, top: textDraft.sy - 8 }}
+          className={`absolute z-50 -translate-x-1/2 ${textDraft.sy < 90 ? '' : '-translate-y-full'} flex flex-col gap-1 p-2 rounded-md bg-zinc-900/95 border border-blue-500/60 shadow-lg`}
+          // 靠近畫布上緣時改放在點擊位置下方，避免被切掉
+          style={{ left: Math.max(130, textDraft.sx), top: textDraft.sy < 90 ? textDraft.sy + 12 : textDraft.sy - 8 }}
         >
           <span className="text-[10px] text-zinc-400">{textDraft.kind === 'road_text' ? '路面標字（例：慢、停、公車專用）' : '文字標註'}</span>
           <input
             id="inline-text-input"
             autoFocus
+            onFocus={(e) => e.currentTarget.select()}
             value={textDraft.value}
             onChange={(e) => setTextDraft({ ...textDraft, value: e.target.value })}
             onKeyDown={(e) => {
+              // 注音／拼音輸入法選字時的 Enter 不算送出
+              if (e.nativeEvent.isComposing || e.keyCode === 229) { e.stopPropagation(); return; }
               if (e.key === 'Enter') commitTextDraft();
               if (e.key === 'Escape') setTextDraft(null);
               e.stopPropagation();
@@ -5687,8 +5692,8 @@ export default function CadCanvas({
       )}
 
       {calibrationDialog && (
-        <div className="absolute inset-0 z-[100] bg-black/75 flex items-center justify-center p-4 backdrop-blur-sm">
-          <div className="bg-[#14161c] border border-zinc-800 p-5 rounded-2xl max-w-sm w-full shadow-2xl flex flex-col gap-4">
+        <div className="absolute inset-0 z-[100] bg-black/75 flex items-center justify-center p-4">
+          <div className="bg-[#14161c] border border-zinc-800 p-5 rounded-lg max-w-sm w-full shadow-lg flex flex-col gap-4">
             <div className="flex items-center gap-2 text-red-400 border-b border-zinc-800 pb-2.5">
               <Ruler className="w-4 h-4 text-indigo-400 shrink-0" />
               <h3 className="text-xs font-bold text-white tracking-wider">校正背景底圖比例尺</h3>
