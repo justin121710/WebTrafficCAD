@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="WebTrafficCAD">
+  <title>WebTrafficCAD：斜透視道路＋平面游標（1B）</title>
+  <defs><clipPath id="tile"><rect width="64" height="64" rx="12"/></clipPath></defs>
+  <g clip-path="url(#tile)">
+    <rect width="64" height="64" fill="#1d2127"/>
+    <path d="M10 16H21.5L56 64H10Z" fill="#3a3d42"/>
+    <path d="M12 16H15V64H12Z M20.1 16H20.9L54 64H50Z" fill="#f2f3f5"/>
+    <path d="M17.2 17.9L18 17.9L19.4 21.8L18.4 21.8Z M19.5 25.6L20.8 25.6L23.2 32.3L21.5 32.3Z M23.1 37.6L25 37.6L28.6 47.7L26.2 47.7Z M28.2 54.4L31 54.4L35.2 66L31.6 66Z" fill="#f2b705"/>
+    <path d="M36 8V30.95L42.08 25.28L46.13 34.33L50.18 32.57L46.26 23.66H54.23Z" fill="#f2b705" stroke="#111316" stroke-width="1.6" stroke-linejoin="miter"/>
+  </g>
+</svg>
