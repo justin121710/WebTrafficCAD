@@ -28,10 +28,10 @@ export default function SimPanel({ polished, projectName }: { polished?: boolean
   const tab = store.ui.rightTab;
   return (
     <div id="sim-panel" className="flex flex-col h-full min-h-0" style={{ color: 'var(--ui-text)' }}>
-      <div className="flex gap-1 p-1 m-3 mb-0 rounded-lg shrink-0" style={{ background: 'var(--ui-surface2)' }}>
+      <div className="flex gap-1 p-1 m-3 mb-0 rounded shrink-0" style={{ background: 'var(--ui-surface2)' }}>
         {([['vehicle', '① 車輛'], ['path', '② 路徑'], ['result', '③ 結果']] as const).map(([k, label]) => (
           <button key={k} id={`sim-tab-${k}`} onClick={() => store.setUi({ rightTab: k })}
-            className={`flex-1 py-1.5 text-xs cursor-pointer transition-all ${polished ? 'rounded-lg' : 'rounded-md'} ${tab === k && polished ? 'accent-gradient' : ''}`}
+            className={`flex-1 py-1.5 text-xs cursor-pointer transition-all ${polished ? 'rounded' : 'rounded'} ${tab === k && polished ? 'accent-gradient' : ''}`}
             style={tab === k ? (polished ? {} : { background: 'var(--ui-accent)', color: 'var(--ui-accent-text)', fontWeight: 700 }) : { color: 'var(--ui-muted)' }}>
             {label}
           </button>
@@ -137,7 +137,7 @@ function VehicleTab({ store }: { store: SimStore }) {
     const on = ids.includes(v.id);
     const isFocus = v.id === focusId;
     return (
-      <div key={v.id} id={`sim-vehicle-${v.id}`} className="rounded-lg px-2.5 py-2 cursor-pointer transition-colors"
+      <div key={v.id} id={`sim-vehicle-${v.id}`} className="rounded px-2.5 py-2 cursor-pointer transition-colors"
         style={{ background: isFocus ? 'var(--ui-accent-soft)' : 'var(--ui-surface2)', border: `1px solid ${on ? 'var(--ui-accent)' : 'var(--ui-border)'}` }}
         onClick={() => { setIds([v.id]); store.setUi({ activeVehicleId: v.id }); }}
         title={v.source}>
@@ -185,7 +185,7 @@ function VehicleTab({ store }: { store: SimStore }) {
         {focus.category === 'custom' && (
           <label className={rowCls}><span>名稱</span>
             <input value={focus.name} onChange={e => store.updateCustomVehicle(focus.id, { name: e.target.value, short: e.target.value }, `veh:${focus.id}:name`)}
-              className="w-40 px-1.5 py-1 rounded-md text-[12px] outline-none" style={{ background: 'var(--ui-surface)', border: '1px solid var(--ui-border)', color: 'var(--ui-text)' }} />
+              className="w-40 px-1.5 py-1 rounded text-[12px] outline-none" style={{ background: 'var(--ui-surface)', border: '1px solid var(--ui-border)', color: 'var(--ui-text)' }} />
           </label>
         )}
         {focus.category !== 'custom' && <Hint>修改任何數值會自動另存為自訂車種，原設計車種不變。</Hint>}
@@ -237,7 +237,7 @@ function VehicleTab({ store }: { store: SimStore }) {
           <p className="text-[10.5px] leading-relaxed mt-1" style={{ color: 'var(--ui-muted)' }}>{focus.source}{focus.note ? `。${focus.note}` : ''}</p>
         </details>
         {focus.category === 'custom' && (
-          <button onClick={() => store.deleteCustomVehicle(focus.id)} className="mt-2 w-full py-1.5 text-[11.5px] rounded-md cursor-pointer" style={{ border: '1px solid var(--ui-border)', color: '#f87171' }}>刪除此自訂車種</button>
+          <button onClick={() => store.deleteCustomVehicle(focus.id)} className="mt-2 w-full py-1.5 text-[11.5px] rounded cursor-pointer" style={{ border: '1px solid var(--ui-border)', color: '#f87171' }}>刪除此自訂車種</button>
         )}
       </Card>
       <Hint>預設尺寸請依交通部《公路路線設計規範》等主管機關最新公告版本核對後再用於送審。</Hint>
@@ -256,7 +256,7 @@ function PathRow({ store, p, active }: { store: SimStore; p: SimPath; active: bo
     <button id={id} title={title} disabled={disabled} onClick={e => { e.stopPropagation(); onClick(); }} className="p-1 rounded cursor-pointer hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed" style={{ color: 'var(--ui-muted)' }}>{icon}</button>
   );
   return (
-    <div id={`sim-path-row-${p.id}`} onClick={() => store.selectPath(p.id)} className="flex items-center gap-1.5 px-2 py-1.5 rounded-lg cursor-pointer"
+    <div id={`sim-path-row-${p.id}`} onClick={() => store.selectPath(p.id)} className="flex items-center gap-1.5 px-2 py-1.5 rounded cursor-pointer"
       style={active ? { background: 'var(--ui-accent-soft)', boxShadow: 'inset 3px 0 0 var(--ui-accent)' } : { opacity: p.visible ? 1 : 0.5 }}>
       <label className="relative w-4 h-4 rounded-full shrink-0 cursor-pointer" style={{ background: p.color, border: '1px solid var(--ui-border)' }} title="變更顏色" onClick={e => e.stopPropagation()}>
         <input type="color" value={p.color} onChange={e => store.updatePath(p.id, x => ({ ...x, color: e.target.value }), `color:${p.id}`)} className="absolute inset-0 opacity-0 w-full h-full cursor-pointer" />
@@ -295,7 +295,7 @@ function PathTab({ store, polished }: { store: SimStore; polished?: boolean }) {
           {paths.length > 0 && <button onClick={() => store.clearAll()} className="text-[11px] cursor-pointer" style={{ color: '#f87171' }}>全部清除</button>}
         </div>
         {store.draft && (
-          <div className="flex items-center gap-2 px-2 py-1.5 rounded-lg mb-1" style={{ background: 'var(--ui-accent-soft)', boxShadow: 'inset 3px 0 0 var(--ui-accent)' }}>
+          <div className="flex items-center gap-2 px-2 py-1.5 rounded mb-1" style={{ background: 'var(--ui-accent-soft)', boxShadow: 'inset 3px 0 0 var(--ui-accent)' }}>
             <span className="w-4 h-4 rounded-full" style={{ background: store.draft.color }} />
             <span className="text-[12.5px] flex-1">{store.draft.name}（繪製中）</span>
             <button id="sim-draft-finish" onClick={() => store.finishDraft()} className="text-[11px] px-2 py-0.5 rounded cursor-pointer" style={{ background: 'var(--ui-accent)', color: 'var(--ui-accent-text)' }}>完成 Enter</button>
@@ -397,7 +397,7 @@ function ChainCard({ store, path }: { store: SimStore; path: SimPath }) {
       <label className={rowCls}>
         <span>接續自</span>
         <select id="sim-chain-from" value={path.chainFrom ?? ''} onChange={e => store.updatePath(path.id, p => ({ ...p, chainFrom: e.target.value || null }))}
-          className="max-w-[60%] text-[12px] rounded-md px-1.5 py-1 outline-none cursor-pointer" style={{ background: 'var(--ui-surface)', color: 'var(--ui-text)', border: '1px solid var(--ui-border)' }}>
+          className="max-w-[60%] text-[12px] rounded px-1.5 py-1 outline-none cursor-pointer" style={{ background: 'var(--ui-surface)', color: 'var(--ui-text)', border: '1px solid var(--ui-border)' }}>
           <option value="">（獨立軌跡）</option>
           {options.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
         </select>
@@ -406,8 +406,8 @@ function ChainCard({ store, path }: { store: SimStore; path: SimPath }) {
       {children.length > 0 && <Hint>後續：{children.map(c => c.name).join('、')}</Hint>}
       {!isDraft && (
         <div className="flex gap-2 mt-2">
-          <button id="sim-continue-forward" onClick={() => store.continueFrom(path.id, 'forward')} className="flex-1 py-1.5 text-[11.5px] rounded-md cursor-pointer" style={{ background: 'var(--ui-accent-soft)', color: 'var(--ui-accent)', border: '1px solid var(--ui-border)' }}>從終點接續前進</button>
-          <button id="sim-continue-reverse" onClick={() => store.continueFrom(path.id, 'reverse')} className="flex-1 py-1.5 text-[11.5px] rounded-md cursor-pointer" style={{ background: 'var(--ui-accent-soft)', color: 'var(--ui-accent)', border: '1px solid var(--ui-border)' }}>從終點接續倒車</button>
+          <button id="sim-continue-forward" onClick={() => store.continueFrom(path.id, 'forward')} className="flex-1 py-1.5 text-[11.5px] rounded cursor-pointer" style={{ background: 'var(--ui-accent-soft)', color: 'var(--ui-accent)', border: '1px solid var(--ui-border)' }}>從終點接續前進</button>
+          <button id="sim-continue-reverse" onClick={() => store.continueFrom(path.id, 'reverse')} className="flex-1 py-1.5 text-[11.5px] rounded cursor-pointer" style={{ background: 'var(--ui-accent-soft)', color: 'var(--ui-accent)', border: '1px solid var(--ui-border)' }}>從終點接續倒車</button>
         </div>
       )}
       <Hint>例：大貨車前進進入裝卸區後倒車入位、停車場出入口的前進＋倒車調整。倒車段以後軸沿路徑計算。</Hint>
@@ -490,7 +490,7 @@ function SourceEditor({ store, path, setSource, isDraft }: { store: SimStore; pa
   const step = isDraft ? store.ui.intersectionStep : 'done';
   const setP = (patch: Partial<typeof pr>, key: string) => setSource({ kind: 'intersection', params: { ...pr, ...patch } }, `int:${path.id}:${key}`);
   const stepChip = (k: string, label: string, done: boolean, cur: boolean) => (
-    <div key={k} className="flex-1 text-center py-1 rounded-md text-[11px]" style={cur ? { background: 'var(--ui-accent)', color: 'var(--ui-accent-text)', fontWeight: 700 } : done ? { background: 'var(--ui-accent-soft)', color: 'var(--ui-accent)' } : { background: 'var(--ui-surface)', color: 'var(--ui-muted)' }}>{label}</div>
+    <div key={k} className="flex-1 text-center py-1 rounded text-[11px]" style={cur ? { background: 'var(--ui-accent)', color: 'var(--ui-accent-text)', fontWeight: 700 } : done ? { background: 'var(--ui-accent-soft)', color: 'var(--ui-accent)' } : { background: 'var(--ui-surface)', color: 'var(--ui-muted)' }}>{label}</div>
   );
   return (
     <>
@@ -574,7 +574,7 @@ function ResultCard({ store, e }: { store: SimStore; e: ResultEntry }) {
         <div className="mt-2 space-y-1">
           <div className="text-[11px] font-bold" style={{ color: 'var(--ui-muted)' }}>衝突（點擊定位）</div>
           {r.conflicts.map(c => (
-            <button key={c.obstacleId} onClick={() => jump(c.at, c.pose)} className="w-full flex items-center gap-2 px-2 py-1 rounded-md text-left text-[11.5px] cursor-pointer hover:bg-white/10" style={{ border: '1px solid var(--ui-border)' }}>
+            <button key={c.obstacleId} onClick={() => jump(c.at, c.pose)} className="w-full flex items-center gap-2 px-2 py-1 rounded text-left text-[11.5px] cursor-pointer hover:bg-white/10" style={{ border: '1px solid var(--ui-border)' }}>
               <Crosshair className="w-3.5 h-3.5 shrink-0" style={{ color: c.severity === 'intrusion' ? '#ef4444' : '#f59e0b' }} />
               <span className="flex-1 truncate">{c.label} {SEV[c.severity]}</span>
               <span className="font-mono text-[10.5px]" style={{ color: 'var(--ui-muted)' }}>{c.severity === 'intrusion' ? `深 ${c.depth.toFixed(2)} m` : c.severity === 'clearance' ? `${c.minDist.toFixed(2)} m` : ''}</span>
@@ -634,7 +634,7 @@ function ResultTab({ store, projectName }: { store: SimStore; projectName: strin
             </tbody>
           </table>
           <div className="flex gap-2 mt-2">
-            <button id="sim-export-csv" onClick={() => download(`${base}_轉彎檢核表.csv`, reportCsv(buildReportRows(committed)), 'text/csv;charset=utf-8')} className="flex-1 flex items-center justify-center gap-1.5 py-1.5 text-[11.5px] rounded-md cursor-pointer" style={{ background: 'var(--ui-accent-soft)', color: 'var(--ui-accent)', border: '1px solid var(--ui-border)' }}>
+            <button id="sim-export-csv" onClick={() => download(`${base}_轉彎檢核表.csv`, reportCsv(buildReportRows(committed)), 'text/csv;charset=utf-8')} className="flex-1 flex items-center justify-center gap-1.5 py-1.5 text-[11.5px] rounded cursor-pointer" style={{ background: 'var(--ui-accent-soft)', color: 'var(--ui-accent)', border: '1px solid var(--ui-border)' }}>
               <FileDown className="w-3.5 h-3.5" /> 檢核表 CSV
             </button>
             <button id="sim-print-report" onClick={() => {
@@ -642,7 +642,7 @@ function ResultTab({ store, projectName }: { store: SimStore; projectName: strin
               if (!w) { store.onToast('瀏覽器封鎖了彈出視窗，請允許後再試', 'error'); return; }
               w.document.write(reportHtml(buildReportRows(committed), projectName || '未命名', { bufferM: settings.bufferM }));
               w.document.close();
-            }} className="flex-1 flex items-center justify-center gap-1.5 py-1.5 text-[11.5px] rounded-md cursor-pointer" style={{ border: '1px solid var(--ui-border)', color: 'var(--ui-text)' }}>
+            }} className="flex-1 flex items-center justify-center gap-1.5 py-1.5 text-[11.5px] rounded cursor-pointer" style={{ border: '1px solid var(--ui-border)', color: 'var(--ui-text)' }}>
               <Printer className="w-3.5 h-3.5" /> 列印／PDF
             </button>
           </div>
@@ -672,7 +672,7 @@ function ResultTab({ store, projectName }: { store: SimStore; projectName: strin
         <Hint>硬障礙：建築線、人行道（及設定為實體島的槽化線），檢核侵入與淨距。軟侵入：分向限制線、雙白線、路面邊線、紅黃實線、槽化線，只回報越線。停止線、行人穿越道、車道虛線不列入（正常轉彎本來就會越過）。</Hint>
       </div>
 
-      <div className="flex gap-2 text-[11px] leading-relaxed p-2.5 rounded-lg" style={{ background: 'var(--ui-surface2)', color: 'var(--ui-muted)' }}>
+      <div className="flex gap-2 text-[11px] leading-relaxed p-2.5 rounded" style={{ background: 'var(--ui-surface2)', color: 'var(--ui-muted)' }}>
         <Info className="w-4 h-4 shrink-0 mt-0.5" />
         <span>本模擬採低速運動學（單軌模型），不考慮輪胎側滑，適用於路口轉彎、迴轉等低速（約 15 km/h 以下）情境；播放速度只影響動畫，不影響軌跡。</span>
       </div>

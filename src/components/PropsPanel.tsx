@@ -40,7 +40,7 @@ function Row({ label, children, title }: { label: string; children: React.ReactN
 }
 
 const fieldStyle: React.CSSProperties = { background: 'var(--ui-field)', color: 'var(--ui-text)', border: '1px solid var(--ui-border)' };
-const fieldCls = 'h-[21px] px-1.5 text-xs outline-none focus:border-[var(--ui-accent)] min-w-0';
+const fieldCls = 'h-[21px] px-1.5 text-xs rounded outline-none focus:border-[var(--ui-accent)] min-w-0';
 
 /** 數值欄：輸入中不打斷，Enter／離開時套用並限制範圍；↑↓ 以步距調整 */
 function Num({ value, onChange, min = -Infinity, max = Infinity, step = 0.1, unit, digits = 2, id }: {
@@ -97,7 +97,7 @@ function Select<T extends string>({ value, options, onChange, id }: { value: T; 
 
 function Seg<T extends string>({ value, options, onChange }: { value: T; options: [T, string][]; onChange: (v: T) => void }) {
   return (
-    <div className="flex flex-1" style={{ border: '1px solid var(--ui-border)' }}>
+    <div className="flex flex-1 rounded overflow-hidden" style={{ border: '1px solid var(--ui-border)' }}>
       {options.map(([v, l]) => (
         <button key={v} type="button" aria-pressed={value === v} onClick={() => onChange(v)} className="flex-1 h-[19px] px-1 text-[11px] cursor-pointer whitespace-nowrap"
           style={value === v ? { background: 'var(--ui-accent)', color: 'var(--ui-accent-text)' } : { color: 'var(--ui-muted)' }}>
@@ -118,14 +118,14 @@ function Check({ checked, onChange, id, label }: { checked: boolean; onChange: (
 }
 
 function Val({ children, tone }: { children: React.ReactNode; tone?: 'ok' | 'bad' }) {
-  return <span className="font-mono px-1 truncate" style={{ color: tone === 'bad' ? '#f87171' : tone === 'ok' ? '#5ccf8a' : 'var(--ui-text)' }}>{children}</span>;
+  return <span className="font-mono px-1 truncate" style={{ color: tone === 'bad' ? '#f87171' : 'var(--ui-text)' }}>{children}</span>;
 }
 
 function Btn({ children, onClick, danger, primary, id, disabled }: { children: React.ReactNode; onClick: () => void; danger?: boolean; primary?: boolean; id?: string; disabled?: boolean; key?: React.Key }) {
   return (
-    <button id={id} type="button" disabled={disabled} onClick={onClick} className="flex-1 h-[24px] px-2 text-xs cursor-pointer whitespace-nowrap disabled:opacity-35 enabled:hover:brightness-125"
+    <button id={id} type="button" disabled={disabled} onClick={onClick} className="flex-1 h-[24px] px-2 text-xs rounded cursor-pointer whitespace-nowrap disabled:opacity-35 enabled:hover:brightness-125"
       style={primary ? { background: 'var(--ui-accent)', color: 'var(--ui-accent-text)', border: '1px solid var(--ui-accent)' }
-        : { background: 'var(--ui-surface2)', color: danger ? '#f87171' : 'var(--ui-text)', border: '1px solid var(--ui-border)' }}>
+        : { background: danger ? 'transparent' : 'var(--ui-surface2)', color: 'var(--ui-text)', border: '1px solid var(--ui-border)' }}>
       {children}
     </button>
   );
@@ -567,7 +567,7 @@ export default function PropsPanel({
               <Row label="常用字樣">
                 <div className="flex flex-wrap gap-1 py-0.5">
                   {['慢', '停', '讓', '公車專用', '機慢車優先', '學校', '速限50'].map(t => (
-                    <button key={t} type="button" onClick={() => update({ text: t })} className="px-1.5 h-[19px] text-[11px] cursor-pointer" style={{ border: '1px solid var(--ui-border)', color: 'var(--ui-text)' }}>{t}</button>
+                    <button key={t} type="button" onClick={() => update({ text: t })} className="px-1.5 h-[19px] text-[11px] rounded cursor-pointer hover:bg-white/5" style={{ border: '1px solid var(--ui-border)', color: 'var(--ui-text)' }}>{t}</button>
                   ))}
                 </div>
               </Row>

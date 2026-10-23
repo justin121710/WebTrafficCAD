@@ -36,7 +36,7 @@ export function NumberField({
             const n = parseFloat(e.target.value);
             if (e.target.value.trim() !== '' && isFinite(n) && n >= min && n <= max) onChange(n);
           }}
-          className={`sim-num ${width} px-1.5 py-1 rounded-md text-right font-mono text-[12px] outline-none disabled:opacity-50`}
+          className={`sim-num ${width} px-1.5 py-1 rounded text-right font-mono text-[12px] outline-none disabled:opacity-50`}
           style={{ background: 'var(--ui-surface2)', border: `1px solid ${invalid && focused ? '#ef4444' : 'var(--ui-border)'}`, color: 'var(--ui-text)' }}
         />
         {unit && <span className="w-6 text-[11px]" style={{ color: 'var(--ui-muted)' }}>{unit}</span>}
@@ -49,7 +49,7 @@ export function Segmented<T extends string>({ value, options, onChange, polished
   value: T; options: { value: T; label: string; title?: string; disabled?: boolean }[]; onChange: (v: T) => void; polished?: boolean; id?: string;
 }) {
   return (
-    <div id={id} className="flex gap-1 p-0.5 rounded-lg" style={{ background: 'var(--ui-surface2)' }}>
+    <div id={id} className="flex gap-1 p-0.5 rounded" style={{ background: 'var(--ui-surface2)' }}>
       {options.map(o => {
         const active = o.value === value;
         return (
@@ -58,7 +58,7 @@ export function Segmented<T extends string>({ value, options, onChange, polished
             disabled={o.disabled}
             title={o.title}
             onClick={() => onChange(o.value)}
-            className={`flex-1 py-1 text-[11.5px] rounded-md cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed ${active && polished ? 'accent-gradient' : ''}`}
+            className={`flex-1 py-1 text-[11.5px] rounded cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed ${active && polished ? 'accent-gradient' : ''}`}
             style={active ? (polished ? {} : { background: 'var(--ui-accent)', color: 'var(--ui-accent-text)', fontWeight: 700 }) : { color: 'var(--ui-muted)' }}
           >
             {o.label}
@@ -71,7 +71,7 @@ export function Segmented<T extends string>({ value, options, onChange, polished
 
 export function Card({ children, className = '' }: { children: React.ReactNode; className?: string }) {
   return (
-    <div className={`rounded-lg p-3 ${className}`} style={{ background: 'var(--ui-surface2)', border: '1px solid var(--ui-border)' }}>
+    <div className={`rounded p-3 ${className}`} style={{ background: 'var(--ui-surface2)', border: '1px solid var(--ui-border)' }}>
       {children}
     </div>
   );

@@ -66,12 +66,12 @@ export default function SimHud({ bottom = 0, polished }: { bottom?: number; poli
   return (
     <>
     {compact && showMore && (
-      <div id="sim-hud-more-panel" className={`absolute left-1/2 -translate-x-1/2 z-30 flex flex-wrap items-center justify-center gap-2 px-3 py-2 shadow-lg max-w-[calc(100%-24px)] ${polished ? 'glass rounded-lg' : 'rounded-xl'}`}
+      <div id="sim-hud-more-panel" className={`absolute left-1/2 -translate-x-1/2 z-30 flex flex-wrap items-center justify-center gap-2 px-3 py-2 shadow-lg max-w-[calc(100%-24px)] ${polished ? 'glass rounded' : 'rounded'}`}
         style={{ bottom: bottom + 44 + 60, ...panelStyle }}>
         {extra}
       </div>
     )}
-    <div ref={ref} id="sim-hud" className={`absolute left-1/2 -translate-x-1/2 z-30 flex items-center gap-2 px-3 py-2 shadow-lg max-w-[calc(100%-24px)] overflow-x-auto ${polished ? 'glass rounded-lg' : 'rounded-xl'}`}
+    <div ref={ref} id="sim-hud" className={`absolute left-1/2 -translate-x-1/2 z-30 flex items-center gap-2 px-3 py-2 shadow-lg max-w-[calc(100%-24px)] overflow-x-auto ${polished ? 'glass rounded' : 'rounded'}`}
       style={{ bottom: bottom + 44, ...panelStyle }}>
       <button id="sim-play-btn" onClick={() => store.togglePlay()} title={store.playing ? '暫停（Space）' : '播放（Space）'}
         className={`w-8 h-8 shrink-0 rounded-full flex items-center justify-center cursor-pointer ${polished && store.playing ? 'accent-gradient' : ''}`}
@@ -98,14 +98,14 @@ export default function SimHud({ bottom = 0, polished }: { bottom?: number; poli
       {!compact && extra}
       {compact && (
         <div className="relative shrink-0">
-          <button id="sim-hud-more" onClick={() => setShowMore(!showMore)} title="更多讀數" className="p-1.5 rounded-md cursor-pointer" style={{ color: showMore ? 'var(--ui-accent)' : 'var(--ui-muted)', border: '1px solid var(--ui-border)' }}>
+          <button id="sim-hud-more" onClick={() => setShowMore(!showMore)} title="更多讀數" className="p-1.5 rounded cursor-pointer" style={{ color: showMore ? 'var(--ui-accent)' : 'var(--ui-muted)', border: '1px solid var(--ui-border)' }}>
             <Gauge className="w-4 h-4" />
           </button>
         </div>
       )}
       {firstConflict && (
         <button onClick={() => { store.stop(); store.requestFocus(firstConflict.at); const p = poses[Math.min(firstConflict.pose, poses.length - 1)]; if (p) store.setPlayS(p.s); }}
-          className="flex items-center gap-1 px-2 py-1 rounded-md text-[11px] cursor-pointer shrink-0" title="跳到第一個衝突位置"
+          className="flex items-center gap-1 px-2 py-1 rounded text-[11px] cursor-pointer shrink-0" title="跳到第一個衝突位置"
           style={{ color: firstConflict.severity === 'intrusion' ? '#f87171' : '#fbbf24', border: '1px solid var(--ui-border)' }}>
           <Crosshair className="w-3.5 h-3.5" /> {r.conflicts.length} 處
         </button>

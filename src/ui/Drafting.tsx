@@ -1,7 +1,7 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 
 /**
- * 製圖桌介面（Demo 1）的框架元件：選單列、功能區（Ribbon）、指令列、狀態列。
+ * 製圖桌介面的框架元件：選單列、功能區（Ribbon）、狀態列。
  * 顏色取自 .ui-drafting 的 CSS 變數，內容與動作由 App 傳入。
  */
 
@@ -44,13 +44,13 @@ export function MenuBar({ logoSrc, menus, right }: { logoSrc: string; menus: Men
             id={`menu-${m.key}-btn`}
             onClick={() => setOpen(open === m.key ? null : m.key)}
             onMouseEnter={() => { if (open && open !== m.key) setOpen(m.key); }}
-            className="h-[26px] px-2.5 text-xs cursor-pointer"
+            className="h-[24px] px-2.5 text-xs rounded cursor-pointer"
             style={{ color: 'var(--ui-text)', background: open === m.key ? 'var(--ui-surface2)' : 'transparent' }}
           >
             {m.label}
           </button>
           {open === m.key && (
-            <div id={`menu-${m.key}`} className="absolute left-0 top-full mt-px min-w-[220px] py-1 shadow-lg z-50" style={{ background: 'var(--ui-surface)', border: '1px solid var(--ui-border)' }}>
+            <div id={`menu-${m.key}`} className="absolute left-0 top-full mt-1 min-w-[220px] p-1 rounded shadow-lg z-50" style={{ background: 'var(--ui-surface)', border: '1px solid var(--ui-border)' }}>
               {m.items.map((it, i) => (
                 <React.Fragment key={i}>
                   {it.separator && <div className="my-1" style={{ borderTop: '1px solid var(--ui-border)' }} />}
@@ -58,7 +58,7 @@ export function MenuBar({ logoSrc, menus, right }: { logoSrc: string; menus: Men
                     id={it.id}
                     disabled={it.disabled}
                     onClick={() => { setOpen(null); it.onClick?.(); }}
-                    className="w-full flex items-center justify-between gap-6 px-3 py-[5px] text-xs text-left cursor-pointer disabled:opacity-35 disabled:cursor-default enabled:hover:bg-[var(--ui-accent-soft)]"
+                    className="w-full flex items-center justify-between gap-6 px-2.5 py-[5px] rounded-sm text-xs text-left cursor-pointer disabled:opacity-35 disabled:cursor-default enabled:hover:bg-[var(--ui-accent-soft)]"
                     style={{ color: it.danger ? '#f87171' : 'var(--ui-text)' }}
                   >
                     <span>{it.label}</span>
@@ -87,7 +87,7 @@ export function RibbonTabs({ tabs, value, onChange }: { tabs: [string, string][]
             key={k}
             id={`ribbon-tab-${k}`}
             onClick={() => onChange(k)}
-            className="h-[24px] px-4 text-xs cursor-pointer -mb-px"
+            className="h-[24px] px-4 text-xs rounded-t cursor-pointer -mb-px"
             style={active
               ? { background: 'var(--ui-ribbon)', color: 'var(--ui-strong)', border: '1px solid var(--ui-border)', borderBottomColor: 'var(--ui-ribbon)' }
               : { color: 'var(--ui-muted)', border: '1px solid transparent' }}
@@ -100,11 +100,25 @@ export function RibbonTabs({ tabs, value, onChange }: { tabs: [string, string][]
   );
 }
 
-export function Ribbon({ children }: { children: React.ReactNode }) {
+/** 功能區寬度不足時改為只顯示圖示（滑鼠停留顯示名稱） */
+const RibbonCompact = createContext(false);
+
+export function Ribbon({ children, compactBelow = 1360 }: { children: React.ReactNode; compactBelow?: number }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [compact, setCompact] = useState(false);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(() => setCompact(el.clientWidth < compactBelow));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [compactBelow]);
   return (
-    <div id="ribbon" className="flex items-stretch shrink-0 overflow-x-auto px-1 pt-1" style={{ background: 'var(--ui-ribbon)', borderBottom: '1px solid var(--ui-border)' }}>
-      {children}
-    </div>
+    <RibbonCompact.Provider value={compact}>
+      <div ref={ref} id="ribbon" className="flex items-stretch shrink-0 overflow-x-auto px-1 pt-1" style={{ background: 'var(--ui-ribbon)', borderBottom: '1px solid var(--ui-border)' }}>
+        {children}
+      </div>
+    </RibbonCompact.Provider>
   );
 }
 
@@ -126,7 +140,7 @@ export function RibbonBigButton({ icon, label, active, onClick, title, id }: { i
       id={id}
       onClick={onClick}
       title={title}
-      className="row-span-3 flex flex-col items-center justify-center gap-1 w-[58px] px-1 text-xs cursor-pointer hover:bg-white/5 [&_svg]:w-6 [&_svg]:h-6"
+      className="row-span-3 flex flex-col items-center justify-center gap-1 w-[58px] px-1 text-xs rounded cursor-pointer hover:bg-white/5 [&_svg]:w-6 [&_svg]:h-6"
       style={active ? { background: 'var(--ui-accent-soft)', outline: '1px solid var(--ui-accent)', outlineOffset: -1, color: 'var(--ui-strong)' } : { color: 'var(--ui-text)' }}
     >
       {icon}
@@ -136,82 +150,29 @@ export function RibbonBigButton({ icon, label, active, onClick, title, id }: { i
 }
 
 export function RibbonButton({ icon, label, active, onClick, title, disabled, id }: { icon?: React.ReactNode; label: string; active?: boolean; onClick: () => void; title?: string; disabled?: boolean; id?: string; key?: React.Key }) {
+  const compact = useContext(RibbonCompact) && !!icon;
   return (
     <button
       id={id}
       onClick={onClick}
-      title={title}
+      title={compact ? (title ? `${label}：${title}` : label) : title}
+      aria-label={label}
       disabled={disabled}
-      className="flex items-center gap-1.5 h-[24px] pl-1 pr-2 text-xs whitespace-nowrap cursor-pointer enabled:hover:bg-white/5 disabled:opacity-35 disabled:cursor-default [&_svg]:w-4 [&_svg]:h-4"
+      className={`flex items-center gap-1.5 h-[24px] ${compact ? 'w-[26px] justify-center' : 'pl-1 pr-2'} text-xs whitespace-nowrap rounded cursor-pointer enabled:hover:bg-white/5 disabled:opacity-35 disabled:cursor-default [&_svg]:w-4 [&_svg]:h-4`}
       style={active ? { background: 'var(--ui-accent-soft)', outline: '1px solid var(--ui-accent)', outlineOffset: -1, color: 'var(--ui-strong)' } : { color: 'var(--ui-text)' }}
     >
       {icon && <span className="w-4 h-4 flex items-center justify-center shrink-0">{icon}</span>}
-      <span>{label}</span>
+      {!compact && <span>{label}</span>}
     </button>
   );
 }
 
 export function RibbonCheck({ label, checked, onChange, id }: { label: string; checked: boolean; onChange: () => void; id?: string }) {
   return (
-    <label className="flex items-center gap-1.5 h-[24px] px-1.5 text-xs whitespace-nowrap cursor-pointer hover:bg-white/5" style={{ color: 'var(--ui-text)' }}>
+    <label className="flex items-center gap-1.5 h-[24px] px-1.5 text-xs whitespace-nowrap rounded cursor-pointer hover:bg-white/5" style={{ color: 'var(--ui-text)' }}>
       <input id={id} type="checkbox" checked={checked} onChange={onChange} className="m-0 cursor-pointer" style={{ accentColor: 'var(--ui-accent)' }} />
       {label}
     </label>
-  );
-}
-
-/* ------------------------------------------------------------------ 指令列 */
-export function CommandLine({ history, prompt, onSubmit, suggestions, typeToFocus }: {
-  history: string[];
-  prompt: string;
-  onSubmit: (text: string) => void;
-  suggestions: string[];
-  /** 畫布有焦點時直接打字即進入指令列（類似 AutoCAD） */
-  typeToFocus: boolean;
-}) {
-  const [value, setValue] = useState('');
-  const inputRef = useRef<HTMLInputElement>(null);
-  useEffect(() => {
-    if (!typeToFocus) return;
-    const onKey = (e: KeyboardEvent) => {
-      const t = e.target as HTMLElement;
-      if (t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement || t instanceof HTMLSelectElement || t?.isContentEditable) return;
-      if (e.ctrlKey || e.metaKey || e.altKey || e.key.length !== 1) return;
-      // V 保留給「選取」快捷鍵，空白鍵保留給平移
-      if (!/^[a-uw-z]$/i.test(e.key)) return;
-      e.preventDefault();
-      setValue(v => v + e.key);
-      inputRef.current?.focus();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [typeToFocus]);
-  return (
-    <div id="command-line" className="shrink-0 px-2.5 pt-1 pb-0.5 font-mono text-[11px] leading-[17px]" style={{ background: 'var(--ui-cmd)', borderTop: '1px solid var(--ui-border)', color: 'var(--ui-muted)' }}>
-      {history.slice(-2).map((h, i) => <div key={i} className="truncate">{h}</div>)}
-      <form
-        className="flex items-center gap-1.5"
-        style={{ color: 'var(--ui-text)' }}
-        onSubmit={e => { e.preventDefault(); const t = value.trim(); if (t) onSubmit(t); setValue(''); inputRef.current?.blur(); }}
-      >
-        <label htmlFor="command-input" className="whitespace-nowrap shrink-0 max-w-[60%] truncate">{prompt}</label>
-        <input
-          id="command-input"
-          ref={inputRef}
-          value={value}
-          list="command-suggestions"
-          onChange={e => setValue(e.target.value)}
-          onKeyDown={e => { if (e.key === 'Escape') { setValue(''); inputRef.current?.blur(); } e.stopPropagation(); }}
-          placeholder="輸入指令或工具名稱，例如 停止線、STOP、Z"
-          autoComplete="off"
-          className="flex-1 min-w-0 bg-transparent outline-none border-0 py-px"
-          style={{ color: 'var(--ui-text)', font: 'inherit' }}
-        />
-        <datalist id="command-suggestions">
-          {suggestions.map(s => <option key={s} value={s} />)}
-        </datalist>
-      </form>
-    </div>
   );
 }
 
@@ -240,7 +201,7 @@ export function StatusBar({ coordRef, scaleRef, toggles, right }: {
           aria-pressed={t.on}
           onClick={t.onClick}
           title={t.title}
-          className="h-[20px] px-2 whitespace-nowrap cursor-pointer"
+          className="h-[20px] px-2 whitespace-nowrap rounded cursor-pointer"
           style={t.on ? { background: 'var(--ui-accent-soft)', color: 'var(--ui-strong)' } : { color: 'var(--ui-muted)' }}
         >
           {t.label}

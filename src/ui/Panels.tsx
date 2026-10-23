@@ -34,7 +34,7 @@ export function LayerPanel({ elements, hidden, onToggle, onShowAll, extra }: { e
       {hidden.length > 0 && (
         <div className="flex items-center justify-between px-1 pb-1 text-[11px]" style={{ color: 'var(--ui-muted)' }}>
           <span>{hidden.length} 個圖層隱藏中，不會匯出</span>
-          <button onClick={onShowAll} className="px-2 py-0.5 cursor-pointer" style={{ border: '1px solid var(--ui-border)', color: 'var(--ui-text)' }}>全部顯示</button>
+          <button onClick={onShowAll} className="px-2 py-0.5 rounded cursor-pointer" style={{ border: '1px solid var(--ui-border)', color: 'var(--ui-text)' }}>全部顯示</button>
         </div>
       )}
       {keys.map(k => {
@@ -42,7 +42,7 @@ export function LayerPanel({ elements, hidden, onToggle, onShowAll, extra }: { e
         const def = LAYERS[k];
         const swatch = def ? PALETTES.screen[def.color] : '#888';
         return (
-          <label key={k} className="flex items-center gap-2.5 px-1.5 py-[5px] text-xs cursor-pointer hover:bg-white/5" style={{ color: isHidden ? 'var(--ui-muted)' : 'var(--ui-text)' }}>
+          <label key={k} className="flex items-center gap-2.5 px-1.5 py-[5px] text-xs rounded cursor-pointer hover:bg-white/5" style={{ color: isHidden ? 'var(--ui-muted)' : 'var(--ui-text)' }}>
             <input id={`layer-toggle-${k}`} type="checkbox" checked={!isHidden} onChange={() => onToggle(k)} className="m-0 cursor-pointer" style={{ accentColor: 'var(--ui-accent)' }} />
             <span className="w-3 h-3 shrink-0" style={{ background: swatch, border: '1px solid var(--ui-border)', opacity: isHidden ? 0.3 : 1 }} />
             <span className="flex-1 truncate">{def?.desc || k}</span>
@@ -80,7 +80,7 @@ export function QuantityPanel({ elements, onExport }: { elements: CadElement[]; 
           </tbody>
         </table>
       )}
-      <button onClick={onExport} className="mt-3 w-full py-1.5 text-xs rounded-md cursor-pointer" style={{ background: 'var(--ui-accent-soft)', color: 'var(--ui-accent)', border: '1px solid var(--ui-border)' }}>匯出 CSV（Excel 可開啟）</button>
+      <button onClick={onExport} className="mt-3 w-full py-1.5 text-xs rounded cursor-pointer" style={{ background: 'var(--ui-accent-soft)', color: 'var(--ui-accent)', border: '1px solid var(--ui-border)' }}>匯出 CSV（Excel 可開啟）</button>
       <p className="text-[10.5px] mt-2" style={{ color: 'var(--ui-muted)' }}>虛線只計實線段；面積＝長度×線寬，區域標線以多邊形面積計。</p>
     </div>
   );
@@ -97,10 +97,10 @@ export const ARROW_TYPES = [
 
 export function ArrowTypeBar({ value, onChange, style }: { value: string; onChange: (t: string) => void; style?: React.CSSProperties }) {
   return (
-    <div id="arrow-type-bar" className="absolute left-1/2 -translate-x-1/2 z-30 flex items-center gap-1 p-1 rounded-xl shadow-lg" style={{ background: 'var(--ui-surface)', border: '1px solid var(--ui-border)', backdropFilter: 'blur(12px)', ...style }}>
+    <div id="arrow-type-bar" className="absolute left-1/2 -translate-x-1/2 z-30 flex items-center gap-1 p-1 rounded shadow-lg" style={{ background: 'var(--ui-surface)', border: '1px solid var(--ui-border)', backdropFilter: 'blur(12px)', ...style }}>
       <span className="text-[11px] px-2" style={{ color: 'var(--ui-muted)' }}>箭頭</span>
       {ARROW_TYPES.map(a => (
-        <button key={a.type} onClick={() => onChange(a.type)} className="px-2.5 py-1 text-xs rounded-lg cursor-pointer"
+        <button key={a.type} onClick={() => onChange(a.type)} className="px-2.5 py-1 text-xs rounded cursor-pointer"
           style={value === a.type ? { background: 'var(--ui-accent)', color: 'var(--ui-accent-text)' } : { color: 'var(--ui-text)' }}>
           {a.name}
         </button>
@@ -114,12 +114,12 @@ export function ConfirmDialog({ dialog, onClose }: { dialog: { title: string; me
   if (!dialog) return null;
   return (
     <div className="fixed inset-0 z-[400] bg-black/60 flex items-center justify-center p-4" onClick={onClose}>
-      <div id="confirm-dialog" className="w-full max-w-sm rounded-lg p-5 shadow-lg bg-[#14161c] border border-[#2d3039] text-slate-200" onClick={e => e.stopPropagation()}>
+      <div id="confirm-dialog" className="w-full max-w-sm rounded p-5 shadow-lg bg-[#14161c] border border-[#2d3039] text-slate-200" onClick={e => e.stopPropagation()}>
         <h3 className="text-sm font-bold mb-2">{dialog.title}</h3>
         <p className="text-xs text-slate-400 leading-relaxed">{dialog.message}</p>
         <div className="flex justify-end gap-2 mt-5">
-          <button onClick={onClose} className="px-4 py-1.5 text-xs rounded-lg border border-[#2d3039] hover:bg-white/5 cursor-pointer">取消</button>
-          <button id="confirm-dialog-ok" onClick={() => { dialog.onConfirm(); onClose(); }} className="px-4 py-1.5 text-xs rounded-lg bg-red-600 hover:bg-red-500 text-white font-bold cursor-pointer">{dialog.confirmLabel}</button>
+          <button onClick={onClose} className="px-4 py-1.5 text-xs rounded border border-[#2d3039] hover:bg-white/5 cursor-pointer">取消</button>
+          <button id="confirm-dialog-ok" onClick={() => { dialog.onConfirm(); onClose(); }} className="px-4 py-1.5 text-xs rounded bg-red-600 hover:bg-red-500 text-white font-bold cursor-pointer">{dialog.confirmLabel}</button>
         </div>
       </div>
     </div>
@@ -131,11 +131,11 @@ export function AutosaveBanner({ offer, onRestore, onDiscard }: { offer: { saved
   const n = offer.project?.cad?.elements?.length ?? 0;
   const when = new Date(offer.savedAt).toLocaleString('zh-TW', { hour12: false });
   return (
-    <div id="autosave-banner" className="fixed top-[164px] left-1/2 -translate-x-1/2 z-[350] flex items-center gap-3 px-4 py-3 rounded-xl shadow-lg bg-[#14161c] border border-amber-500/50 text-slate-200 text-xs max-w-xl">
+    <div id="autosave-banner" className="fixed top-[164px] left-1/2 -translate-x-1/2 z-[350] flex items-center gap-3 px-4 py-3 rounded shadow-lg bg-[#14161c] border border-amber-500/50 text-slate-200 text-xs max-w-xl">
       <History className="w-4 h-4 text-amber-400 shrink-0" />
       <span className="flex-1">找到上次自動儲存的內容（{when}，{n} 個物件）。要還原嗎？</span>
-      <button id="autosave-restore-btn" onClick={onRestore} className="px-3 py-1 rounded-lg bg-amber-500 text-black font-bold cursor-pointer">還原</button>
-      <button id="autosave-discard-btn" onClick={onDiscard} className="px-3 py-1 rounded-lg border border-[#2d3039] hover:bg-white/5 cursor-pointer">捨棄</button>
+      <button id="autosave-restore-btn" onClick={onRestore} className="px-3 py-1 rounded bg-amber-500 text-black font-bold cursor-pointer">還原</button>
+      <button id="autosave-discard-btn" onClick={onDiscard} className="px-3 py-1 rounded border border-[#2d3039] hover:bg-white/5 cursor-pointer">捨棄</button>
     </div>
   );
 }

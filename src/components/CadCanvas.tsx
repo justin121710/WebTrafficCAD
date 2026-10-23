@@ -905,6 +905,8 @@ interface CadCanvasProps {
   onCursorMove?: (x: number, y: number, zoom: number) => void;
   /** 由外層狀態列顯示座標時，隱藏畫布內建的座標列 */
   hideStatusBar?: boolean;
+  /** 繪製工具的游標樣式 */
+  drawCursor?: DrawCursorStyle;
   elements: CadElement[];
   onAddElement: (el: CadElement) => void;
   onUpdateElement: (el: CadElement) => void;
@@ -946,6 +948,36 @@ interface CadCanvasProps {
   setRoadArrowConfig?: (cfg: any) => void;
 }
 
+/**
+ * 繪製工具的游標（32×32 SVG，白線加深色描邊，淺色或深色底都看得清楚）。
+ * hot：游標熱點，也就是實際點下的位置。
+ */
+export type DrawCursorStyle = 'cross' | 'pen' | 'precision';
+const DARK = '#111317', LIGHT = '#f2f3f5';
+export const DRAW_CURSORS: Record<DrawCursorStyle, { label: string; svg: string; hot: [number, number] }> = {
+  cross: {
+    label: '精準十字',
+    hot: [16, 16],
+    svg: `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><path d="M16 2V12.5M16 19.5V30M2 16H12.5M19.5 16H30" stroke="${DARK}" stroke-width="3"/><path d="M16 2V12.5M16 19.5V30M2 16H12.5M19.5 16H30" stroke="${LIGHT}" stroke-width="1"/><rect x="15" y="15" width="2" height="2" fill="${LIGHT}" stroke="${DARK}" stroke-width="0.5"/></svg>`,
+  },
+  pen: {
+    label: '筆尖',
+    hot: [2, 2],
+    svg: `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><path d="M2 2L15 6.5L22 13.5L13.5 22L6.5 15Z" fill="${DARK}" stroke="${LIGHT}" stroke-width="1.3" stroke-linejoin="miter"/><path d="M2 2L9.6 9.6" stroke="${LIGHT}" stroke-width="1.2"/><rect x="9.4" y="9.4" width="3" height="3" fill="none" stroke="${LIGHT}" stroke-width="1.1" transform="rotate(45 10.9 10.9)"/><path d="M15.5 20L20 15.5L23.5 19L19 23.5Z" fill="${LIGHT}" stroke="${DARK}" stroke-width="0.8"/></svg>`,
+  },
+  precision: {
+    label: '十字＋筆尖',
+    hot: [9, 9],
+    svg: `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><path d="M9 1V6.5M9 11.5V17M1 9H6.5M11.5 9H17" stroke="${DARK}" stroke-width="3"/><path d="M9 1V6.5M9 11.5V17M1 9H6.5M11.5 9H17" stroke="${LIGHT}" stroke-width="1"/><path d="M17 17L25 19.5L29.5 24L24 29.5L19.5 25Z" fill="${DARK}" stroke="${LIGHT}" stroke-width="1.1" stroke-linejoin="miter"/><path d="M17 17L21.6 21.6" stroke="${LIGHT}" stroke-width="1"/></svg>`,
+  },
+};
+export const drawCursorUrl = (k: DrawCursorStyle) => `data:image/svg+xml;utf8,${encodeURIComponent(DRAW_CURSORS[k].svg)}`;
+
+/** 編輯介面（選取、夾點、把手、草稿線、鎖點）統一使用單一顏色 */
+const EDIT = '#4c9eff';
+const EDIT_BG = '#1d2127';
+const editA = (a: number) => `rgba(76, 158, 255, ${a})`;
+
 export default function CadCanvas({
   onContextAction,
   canPaste = false,
@@ -954,6 +986,7 @@ export default function CadCanvas({
   fitRequest,
   onCursorMove,
   hideStatusBar = false,
+  drawCursor = 'cross',
   elements,
   onAddElement,
   onUpdateElement,
@@ -3565,7 +3598,7 @@ export default function CadCanvas({
 
       // Primary central axes coordinate crosses
       const origin = worldToScreen(0, 0);
-      ctx.strokeStyle = 'rgba(59, 130, 246, 0.28)';
+      ctx.strokeStyle = editA(0.28);
       ctx.lineWidth = 1.5;
       ctx.beginPath();
       ctx.moveTo(0, origin.y); ctx.lineTo(canvas.width, origin.y);
@@ -3599,7 +3632,7 @@ export default function CadCanvas({
           // 標線本體：與 PNG／DXF 匯出共用同一份幾何（src/markings.ts）
           renderPrimitives(ctx, getElementPrimitives(el), { zoom, w2s: worldToScreen, palette: 'screen' });
           if (isSelected && el.type === 'bicycle_lane') {
-            renderPrimitives(ctx, getElementPrimitives(el), { zoom, w2s: worldToScreen, palette: 'screen', overrideColor: '#ec4899' });
+            renderPrimitives(ctx, getElementPrimitives(el), { zoom, w2s: worldToScreen, palette: 'screen', overrideColor: EDIT });
           }
 
           // Render anchors and symmetric guidelines if selected!
@@ -3608,7 +3641,7 @@ export default function CadCanvas({
               const ptS = worldToScreen(pt.x, pt.y);
 
               if (ref.cpLeft[j] && ref.cpRight[j]) {
-                ctx.strokeStyle = 'rgba(168, 85, 247, 0.45)';
+                ctx.strokeStyle = editA(0.45);
                 ctx.lineWidth = 1;
                 const cpLeftS = worldToScreen(ref.cpLeft[j].x, ref.cpLeft[j].y);
                 const cpRightS = worldToScreen(ref.cpRight[j].x, ref.cpRight[j].y);
@@ -3618,7 +3651,7 @@ export default function CadCanvas({
                 ctx.lineTo(cpRightS.x, cpRightS.y);
                 ctx.stroke();
 
-                ctx.fillStyle = '#a855f7'; // Purple handles
+                ctx.fillStyle = EDIT; // 控制把手
                 ctx.beginPath();
                 ctx.arc(cpLeftS.x, cpLeftS.y, 3.5, 0, 2 * Math.PI);
                 ctx.arc(cpRightS.x, cpRightS.y, 3.5, 0, 2 * Math.PI);
@@ -3626,8 +3659,8 @@ export default function CadCanvas({
               }
 
               const isAnchorSelected = selectedAnchorIndices?.includes(j);
-              ctx.fillStyle = isAnchorSelected ? '#10b981' : '#06b6d4'; // Emerald green if selected, cyan if regular
-              ctx.strokeStyle = whiteColor;
+              ctx.fillStyle = isAnchorSelected ? EDIT : EDIT_BG; // 選取的節點為實心，其餘為空心
+              ctx.strokeStyle = EDIT;
               ctx.lineWidth = isAnchorSelected ? 2.5 : 1.5;
               ctx.beginPath();
               const size = isAnchorSelected ? 12 : 9;
@@ -3640,7 +3673,7 @@ export default function CadCanvas({
       } else if (el.type === 'sketch_circle') {
         const circ = el as any;
         const sCenter = worldToScreen(circ.center.x, circ.center.y);
-        ctx.strokeStyle = 'rgba(14, 165, 233, 0.35)'; // Blue translucent
+        ctx.strokeStyle = editA(0.35); 
         ctx.lineWidth = Math.max(1.5, zoom * 0.08);
         ctx.setLineDash([6, 6]);
         ctx.beginPath();
@@ -3649,7 +3682,7 @@ export default function CadCanvas({
         ctx.setLineDash([]);
 
         // Little dynamic center cursor
-        ctx.strokeStyle = 'rgba(14, 165, 233, 0.55)';
+        ctx.strokeStyle = editA(0.55);
         ctx.lineWidth = 1.0;
         ctx.beginPath();
         ctx.moveTo(sCenter.x - 6, sCenter.y); ctx.lineTo(sCenter.x + 6, sCenter.y);
@@ -3668,7 +3701,7 @@ export default function CadCanvas({
 
           // Perimeter handle point
           const perimPt = worldToScreen(circ.center.x + circ.radius, circ.center.y);
-          ctx.fillStyle = '#a855f7';
+          ctx.fillStyle = EDIT;
           ctx.beginPath();
           ctx.rect(perimPt.x - 5, perimPt.y - 5, 10, 10);
           ctx.fill();
@@ -3691,7 +3724,7 @@ export default function CadCanvas({
           const O1s = worldToScreen(curve.O1.x, curve.O1.y);
           const O2s = worldToScreen(curve.O2.x, curve.O2.y);
           const O3s = worldToScreen(curve.O3.x, curve.O3.y);
-          ctx.fillStyle = '#ec4899';
+          ctx.fillStyle = EDIT;
           ctx.beginPath();
           ctx.arc(O1s.x, O1s.y, 4, 0, 2*Math.PI);
           ctx.arc(O2s.x, O2s.y, 4, 0, 2*Math.PI);
@@ -3699,7 +3732,7 @@ export default function CadCanvas({
           ctx.fill();
         }
 
-        ctx.strokeStyle = '#3b82f6';
+        ctx.strokeStyle = EDIT;
         ctx.lineWidth = Math.max(2, zoom * 0.15);
         ctx.lineCap = 'butt';
         ctx.lineJoin = 'miter';
@@ -3716,7 +3749,7 @@ export default function CadCanvas({
         const c12s = worldToScreen(curve.C12.x, curve.C12.y);
         const c23s = worldToScreen(curve.C23.x, curve.C23.y);
 
-        ctx.fillStyle = '#f59e0b';
+        ctx.fillStyle = EDIT;
         ctx.beginPath();
         ctx.arc(t1s.x, t1s.y, 3, 0, 2*Math.PI);
         ctx.arc(t2s.x, t2s.y, 3, 0, 2*Math.PI);
@@ -3752,7 +3785,7 @@ export default function CadCanvas({
               const ptS = worldToScreen(pt.x, pt.y);
 
               if (ref.cpLeft[j] && ref.cpRight[j]) {
-                ctx.strokeStyle = 'rgba(168, 85, 247, 0.45)';
+                ctx.strokeStyle = editA(0.45);
                 ctx.lineWidth = 1;
                 const cpLeftS = worldToScreen(ref.cpLeft[j].x, ref.cpLeft[j].y);
                 const cpRightS = worldToScreen(ref.cpRight[j].x, ref.cpRight[j].y);
@@ -3762,7 +3795,7 @@ export default function CadCanvas({
                 ctx.lineTo(cpRightS.x, cpRightS.y);
                 ctx.stroke();
 
-                ctx.fillStyle = '#a855f7'; // Purple handles
+                ctx.fillStyle = EDIT; // 控制把手
                 ctx.beginPath();
                 ctx.arc(cpLeftS.x, cpLeftS.y, 3.5, 0, 2 * Math.PI);
                 ctx.arc(cpRightS.x, cpRightS.y, 3.5, 0, 2 * Math.PI);
@@ -3770,8 +3803,8 @@ export default function CadCanvas({
               }
 
               const isAnchorSelected = selectedAnchorIndices?.includes(j);
-              ctx.fillStyle = isAnchorSelected ? '#10b981' : '#06b6d4'; // Emerald green if selected, cyan if regular
-              ctx.strokeStyle = whiteColor;
+              ctx.fillStyle = isAnchorSelected ? EDIT : EDIT_BG; // 選取的節點為實心，其餘為空心
+              ctx.strokeStyle = EDIT;
               ctx.lineWidth = isAnchorSelected ? 2.5 : 1.5;
               ctx.beginPath();
               const size = isAnchorSelected ? 12 : 9;
@@ -3797,7 +3830,7 @@ export default function CadCanvas({
         if (isSelected) {
           const boxw = ctx.measureText(txt.text).width + 12;
           const boxh = pxFontSize + 8;
-          ctx.strokeStyle = '#64748b';
+          ctx.strokeStyle = EDIT;
           ctx.lineWidth = 1;
           ctx.beginPath();
           ctx.rect(-boxw / 2, -boxh / 2, boxw, boxh);
@@ -3827,7 +3860,7 @@ export default function CadCanvas({
           const allQuads = [...swept.tractorEnvelopes, ...(swept.trailerEnvelopes || [])];
 
           // Draw the backdrop bottom background fill color (Deselected is soft, Selected is brighter)
-          ctx.fillStyle = isSelected ? 'rgba(6, 182, 212, 0.35)' : 'rgba(6, 182, 212, 0.20)';
+          ctx.fillStyle = isSelected ? editA(0.35) : editA(0.20);
           ctx.beginPath();
           allQuads.forEach(quad => {
             const s1 = worldToScreen(quad.p1.x, quad.p1.y);
@@ -3845,7 +3878,7 @@ export default function CadCanvas({
           // Only if selected, draw track boundaries and vehicle bodies (ghost elements)
           if (isSelected) {
             // Left & Right ribbon borders
-            ctx.strokeStyle = '#22d3ee';
+            ctx.strokeStyle = EDIT;
             ctx.lineWidth = 1;
             
             ctx.beginPath();
@@ -3873,8 +3906,8 @@ export default function CadCanvas({
               const s3 = worldToScreen(q.p3.x, q.p3.y);
               const s4 = worldToScreen(q.p4.x, q.p4.y);
 
-              ctx.fillStyle = 'rgba(6, 182, 212, 0.16)';
-              ctx.strokeStyle = '#67e8f9';
+              ctx.fillStyle = editA(0.16);
+              ctx.strokeStyle = EDIT;
               ctx.lineWidth = 1.6;
 
               ctx.beginPath();
@@ -3922,7 +3955,7 @@ export default function CadCanvas({
             const pNext = wholePath[k + 1];
 
             const angle = calculateSteeringAngle(pPrev, pCurr, pNext, wheelbase);
-            ctx.strokeStyle = angle > getMaxSteerForVehicle(pathVehicle) ? '#ef4444' : '#06b6d4'; // 超過該車種最大轉角為紅色
+            ctx.strokeStyle = angle > getMaxSteerForVehicle(pathVehicle) ? '#ef4444' : EDIT; // 超過該車種最大轉角為紅色
             ctx.beginPath();
             const s1 = worldToScreen(pCurr.x, pCurr.y);
             const s2 = worldToScreen(pNext.x, pNext.y);
@@ -3937,7 +3970,7 @@ export default function CadCanvas({
           sp.points.forEach((pt: Point2D, j: number) => {
             const ptS = worldToScreen(pt.x, pt.y);
 
-            ctx.strokeStyle = 'rgba(168, 85, 247, 0.55)'; // Purple handle line
+            ctx.strokeStyle = editA(0.55); // 控制把手連線
             ctx.lineWidth = 1;
             const cpLeftS = worldToScreen(sp.cpLeft[j].x, sp.cpLeft[j].y);
             const cpRightS = worldToScreen(sp.cpRight[j].x, sp.cpRight[j].y);
@@ -3947,15 +3980,15 @@ export default function CadCanvas({
             ctx.lineTo(cpRightS.x, cpRightS.y);
             ctx.stroke();
 
-            ctx.fillStyle = '#a855f7'; // purple handles
+            ctx.fillStyle = EDIT; // 控制把手
             ctx.beginPath();
             ctx.arc(cpLeftS.x, cpLeftS.y, 3.5, 0, 2 * Math.PI);
             ctx.arc(cpRightS.x, cpRightS.y, 3.5, 0, 2 * Math.PI);
             ctx.fill();
 
             const isAnchorSelected = selectedAnchorIndices?.includes(j);
-            ctx.fillStyle = isAnchorSelected ? '#10b981' : '#06b6d4'; // Emerald green if selected, cyan if regular
-            ctx.strokeStyle = whiteColor;
+            ctx.fillStyle = isAnchorSelected ? EDIT : EDIT_BG; // 選取的節點為實心，其餘為空心
+            ctx.strokeStyle = EDIT;
             ctx.lineWidth = isAnchorSelected ? 2.5 : 1.5;
             ctx.beginPath();
             const size = isAnchorSelected ? 12 : 9;
@@ -3990,7 +4023,7 @@ export default function CadCanvas({
 
         // Handle overlay markings when selected
         if (isSelected) {
-          ctx.strokeStyle = '#64748b';
+          ctx.strokeStyle = EDIT;
           ctx.lineWidth = 1.5;
           ctx.setLineDash([4, 4]);
 
@@ -4024,7 +4057,7 @@ export default function CadCanvas({
         ctx.lineJoin = 'round';
         ctx.strokeStyle = whiteColor;
         ctx.lineWidth = Math.max(1.5, zoom * 0.1); // 10cm standard paint lines
-        ctx.fillStyle = isSelected ? 'rgba(56, 189, 248, 0.22)' : 'rgba(255, 255, 255, 0.05)';
+        ctx.fillStyle = isSelected ? editA(0.22) : 'rgba(255, 255, 255, 0.05)';
 
         ctx.beginPath();
         ctx.moveTo(0, 0);
@@ -4036,7 +4069,7 @@ export default function CadCanvas({
         ctx.stroke();
 
         if (pk.showSizeLabel !== false && Math.min(W, L) * zoom > 46) {
-          ctx.fillStyle = isSelected ? '#38bdf8' : 'rgba(255, 255, 255, 0.55)';
+          ctx.fillStyle = isSelected ? EDIT : 'rgba(255, 255, 255, 0.55)';
           ctx.font = '9px JetBrains Mono, monospace, sans-serif';
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
@@ -4053,7 +4086,7 @@ export default function CadCanvas({
         if (isSelected) {
           const center = getParkingSpaceCenter(pk);
           const hs = worldToScreen(center.x, center.y);
-          ctx.fillStyle = '#38bdf8'; // Sky blue handle
+          ctx.fillStyle = EDIT; // 夾點
           ctx.strokeStyle = whiteColor;
           ctx.lineWidth = 1.5;
           ctx.beginPath();
@@ -4069,9 +4102,9 @@ export default function CadCanvas({
           ctx.lineCap = 'round';
           ctx.lineJoin = 'round';
           
-          ctx.strokeStyle = isSelected ? '#38bdf8' : whiteColor;
+          ctx.strokeStyle = isSelected ? EDIT : whiteColor;
           ctx.lineWidth = isSelected ? Math.max(2, zoom * 0.08) : Math.max(1, zoom * 0.03);
-          ctx.fillStyle = isSelected ? 'rgba(56, 189, 248, 0.25)' : whiteColor;
+          ctx.fillStyle = isSelected ? editA(0.25) : whiteColor;
 
           ctx.beginPath();
           const pStart = worldToScreen(pts[0].x, pts[0].y);
@@ -4089,7 +4122,7 @@ export default function CadCanvas({
             // 插入點：小方塊，不遮住箭頭本體
             const hs = worldToScreen(arrow.p.x, arrow.p.y);
             ctx.fillStyle = '#ffffff';
-            ctx.strokeStyle = '#a855f7';
+            ctx.strokeStyle = EDIT;
             ctx.lineWidth = 1.5;
             ctx.beginPath();
             ctx.rect(hs.x - 3.5, hs.y - 3.5, 7, 7);
@@ -4102,7 +4135,7 @@ export default function CadCanvas({
         const ref = getLineBezierRepresentation(zone);
         if (ref) {
           ctx.save();
-          ctx.strokeStyle = isSelected ? 'rgba(56, 189, 248, 0.4)' : 'rgba(255, 255, 255, 0.15)';
+          ctx.strokeStyle = isSelected ? editA(0.4) : 'rgba(255, 255, 255, 0.15)';
           ctx.lineWidth = 1.0;
           ctx.setLineDash([4, 6]);
           ctx.beginPath();
@@ -4123,7 +4156,7 @@ export default function CadCanvas({
           ctx.lineJoin = 'round';
           ctx.strokeStyle = whiteColor;
           ctx.lineWidth = Math.max(1.5, zoom * 0.1);
-          ctx.fillStyle = isSelected ? 'rgba(56, 189, 248, 0.22)' : 'rgba(255, 255, 255, 0.05)';
+          ctx.fillStyle = isSelected ? editA(0.22) : 'rgba(255, 255, 255, 0.05)';
 
           const s1 = worldToScreen(slot.corners[0].x, slot.corners[0].y);
           const s2 = worldToScreen(slot.corners[1].x, slot.corners[1].y);
@@ -4140,7 +4173,7 @@ export default function CadCanvas({
           ctx.stroke();
 
           if ((el as any).showSizeLabel !== false && Math.min(slot.width, slot.length) * zoom > 46) {
-            ctx.fillStyle = isSelected ? '#38bdf8' : 'rgba(255, 255, 255, 0.55)';
+            ctx.fillStyle = isSelected ? EDIT : 'rgba(255, 255, 255, 0.55)';
             ctx.font = '9px JetBrains Mono, monospace, sans-serif';
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
@@ -4162,7 +4195,7 @@ export default function CadCanvas({
           const s2 = worldToScreen(p2.x, p2.y);
           
           ctx.save();
-          ctx.strokeStyle = isSelected ? '#f59e0b' : '#fb923c';
+          ctx.strokeStyle = isSelected ? EDIT : '#fb923c';
           ctx.lineWidth = isSelected ? 2.5 : 1.5;
           ctx.setLineDash([5, 5]);
           ctx.beginPath();
@@ -4176,7 +4209,7 @@ export default function CadCanvas({
             ctx.save();
             ctx.translate(sx, sy);
             ctx.rotate(angle + Math.PI / 4);
-            ctx.strokeStyle = isSelected ? '#f59e0b' : '#fb923c';
+            ctx.strokeStyle = isSelected ? EDIT : '#fb923c';
             ctx.lineWidth = 2.0;
             ctx.beginPath();
             ctx.moveTo(0, -6);
@@ -4204,7 +4237,7 @@ export default function CadCanvas({
           ctx.restore();
         }
       } else if (el.type === 'moto_box' || el.type === 'moto_turn_box' || el.type === 'road_text') {
-        renderPrimitives(ctx, getElementPrimitives(el), { zoom, w2s: worldToScreen, palette: 'screen', overrideColor: isSelected ? '#38bdf8' : undefined });
+        renderPrimitives(ctx, getElementPrimitives(el), { zoom, w2s: worldToScreen, palette: 'screen', overrideColor: isSelected ? EDIT : undefined });
       } else if (el.type === 'angular_dimension') {
         const angEl = el as AngularDimensionElement;
         const sCenter = worldToScreen(angEl.center.x, angEl.center.y);
@@ -4215,7 +4248,7 @@ export default function CadCanvas({
         const a2 = Math.atan2(sStart2.y - sCenter.y, sStart2.x - sCenter.x);
 
         ctx.save();
-        ctx.strokeStyle = isSelected ? '#a855f7' : '#ec4899';
+        ctx.strokeStyle = isSelected ? EDIT : '#ec4899';
         ctx.lineWidth = isSelected ? 1.5 : 1.0;
         ctx.setLineDash([3, 3]);
         ctx.beginPath();
@@ -4227,7 +4260,7 @@ export default function CadCanvas({
         ctx.restore();
 
         ctx.save();
-        ctx.strokeStyle = isSelected ? '#a855f7' : '#ec4899';
+        ctx.strokeStyle = isSelected ? EDIT : '#ec4899';
         ctx.lineWidth = isSelected ? 2.5 : 1.5;
         
         const radius = 30;
@@ -4271,9 +4304,9 @@ export default function CadCanvas({
       ctx.rotate(-stampAngle);
       ctx.translate(-(stampLength / 2) * zoom, (stampWidth / 2) * zoom);
 
-      ctx.strokeStyle = 'rgba(56, 189, 248, 0.75)';
+      ctx.strokeStyle = editA(0.75);
       ctx.lineWidth = Math.max(1.5, zoom * 0.1);
-      ctx.fillStyle = 'rgba(56, 189, 248, 0.18)';
+      ctx.fillStyle = editA(0.18);
       ctx.setLineDash([4, 4]);
 
       ctx.beginPath();
@@ -4306,9 +4339,9 @@ export default function CadCanvas({
         ctx.save();
         ctx.lineCap = 'round';
         ctx.lineJoin = 'round';
-        ctx.strokeStyle = 'rgba(56, 189, 248, 0.75)';
+        ctx.strokeStyle = editA(0.75);
         ctx.lineWidth = Math.max(1.5, zoom * 0.05);
-        ctx.fillStyle = 'rgba(56, 189, 248, 0.18)';
+        ctx.fillStyle = editA(0.18);
         ctx.setLineDash([4, 4]);
 
         ctx.beginPath();
@@ -4333,7 +4366,7 @@ export default function CadCanvas({
       const s2 = worldToScreen(p2.x, p2.y);
       
       ctx.save();
-      ctx.strokeStyle = '#f59e0b';
+      ctx.strokeStyle = EDIT;
       ctx.lineWidth = 1.5;
       ctx.setLineDash([5, 5]);
       ctx.beginPath();
@@ -4347,7 +4380,7 @@ export default function CadCanvas({
         ctx.save();
         ctx.translate(sx, sy);
         ctx.rotate(angle + Math.PI / 4);
-        ctx.strokeStyle = '#f59e0b';
+        ctx.strokeStyle = EDIT;
         ctx.lineWidth = 2.0;
         ctx.beginPath();
         ctx.moveTo(0, -6);
@@ -4381,7 +4414,7 @@ export default function CadCanvas({
         const corner2 = { x: s2.x + lineDir.x * size, y: s2.y + lineDir.y * size };
         const corner3 = { x: corner2.x + perpDir.x * size, y: corner2.y + perpDir.y * size };
         
-        ctx.strokeStyle = '#f59e0b';
+        ctx.strokeStyle = EDIT;
         ctx.lineWidth = 1.5;
         ctx.beginPath();
         ctx.moveTo(corner1.x, corner1.y);
@@ -4401,7 +4434,7 @@ export default function CadCanvas({
 
       if (spPoints.length === 1) {
         // Draw helper dashed line from center to mouse
-        ctx.strokeStyle = 'rgba(236, 72, 153, 0.75)';
+        ctx.strokeStyle = editA(0.75);
         ctx.lineWidth = 1.5;
         ctx.setLineDash([4, 4]);
         ctx.beginPath();
@@ -4413,7 +4446,7 @@ export default function CadCanvas({
         const sStart1 = worldToScreen(pStart1.x, pStart1.y);
 
         // Draw solid line from center to pStart1
-        ctx.strokeStyle = '#ec4899';
+        ctx.strokeStyle = EDIT;
         ctx.lineWidth = 1.5;
         ctx.beginPath();
         ctx.moveTo(sCenter.x, sCenter.y);
@@ -4421,7 +4454,7 @@ export default function CadCanvas({
         ctx.stroke();
 
         // Draw helper dashed line from center to mouse
-        ctx.strokeStyle = 'rgba(236, 72, 153, 0.75)';
+        ctx.strokeStyle = editA(0.75);
         ctx.lineWidth = 1.5;
         ctx.setLineDash([4, 4]);
         ctx.beginPath();
@@ -4439,7 +4472,7 @@ export default function CadCanvas({
         while (diff < -Math.PI) diff += 2 * Math.PI;
 
         const radius = 24; // 24px
-        ctx.strokeStyle = '#ec4899';
+        ctx.strokeStyle = EDIT;
         ctx.lineWidth = 1.5;
         ctx.beginPath();
         ctx.arc(sCenter.x, sCenter.y, radius, a1, a1 + diff, diff < 0);
@@ -4479,7 +4512,7 @@ export default function CadCanvas({
     // 9. 3-point Arc Preview
     if (activeTool === 'arc_3point' && spPoints.length > 0) {
       ctx.save();
-      ctx.strokeStyle = 'rgba(56, 189, 248, 0.75)';
+      ctx.strokeStyle = editA(0.75);
       ctx.lineWidth = Math.max(1.5, zoom * 0.1);
       ctx.setLineDash([4, 4]);
 
@@ -4515,7 +4548,7 @@ export default function CadCanvas({
         if (draftPoints.length === 1) {
           const sCenter = worldToScreen(draftPoints[0].x, draftPoints[0].y);
           const r = distance(draftPoints[0], mouseWorld);
-          ctx.strokeStyle = 'rgba(14, 165, 233, 0.55)';
+          ctx.strokeStyle = editA(0.55);
           ctx.lineWidth = 1.5;
           ctx.beginPath();
           ctx.arc(sCenter.x, sCenter.y, r * zoom, 0, 2 * Math.PI);
@@ -4545,9 +4578,9 @@ export default function CadCanvas({
           const s3 = worldToScreen(c3.x, c3.y);
           const s4 = worldToScreen(c4.x, c4.y);
 
-          ctx.strokeStyle = 'rgba(56, 189, 248, 0.7)';
+          ctx.strokeStyle = editA(0.7);
           ctx.lineWidth = Math.max(1.5, zoom * 0.1);
-          ctx.fillStyle = 'rgba(56, 189, 248, 0.18)';
+          ctx.fillStyle = editA(0.18);
 
           ctx.beginPath();
           ctx.moveTo(s1.x, s1.y);
@@ -4567,7 +4600,7 @@ export default function CadCanvas({
           ctx.stroke();
         }
       } else if (activeTool === 'crosswalk') {
-        ctx.strokeStyle = '#34d399'; // Emerald outlines
+        ctx.strokeStyle = EDIT; // 外框
         ctx.lineWidth = 1.5;
 
         const sA1 = draftPoints[0] ? worldToScreen(draftPoints[0].x, draftPoints[0].y) : null;
@@ -4583,7 +4616,7 @@ export default function CadCanvas({
           ctx.stroke();
 
           // Green start anchor
-          ctx.fillStyle = '#10b981';
+          ctx.fillStyle = EDIT;
           ctx.fillRect(sA1.x - 4, sA1.y - 4, 8, 8);
         } else if (draftPoints.length === 2 && sA1 && sA2) {
           // Line A is fixed. From A2, drawing to click B1
@@ -4592,13 +4625,13 @@ export default function CadCanvas({
           ctx.lineTo(sA2.x, sA2.y);
           ctx.stroke();
 
-          ctx.strokeStyle = 'rgba(52, 211, 153, 0.45)';
+          ctx.strokeStyle = editA(0.45);
           ctx.beginPath();
           ctx.moveTo(sA2.x, sA2.y);
           ctx.lineTo(sMouse.x, sMouse.y);
           ctx.stroke();
 
-          ctx.fillStyle = '#10b981';
+          ctx.fillStyle = EDIT;
           ctx.fillRect(sA1.x - 4, sA1.y - 4, 8, 8);
           ctx.fillRect(sA2.x - 4, sA2.y - 4, 8, 8);
         } else if (draftPoints.length === 3 && sA1 && sA2 && sB1) {
@@ -4614,7 +4647,7 @@ export default function CadCanvas({
           ctx.stroke();
 
           // envelope edges
-          ctx.strokeStyle = 'rgba(251, 191, 36, 0.4)'; // amber translucency
+          ctx.strokeStyle = editA(0.4); // amber translucency
           ctx.beginPath();
           ctx.moveTo(sA1.x, sA1.y);
           ctx.lineTo(sB1.x, sB1.y);
@@ -4639,10 +4672,10 @@ export default function CadCanvas({
             ctx.fill();
           });
 
-          ctx.fillStyle = '#10b981';
+          ctx.fillStyle = EDIT;
           ctx.fillRect(sA1.x - 4, sA1.y - 4, 8, 8);
           ctx.fillRect(sA2.x - 4, sA2.y - 4, 8, 8);
-          ctx.fillStyle = '#3b82f6';
+          ctx.fillStyle = EDIT;
           ctx.fillRect(sB1.x - 4, sB1.y - 4, 8, 8);
         }
       }
@@ -4659,8 +4692,8 @@ export default function CadCanvas({
           
           ctx.save();
           ctx.shadowBlur = 10;
-          ctx.shadowColor = isEndpoint ? '#22c55e' : '#3b82f6';
-          ctx.fillStyle = isEndpoint ? '#22c55e' : '#3b82f6';
+          ctx.shadowColor = isEndpoint ? EDIT : EDIT;
+          ctx.fillStyle = isEndpoint ? EDIT : EDIT;
           ctx.strokeStyle = '#ffffff';
           ctx.lineWidth = 1.5;
           ctx.beginPath();
@@ -4678,7 +4711,7 @@ export default function CadCanvas({
         const a = worldToScreen(draftPoints[0].x, draftPoints[0].y);
         const m = worldToScreen(mouseWorld.x, mouseWorld.y);
         ctx.save();
-        ctx.strokeStyle = 'rgba(56, 189, 248, 0.8)';
+        ctx.strokeStyle = editA(0.8);
         ctx.setLineDash([4, 4]);
         ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(m.x, m.y); ctx.stroke();
         ctx.restore();
@@ -4688,7 +4721,7 @@ export default function CadCanvas({
         let depth = ((b.x - a.x) * (mouseWorld.y - a.y) - (b.y - a.y) * (mouseWorld.x - a.x)) / len;
         if (depth < 0) { [a, b] = [b, a]; depth = -depth; }
         const preview = { id: '__preview__', type: activeTool, p1: a, p2: b, depth: Math.max(0.5, depth) } as any;
-        renderPrimitives(ctx, getElementPrimitives(preview), { zoom, w2s: worldToScreen, palette: 'screen', overrideColor: 'rgba(56, 189, 248, 0.9)' });
+        renderPrimitives(ctx, getElementPrimitives(preview), { zoom, w2s: worldToScreen, palette: 'screen', overrideColor: editA(0.9) });
       }
     }
 
@@ -4729,7 +4762,7 @@ export default function CadCanvas({
         ctx.fill();
 
         // Connect back to start via helper pink dashed closing stroke
-        ctx.strokeStyle = 'rgba(236, 72, 153, 0.45)';
+        ctx.strokeStyle = editA(0.45);
         ctx.setLineDash([2, 3]);
         const firstPtS = worldToScreen(spPoints[0].x, spPoints[0].y);
         ctx.beginPath();
@@ -4743,7 +4776,7 @@ export default function CadCanvas({
       const isSmartPath = activeTool === 'smart_path';
       const isPavement = activeTool === 'Sidewalk' || activeTool === 'channelization' || activeTool === 'grid_box';
       if (isSmartPath || isPavement) {
-        ctx.strokeStyle = 'rgba(56, 189, 248, 0.4)';
+        ctx.strokeStyle = editA(0.4);
         ctx.setLineDash([2, 3]);
         ctx.beginPath();
         ctx.moveTo(lastPtS.x, lastPtS.y);
@@ -4776,7 +4809,7 @@ export default function CadCanvas({
           const pNext = wholeActivePath[k + 1];
 
           const angle = calculateSteeringAngle(pPrev, pCurr, pNext, wheelbase);
-          ctx.strokeStyle = angle > getMaxSteerForVehicle(designVehicle) ? '#ef4444' : '#06b6d4'; // 超過該車種最大轉角為紅色
+          ctx.strokeStyle = angle > getMaxSteerForVehicle(designVehicle) ? '#ef4444' : EDIT; // 超過該車種最大轉角為紅色
           ctx.beginPath();
           const s1 = worldToScreen(pCurr.x, pCurr.y);
           const s2 = worldToScreen(pNext.x, pNext.y);
@@ -4822,7 +4855,7 @@ export default function CadCanvas({
             renderPrimitives(ctx, getElementPrimitives(previewEl), { zoom, w2s: worldToScreen, palette: 'screen' });
           } else if (activeTool === 'parking_zone') {
             ctx.save();
-            ctx.strokeStyle = 'rgba(56, 189, 248, 0.85)';
+            ctx.strokeStyle = editA(0.85);
             ctx.lineWidth = 1.5;
             ctx.setLineDash([4, 6]);
             ctx.beginPath();
@@ -4883,7 +4916,7 @@ export default function CadCanvas({
       spPoints.forEach((pt, j) => {
         const ptS = worldToScreen(pt.x, pt.y);
 
-        ctx.strokeStyle = 'rgba(236, 72, 153, 0.45)';
+        ctx.strokeStyle = editA(0.45);
         ctx.lineWidth = 1;
         const cpLeftS = worldToScreen(spCpLeft[j].x, spCpLeft[j].y);
         const cpRightS = worldToScreen(spCpRight[j].x, spCpRight[j].y);
@@ -4893,14 +4926,14 @@ export default function CadCanvas({
         ctx.lineTo(cpRightS.x, cpRightS.y);
         ctx.stroke();
 
-        ctx.fillStyle = '#ec4899';
+        ctx.fillStyle = EDIT;
         ctx.beginPath();
         ctx.arc(cpLeftS.x, cpLeftS.y, 3, 0, 2 * Math.PI);
         ctx.arc(cpRightS.x, cpRightS.y, 3, 0, 2 * Math.PI);
         ctx.fill();
 
         const isFirstAndClosing = (j === 0 && isClosingPathDrag);
-        ctx.fillStyle = isFirstAndClosing ? '#22c55e' : '#06b6d4';
+        ctx.fillStyle = isFirstAndClosing ? EDIT : EDIT_BG;
         ctx.strokeStyle = '#ffffff';
         ctx.lineWidth = isFirstAndClosing ? 2.5 : 1.5;
         ctx.beginPath();
@@ -5005,13 +5038,13 @@ export default function CadCanvas({
           ? 'rgba(239, 68, 68, 0.15)' 
           : isSoftCollision 
             ? 'rgba(234, 179, 8, 0.15)' 
-            : 'rgba(16, 185, 129, 0.08)';
+            : editA(0.08);
 
         ctx.strokeStyle = isHardCollision 
           ? 'rgba(239, 68, 68, 0.5)' 
           : isSoftCollision 
             ? 'rgba(234, 179, 8, 0.5)' 
-            : 'rgba(56, 189, 248, 0.35)';
+            : editA(0.35);
         ctx.lineWidth = 1.5;
 
         // Left rib
@@ -5058,7 +5091,7 @@ export default function CadCanvas({
           const s3 = worldToScreen(q.p3.x, q.p3.y);
           const s4 = worldToScreen(q.p4.x, q.p4.y);
 
-          ctx.fillStyle = isHardCollision ? 'rgba(239, 68, 68, 0.28)' : 'rgba(56, 189, 248, 0.12)';
+          ctx.fillStyle = isHardCollision ? 'rgba(239, 68, 68, 0.28)' : editA(0.12);
           ctx.strokeStyle = isHardCollision ? '#ef4444' : '#00ffff';
           ctx.lineWidth = 1.8;
 
@@ -5072,7 +5105,7 @@ export default function CadCanvas({
           ctx.stroke();
 
           // Little dynamic indicator text on vehicle roof
-          ctx.fillStyle = isHardCollision ? '#f87171' : '#38bdf8';
+          ctx.fillStyle = isHardCollision ? '#f87171' : EDIT;
           ctx.font = '8px sans-serif';
           ctx.fillText(designVehicle === 'articulated' ? '聯結車' : designVehicle === 'semi_trailer' ? '大型車' : '小型車', s1.x, s1.y - 4);
 
@@ -5096,7 +5129,7 @@ export default function CadCanvas({
         const sRot = { x: sTop.x, y: sTop.y - 35 };
 
         ctx.save();
-        ctx.strokeStyle = '#a855f7'; // Purple lever line
+        ctx.strokeStyle = EDIT; // 旋轉把手連線
         ctx.lineWidth = 1.5;
         ctx.setLineDash([2, 2]);
         ctx.beginPath();
@@ -5105,7 +5138,7 @@ export default function CadCanvas({
         ctx.stroke();
         ctx.setLineDash([]);
 
-        ctx.fillStyle = '#a855f7'; // Purple circle rotate knob
+        ctx.fillStyle = EDIT; // 旋轉把手
         ctx.strokeStyle = '#ffffff';
         ctx.lineWidth = 1.5;
         ctx.beginPath();
@@ -5133,7 +5166,7 @@ export default function CadCanvas({
     // DRAW ACTIVE CAD GEOMETRIC SNAP DECORATION INDICATOR
     if (snapTarget) {
       const snapS = worldToScreen(snapTarget.point.x, snapTarget.point.y);
-      ctx.strokeStyle = '#22c55e';
+      ctx.strokeStyle = EDIT;
       ctx.lineWidth = 1.8;
       
       if (snapTarget.type === 'endpoint') {
@@ -5216,7 +5249,7 @@ export default function CadCanvas({
       // Draw helpful text indicator at mouse
       const mouseS = worldToScreen(mouseWorld.x, mouseWorld.y);
       ctx.save();
-      ctx.fillStyle = '#22c55e'; // Emerald green
+      ctx.fillStyle = EDIT; 
       ctx.font = 'bold 12px sans-serif';
       ctx.textAlign = 'center';
       ctx.shadowColor = 'rgba(0, 0, 0, 0.8)';
@@ -5239,14 +5272,14 @@ export default function CadCanvas({
 
       if (isEncloseMode) {
         // Enclose mode (AutoCAD Left-to-Right layout: Blue tint, solid boundary)
-        ctx.fillStyle = 'rgba(59, 130, 246, 0.15)';
-        ctx.strokeStyle = '#3b82f6';
+        ctx.fillStyle = editA(0.15);
+        ctx.strokeStyle = EDIT;
         ctx.lineWidth = 1.5;
         ctx.setLineDash([]);
       } else {
         // Touch mode (AutoCAD Right-to-Left layout: Green tint, dashed boundary)
-        ctx.fillStyle = 'rgba(74, 222, 128, 0.15)';
-        ctx.strokeStyle = '#4ade80';
+        ctx.fillStyle = editA(0.15);
+        ctx.strokeStyle = EDIT;
         ctx.lineWidth = 1.5;
         ctx.setLineDash([4, 3]);
       }
@@ -5442,21 +5475,15 @@ export default function CadCanvas({
 
     if (activeTool === 'select') return 'crosshair';
 
-    // 鋼筆圖樣 (Beautiful high-fidelity custom SVG pen tool cursor)
-    const penSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
-      <path d="M0 0 L14 4 L10 8 L18 16 L14 20 L6 12 L2 14 Z" fill="rgba(15,23,42,0.95)" stroke="white" stroke-width="1.5" stroke-linejoin="round"/>
-      <circle cx="6" cy="6" r="1.5" fill="white"/>
-      <line x1="0" y1="0" x2="5" y2="5" stroke="white" stroke-width="1.5"/>
-    </svg>`;
-    const escaped = encodeURIComponent(penSvg);
-    return `url("data:image/svg+xml;utf8,${escaped}") 0 0, auto`;
+    const c = DRAW_CURSORS[drawCursor] || DRAW_CURSORS.cross;
+    return `url("${drawCursorUrl(drawCursor)}") ${c.hot[0]} ${c.hot[1]}, crosshair`;
   };
 
   return (
     <div 
       ref={containerRef} 
       tabIndex={0}
-      className="flex-1 h-full relative overflow-hidden bg-[#0c0d11] select-none focus:outline-none"
+      className="flex-1 h-full relative overflow-hidden bg-[#1d2127] select-none focus:outline-none"
       style={{ cursor: getCursorStyle() }}
     >
       <canvas
@@ -5483,7 +5510,7 @@ export default function CadCanvas({
         <div 
           id="hard-collision-warning-hud"
           style={{ top: 16 + insets.top }}
-          className="absolute top-4 left-1/2 transform -translate-x-1/2 z-33 flex items-center gap-3 px-5 py-3 bg-red-950 border border-red-500 rounded-xl shadow-lg text-red-200 max-w-xl"
+          className="absolute top-4 left-1/2 transform -translate-x-1/2 z-33 flex items-center gap-3 px-5 py-3 bg-red-950 border border-red-500 rounded shadow-lg text-red-200 max-w-xl"
         >
           <svg className="w-5 h-5 text-red-500 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M12 9v4M12 17h.01M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/></svg>
           <div className="text-xs font-bold leading-snug">
@@ -5496,7 +5523,7 @@ export default function CadCanvas({
         <div 
           id="soft-collision-warning-hud"
           style={{ top: 16 + insets.top }}
-          className="absolute top-4 left-1/2 transform -translate-x-1/2 z-33 flex items-center gap-3 px-5 py-3 bg-yellow-950 border border-yellow-500/80 rounded-xl shadow-lg text-yellow-100 max-w-xl"
+          className="absolute top-4 left-1/2 transform -translate-x-1/2 z-33 flex items-center gap-3 px-5 py-3 bg-yellow-950 border border-yellow-500/80 rounded shadow-lg text-yellow-100 max-w-xl"
         >
           <svg className="w-5 h-5 text-yellow-500 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M12 9v4M12 17h.01M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/></svg>
           <div className="text-xs font-bold leading-snug">
@@ -5512,7 +5539,7 @@ export default function CadCanvas({
           id="btn-zoom-to-fit"
           onClick={handleZoomToFit}
           title="Zoom to Fit & Center (視窗導正 / 回歸全圖中心)"
-          className="flex items-center justify-center w-10 h-10 rounded-lg bg-zinc-900/90 hover:bg-zinc-800 border border-zinc-800/85 text-zinc-300 hover:text-white shadow-lg transition-all cursor-pointer"
+          className="flex items-center justify-center w-10 h-10 rounded bg-zinc-900/90 hover:bg-zinc-800 border border-zinc-800/85 text-zinc-300 hover:text-white shadow-lg transition-all cursor-pointer"
         >
           <Search className="w-5 h-5 text-zinc-300" />
         </button>
@@ -5520,16 +5547,16 @@ export default function CadCanvas({
 
       {/* Floating SmartPath Draw Actions Box */}
       {isLineOrPathTool(activeTool) && spPoints.length >= 1 && (
-        <div id="smartpath-floating-draw-bar" style={{ bottom: 64 + insets.bottom }} className={`absolute bottom-16 left-1/2 transform -translate-x-1/2 z-25 flex gap-2 p-2 rounded-xl shadow-lg ${
+        <div id="smartpath-floating-draw-bar" style={{ bottom: 64 + insets.bottom }} className={`absolute bottom-16 left-1/2 transform -translate-x-1/2 z-25 flex gap-2 p-2 rounded shadow-lg ${
           'bg-zinc-900/95 border border-zinc-800/80'
         }`}>
           <button
             id="btn-complete-smartpath"
             onClick={() => handleCompleteSmartPath(spPoints, spCpLeft, spCpRight)}
             disabled={spPoints.length < 2}
-            className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all flex items-center gap-1 cursor-pointer ${
+            className={`px-3 py-1.5 text-xs font-bold rounded transition-all flex items-center gap-1 cursor-pointer ${
               spPoints.length >= 2 
-                ? 'bg-blue-600 hover:bg-blue-500 text-white' 
+                ? 'bg-[#f2f3f5] hover:bg-white text-[#1d2127]' 
                 : 'bg-zinc-800 text-zinc-600 cursor-not-allowed'
             }`}
           >
@@ -5542,7 +5569,7 @@ export default function CadCanvas({
               setSpCpRight([]);
               setActiveTool('select');
             }}
-            className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer ${
+            className={`px-3 py-1.5 text-xs font-bold rounded transition-all cursor-pointer ${
               'bg-zinc-850 hover:bg-zinc-800 text-zinc-300'
             }`}
           >
@@ -5608,7 +5635,7 @@ export default function CadCanvas({
 
         const instr = getToolInstruction(activeTool, spPoints.length, draftPoints.length);
         return (
-          <div style={{ top: 16 + insets.top, left: 16 + insets.left }} className="absolute top-4 left-4 pointer-events-none px-3 py-2 rounded-md max-w-sm flex flex-col gap-0.5 z-10 bg-zinc-900/90 border border-zinc-800">
+          <div style={{ top: 16 + insets.top, left: 16 + insets.left }} className="absolute top-4 left-4 pointer-events-none px-3 py-2 rounded max-w-sm flex flex-col gap-0.5 z-10 bg-zinc-900/90 border border-zinc-800">
             <h4 className="text-xs font-bold text-zinc-300">
               {instr.name}
             </h4>
@@ -5620,7 +5647,7 @@ export default function CadCanvas({
       })()}
 
       {/* Touch Navigation Helpers on Right Bottom corner */}
-      {!hideStatusBar && <div id="canvas-status-bar" style={{ bottom: 16 + insets.bottom, left: 16 + insets.left }} className="absolute bottom-4 left-4 flex gap-4 text-[10px] font-mono px-3 py-1.5 rounded-md pointer-events-none z-10 bg-zinc-900/60 border border-zinc-800/20 text-zinc-500">
+      {!hideStatusBar && <div id="canvas-status-bar" style={{ bottom: 16 + insets.bottom, left: 16 + insets.left }} className="absolute bottom-4 left-4 flex gap-4 text-[10px] font-mono px-3 py-1.5 rounded pointer-events-none z-10 bg-zinc-900/60 border border-zinc-800/20 text-zinc-500">
         <span className="text-zinc-300">X {mouseWorld.x.toFixed(2)}　Y {mouseWorld.y.toFixed(2)} m</span>
         <span title="以 96 dpi 螢幕估算的出圖比例">比例 1:{(() => { const n = 3780 / viewport.zoom; const m = Math.pow(10, Math.floor(Math.log10(n)) - 1); return Math.round(n / m) * m; })()}</span>
         <span className="hidden xl:inline">Shift 正交／15°</span>
@@ -5641,7 +5668,7 @@ export default function CadCanvas({
       {contextMenu && onContextAction && (
         <>
           <div className="absolute inset-0 z-40" onPointerDown={() => setContextMenu(null)} onContextMenu={(e) => e.preventDefault()} />
-          <div id="canvas-context-menu" className="absolute z-50 w-44 py-1 rounded-lg bg-zinc-900/95 border border-zinc-700 shadow-lg text-xs text-zinc-200" style={{ left: contextMenu.sx, top: contextMenu.sy }}>
+          <div id="canvas-context-menu" className="absolute z-50 w-44 py-1 rounded bg-zinc-900/95 border border-zinc-700 shadow-lg text-xs text-zinc-200" style={{ left: contextMenu.sx, top: contextMenu.sy }}>
             {([
               ['copy', '複製', 'Ctrl+C', !!(selectedElement || selectedElementIds.length)],
               ['paste', '貼上', 'Ctrl+V', canPaste],
@@ -5666,7 +5693,7 @@ export default function CadCanvas({
 
       {textDraft && (
         <div
-          className={`absolute z-50 -translate-x-1/2 ${textDraft.sy < 90 ? '' : '-translate-y-full'} flex flex-col gap-1 p-2 rounded-md bg-zinc-900/95 border border-blue-500/60 shadow-lg`}
+          className={`absolute z-50 -translate-x-1/2 ${textDraft.sy < 90 ? '' : '-translate-y-full'} flex flex-col gap-1 p-2 rounded bg-zinc-900/95 border border-[#4c9eff]/60 shadow-lg`}
           // 靠近畫布上緣時改放在點擊位置下方，避免被切掉
           style={{ left: Math.max(130, textDraft.sx), top: textDraft.sy < 90 ? textDraft.sy + 12 : textDraft.sy - 8 }}
         >
@@ -5685,7 +5712,7 @@ export default function CadCanvas({
               e.stopPropagation();
             }}
             onBlur={commitTextDraft}
-            className="w-56 bg-zinc-950 border border-zinc-700 focus:border-blue-500 rounded px-2 py-1 text-sm text-white outline-none"
+            className="w-56 bg-zinc-950 border border-zinc-700 focus:border-[#4c9eff] rounded px-2 py-1 text-sm text-white outline-none"
             placeholder="輸入文字後按 Enter"
           />
         </div>
@@ -5693,9 +5720,9 @@ export default function CadCanvas({
 
       {calibrationDialog && (
         <div className="absolute inset-0 z-[100] bg-black/75 flex items-center justify-center p-4">
-          <div className="bg-[#14161c] border border-zinc-800 p-5 rounded-lg max-w-sm w-full shadow-lg flex flex-col gap-4">
+          <div className="bg-[#14161c] border border-zinc-800 p-5 rounded max-w-sm w-full shadow-lg flex flex-col gap-4">
             <div className="flex items-center gap-2 text-red-400 border-b border-zinc-800 pb-2.5">
-              <Ruler className="w-4 h-4 text-indigo-400 shrink-0" />
+              <Ruler className="w-4 h-4 text-zinc-400 shrink-0" />
               <h3 className="text-xs font-bold text-white tracking-wider">校正背景底圖比例尺</h3>
             </div>
             
@@ -5720,7 +5747,7 @@ export default function CadCanvas({
                     });
                   }}
                   autoFocus
-                  className="w-full bg-zinc-950 border border-zinc-800 focus:border-blue-500 rounded-xl px-3 py-2 text-sm text-white font-mono placeholder-zinc-650 focus:outline-none"
+                  className="w-full bg-zinc-950 border border-zinc-800 focus:border-[#4c9eff] rounded px-3 py-2 text-sm text-white font-mono placeholder-zinc-650 focus:outline-none"
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') {
                       handleSaveCalibration();
@@ -5732,7 +5759,7 @@ export default function CadCanvas({
             </div>
 
             {calibrationError && (
-              <div className="text-[11px] text-red-400 bg-red-950/25 border border-red-900/30 rounded-xl px-3 py-2 leading-tight">
+              <div className="text-[11px] text-red-400 bg-red-950/25 border border-red-900/30 rounded px-3 py-2 leading-tight">
                 {calibrationError}
               </div>
             )}
@@ -5749,13 +5776,13 @@ export default function CadCanvas({
                   setIsScalingDrag(false);
                   setActiveTool('select');
                 }}
-                className="px-3.5 py-2 text-xs font-semibold rounded-lg bg-zinc-850 hover:bg-zinc-800 text-zinc-300 transition-all cursor-pointer"
+                className="px-3.5 py-2 text-xs font-semibold rounded bg-zinc-850 hover:bg-zinc-800 text-zinc-300 transition-all cursor-pointer"
               >
                 取消
               </button>
               <button
                 onClick={handleSaveCalibration}
-                className="px-4 py-2 text-xs font-bold rounded-lg bg-blue-600 hover:bg-blue-500 text-white shadow-lg transition-all cursor-pointer"
+                className="px-4 py-2 text-xs font-bold rounded bg-[#f2f3f5] hover:bg-white text-[#1d2127] transition-all cursor-pointer"
               >
                 確認設定
               </button>

@@ -27,18 +27,18 @@ import SimTour, { simTourSeen } from './simulation/ui/SimTour';
 import { SIM_TOOLS, SIM_SELECT_DEF } from './simulation/ui/SimToolPalette';
 import { renderToolIcon } from './components/Toolbar';
 import PropsPanel from './components/PropsPanel';
-import CadCanvas, { transformElement, getElementBoundingBox } from './components/CadCanvas';
+import CadCanvas, { transformElement, getElementBoundingBox, DrawCursorStyle, DRAW_CURSORS, drawCursorUrl } from './components/CadCanvas';
 import { exportElementsToDXF } from './dxf';
 import { renderElementsToPng } from './exportPng';
 import { computeQuantities, layerKeyOf, MARKING_NAMES } from './markings';
 import { buildCrossroadTemplate } from './templates';
 import { saveAutosave, loadAutosave, clearAutosave } from './autosave';
 import { TOOL_CATEGORIES, ALL_TOOLS } from './ui/toolCatalog';
-import { MenuBar, MenuDef, MenuItem, RibbonTabs, Ribbon, RibbonGroup, RibbonBigButton, RibbonButton, RibbonCheck, CommandLine, StatusBar, StatusToggle } from './ui/Drafting';
+import { MenuBar, MenuDef, MenuItem, RibbonTabs, Ribbon, RibbonGroup, RibbonBigButton, RibbonButton, RibbonCheck, StatusBar, StatusToggle } from './ui/Drafting';
 import { LayerPanel, QuantityPanel, ArrowTypeBar, ConfirmDialog, AutosaveBanner, Toggle } from './ui/Panels';
 import logoUrl from './assets/logo.svg';
 import { PaletteName } from './renderPrimitives';
-import { Info, CheckCircle2, AlertTriangle, RotateCcw, RotateCw, Image as ImageIcon, Upload, Trash2, Ruler, X, MousePointer2, Copy, ClipboardPaste, CopyPlus, Maximize, FileCode2, Table, Download } from 'lucide-react';
+import { Info, CheckCircle2, AlertTriangle, RotateCcw, RotateCw, Image as ImageIcon, Upload, Trash2, Ruler, X, MousePointer2, Copy, ClipboardPaste, CopyPlus, Maximize, FileCode2, Table, Download, ChevronUp, ChevronDown } from 'lucide-react';
 
 export default function App() {
   // App Mode State: 'cad' | 'simulation' (預設為 'cad')
@@ -88,7 +88,6 @@ export default function App() {
 
   const showToast = (message: string, type: 'success' | 'error' | 'info' = 'info') => {
     setToast({ message, type });
-    pushCmd(message);
   };
 
   useEffect(() => {
@@ -122,8 +121,12 @@ export default function App() {
   const [ribbonTab, setRibbonTab] = useState<'draw' | 'view' | 'output'>('draw');
   const [bottomTab, setBottomTab] = useState<'layers' | 'qty'>('layers');
   const [showHelp, setShowHelp] = useState<boolean>(false);
-  const [cmdHistory, setCmdHistory] = useState<string[]>(['WebTrafficCAD 已就緒。直接打字可輸入工具名稱或指令，例如 停止線、STOP、Z（縮放全圖）；HELP 查看全部。']);
-  const pushCmd = (line: string) => setCmdHistory(h => [...h.slice(-49), line]);
+  const [layersCollapsed, setLayersCollapsed] = useState<boolean>(false);
+  const [drawCursor, setDrawCursorState] = useState<DrawCursorStyle>(() => {
+    try { const v = localStorage.getItem('webtrafficcad.drawCursor'); if (v === 'cross' || v === 'pen' || v === 'precision') return v; } catch { /* 無法存取時用預設 */ }
+    return 'cross';
+  });
+  const setDrawCursor = (v: DrawCursorStyle) => { setDrawCursorState(v); try { localStorage.setItem('webtrafficcad.drawCursor', v); } catch { /* ignore */ } };
   const [hiddenLayers, setHiddenLayers] = useState<string[]>([]);
   const [snapToIntersection, setSnapToIntersection] = useState<boolean>(true);
   const [confirmDialog, setConfirmDialog] = useState<{ title: string; message: string; confirmLabel: string; onConfirm: () => void } | null>(null);
@@ -819,7 +822,7 @@ export default function App() {
 
   // CAD 圖層面板：軌跡模擬結果的唯讀參考圖層
   const simRefLayerRow = sim.doc.paths.length > 0 ? (
-    <div className="flex items-center justify-between gap-3 px-2 py-1.5 mt-2 rounded-md text-xs" style={{ border: '1px dashed var(--ui-border)' }}>
+    <div className="flex items-center justify-between gap-3 px-2 py-1.5 mt-2 rounded text-xs" style={{ border: '1px dashed var(--ui-border)' }}>
       <span>軌跡模擬結果（唯讀參考，{sim.doc.paths.length} 條）</span>
       <Toggle id="layer-sim-ref" on={sim.doc.settings.display.showInCad} onClick={() => simStore.setDisplay({ showInCad: !sim.doc.settings.display.showInCad })} />
     </div>
@@ -849,6 +852,7 @@ export default function App() {
             fitRequest={fitRequest}
             onCursorMove={handleCursorMove}
             hideStatusBar
+            drawCursor={drawCursor}
             snapToIntersection={snapToIntersection}
             elements={visibleElements}
             onAddElement={handleAddElement}
@@ -971,7 +975,7 @@ export default function App() {
 
       {exportedImage && (
         <div className="fixed inset-0 bg-black/75 flex items-center justify-center p-4 z-[150]">
-          <div className="bg-[#14161c] border border-zinc-800 rounded-lg p-4 max-w-4xl w-full flex flex-col gap-3 shadow-xl">
+          <div className="bg-[#14161c] border border-zinc-800 rounded p-4 max-w-4xl w-full flex flex-col gap-3 shadow-xl">
             <div className="flex justify-between items-center pb-2 border-b border-zinc-800">
               <h3 className="text-sm font-bold text-white">PNG 預覽</h3>
               <button
@@ -1016,7 +1020,7 @@ export default function App() {
 
       {/* Embedded Elegant Toast notification */}
       {toast && (
-        <div id="app-toast" role="status" className={`fixed bottom-[96px] left-1/2 -translate-x-1/2 z-[250] max-w-md bg-[#1b1d22] border border-zinc-700/70 text-zinc-100 pl-3 pr-1.5 py-2 rounded-md shadow-lg flex items-center gap-2.5`}>
+        <div id="app-toast" role="status" className={`fixed bottom-[96px] left-1/2 -translate-x-1/2 z-[250] max-w-md bg-[#1b1d22] border border-zinc-700/70 text-zinc-100 pl-3 pr-1.5 py-2 rounded shadow-lg flex items-center gap-2.5`}>
           {toast.type === 'success' ? <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400" />
             : toast.type === 'error' ? <AlertTriangle className="w-4 h-4 shrink-0 text-amber-400" />
             : <Info className="w-4 h-4 shrink-0 text-sky-400" />}
@@ -1041,7 +1045,6 @@ export default function App() {
   const zoomToFit = () => setFitRequest(n => n + 1);
   const toolDef = ALL_TOOLS.find(t => t.id === activeTool);
   const simTool = sim.ui.tool;
-  const simToolDef = [SIM_SELECT_DEF, ...SIM_TOOLS].find(t => t.id === simTool);
 
   const editItems: MenuItem[] = [
     { label: '復原', shortcut: 'Ctrl+Z', onClick: isCad ? handleUndo : () => simStore.undo(), disabled: isCad ? historyStack.length === 0 : !sim.canUndo(), id: 'undo-btn' },
@@ -1067,18 +1070,18 @@ export default function App() {
     { key: 'edit', label: '編輯', items: editItems },
     {
       key: 'view', label: '檢視', items: [
-        { label: '縮放全圖', shortcut: 'Z', onClick: zoomToFit },
+        { label: '縮放全圖', onClick: zoomToFit },
         { label: showGrid ? '隱藏網格' : '顯示網格', onClick: () => setShowGrid(!showGrid) },
         { label: '功能區：繪圖', onClick: () => setRibbonTab('draw'), separator: true },
         { label: '功能區：檢視', onClick: () => setRibbonTab('view') },
         { label: '功能區：輸出', onClick: () => setRibbonTab('output') },
       ],
     },
-    { key: 'help', label: '說明', items: [{ label: '快捷鍵與指令', onClick: () => setShowHelp(true) }] },
+    { key: 'help', label: '說明', items: [{ label: '快捷鍵', onClick: () => setShowHelp(true) }] },
   ];
 
   const modeSwitch = (
-    <div className="flex ml-3" style={{ border: '1px solid var(--ui-border)' }}>
+    <div className="flex ml-3 rounded overflow-hidden" style={{ border: '1px solid var(--ui-border)' }}>
       {([['cad', 'CAD 繪圖'], ['simulation', '軌跡模擬']] as const).map(([m, label]) => (
         <button key={m} id={`mode-${m}`} onClick={() => handleModeChange(m)} className="h-[22px] px-3 text-xs cursor-pointer"
           style={appMode === m ? { background: 'var(--ui-accent)', color: 'var(--ui-accent-text)' } : { color: 'var(--ui-muted)' }}>
@@ -1093,7 +1096,7 @@ export default function App() {
         id="project-name-header"
         value={projectName}
         onChange={e => setProjectName(e.target.value)}
-        className="hidden md:block bg-transparent text-xs outline-none px-1.5 h-[22px] w-40 text-right hover:bg-white/5 focus:bg-white/5"
+        className="hidden md:block bg-transparent text-xs outline-none px-1.5 h-[22px] w-40 text-right rounded hover:bg-white/5 focus:bg-white/5"
         style={{ color: 'var(--ui-text)' }}
         title="圖名（用於匯出檔名與圖框）"
         aria-label="圖名"
@@ -1150,7 +1153,7 @@ export default function App() {
   const gridSelect = (label: string, value: number, options: number[], onChange: (n: number) => void, isDisabled?: (n: number) => boolean) => (
     <label className="flex items-center gap-1.5 h-[24px] px-1.5 text-xs whitespace-nowrap">
       <span style={{ color: 'var(--ui-muted)' }}>{label}</span>
-      <select value={value} onChange={e => onChange(parseFloat(e.target.value))} className="h-[20px] text-xs outline-none cursor-pointer" style={{ background: 'var(--ui-bg)', color: 'var(--ui-text)', border: '1px solid var(--ui-border)' }}>
+      <select value={value} onChange={e => onChange(parseFloat(e.target.value))} className="h-[20px] text-xs rounded outline-none cursor-pointer" style={{ background: 'var(--ui-bg)', color: 'var(--ui-text)', border: '1px solid var(--ui-border)' }}>
         {options.map(n => <option key={n} value={n} disabled={isDisabled?.(n)}>{n === 0 ? '無' : `${n} m`}</option>)}
       </select>
     </label>
@@ -1158,7 +1161,7 @@ export default function App() {
   const viewRibbon = (
     <>
       <RibbonGroup title="視圖">
-        <RibbonBigButton icon={<Maximize />} label="縮放全圖" onClick={zoomToFit} title="指令：Z" />
+        <RibbonBigButton icon={<Maximize />} label="縮放全圖" onClick={zoomToFit} />
       </RibbonGroup>
       <RibbonGroup title="網格">
         <RibbonCheck label="顯示網格" checked={showGrid} onChange={() => setShowGrid(!showGrid)} />
@@ -1171,6 +1174,18 @@ export default function App() {
         <RibbonCheck id="snap-intersection" label="交點" checked={snapToIntersection} onChange={() => setSnapToIntersection(!snapToIntersection)} />
         <RibbonCheck id="snap-nearest" label="最近點／垂足" checked={snapToNearest} onChange={() => setSnapToNearest(!snapToNearest)} />
         <RibbonCheck id="snap-grid" label="格點" checked={snapToGrid} onChange={() => setSnapToGrid(!snapToGrid)} />
+      </RibbonGroup>
+      <RibbonGroup title="繪製游標">
+        {(Object.keys(DRAW_CURSORS) as DrawCursorStyle[]).map(k => (
+          <button key={k} id={`draw-cursor-${k}`} onClick={() => setDrawCursor(k)} title={`繪製時使用「${DRAW_CURSORS[k].label}」游標`}
+            className="row-span-3 flex flex-col items-center justify-center gap-1 w-[64px] text-[11px] rounded cursor-pointer hover:bg-white/5"
+            style={drawCursor === k ? { background: 'var(--ui-accent-soft)', outline: '1px solid var(--ui-accent)', outlineOffset: -1, color: 'var(--ui-strong)' } : { color: 'var(--ui-text)' }}>
+            <span className="w-9 h-9 flex items-center justify-center rounded" style={{ background: 'var(--ui-canvas)', border: '1px solid var(--ui-border)' }}>
+              <img src={drawCursorUrl(k)} alt="" className="w-8 h-8" />
+            </span>
+            <span className="whitespace-nowrap">{DRAW_CURSORS[k].label}</span>
+          </button>
+        ))}
       </RibbonGroup>
       <RibbonGroup title="底圖">
         {!bgImage ? (
@@ -1207,7 +1222,7 @@ export default function App() {
       <RibbonGroup title="出圖設定">
         <label className="flex items-center gap-1.5 h-[24px] px-1.5 text-xs whitespace-nowrap">
           <span style={{ color: 'var(--ui-muted)' }}>配色</span>
-          <select value={exportOptions.palette} onChange={e => setExportOptions({ ...exportOptions, palette: e.target.value as PaletteName })} className="h-[20px] text-xs outline-none cursor-pointer" style={{ background: 'var(--ui-bg)', color: 'var(--ui-text)', border: '1px solid var(--ui-border)' }}>
+          <select value={exportOptions.palette} onChange={e => setExportOptions({ ...exportOptions, palette: e.target.value as PaletteName })} className="h-[20px] text-xs rounded outline-none cursor-pointer" style={{ background: 'var(--ui-bg)', color: 'var(--ui-text)', border: '1px solid var(--ui-border)' }}>
             <option value="print">白底列印</option>
             <option value="screen">深色簡報</option>
           </select>
@@ -1220,7 +1235,7 @@ export default function App() {
       </RibbonGroup>
       <RibbonGroup title="圖名">
         <input id="project-name-input" value={projectName} onChange={e => setProjectName(e.target.value)} aria-label="圖名"
-          className="h-[22px] w-48 px-1.5 text-xs outline-none" style={{ background: 'var(--ui-bg)', color: 'var(--ui-text)', border: '1px solid var(--ui-border)' }} />
+          className="h-[22px] w-48 px-1.5 text-xs rounded outline-none" style={{ background: 'var(--ui-bg)', color: 'var(--ui-text)', border: '1px solid var(--ui-border)' }} />
       </RibbonGroup>
     </>
   );
@@ -1245,25 +1260,33 @@ export default function App() {
               <li>框選可一次選取多個物件</li>
               <li>Delete 刪除；Ctrl+C／V／D 複製、貼上、原地複製</li>
               <li>繪製時按 Shift 鎖定水平／垂直</li>
-              <li>直接打字即可在下方指令列輸入工具名稱</li>
             </ul>
           </div>
         )}
       </div>
-      <div className="h-[38%] min-h-[180px] shrink-0 flex flex-col" style={{ borderTop: '1px solid var(--ui-border)' }}>
-        <div className="flex items-end h-[26px] px-1.5 shrink-0" style={{ background: 'var(--ui-ribbon)', borderBottom: '1px solid var(--ui-border)' }}>
-          {([['layers', '圖層'], ['qty', '數量']] as const).map(([k, label]) => (
-            <button key={k} id={`right-tab-${k}`} onClick={() => setBottomTab(k)} className="h-[24px] px-3 text-xs cursor-pointer -mb-px"
-              style={bottomTab === k ? { background: 'var(--ui-surface)', color: 'var(--ui-strong)', border: '1px solid var(--ui-border)', borderBottomColor: 'var(--ui-surface)' } : { color: 'var(--ui-muted)', border: '1px solid transparent' }}>
-              {label}
-            </button>
-          ))}
+      <div className={`${layersCollapsed ? '' : 'h-[38%] min-h-[180px]'} shrink-0 flex flex-col`} style={{ borderTop: '1px solid var(--ui-border)' }}>
+        <div className="flex items-end h-[26px] pl-1.5 pr-1 shrink-0" style={{ background: 'var(--ui-ribbon)', borderBottom: layersCollapsed ? 'none' : '1px solid var(--ui-border)' }}>
+          {([['layers', '圖層'], ['qty', '數量']] as const).map(([k, label]) => {
+            const active = bottomTab === k && !layersCollapsed;
+            return (
+              <button key={k} id={`right-tab-${k}`} onClick={() => { setBottomTab(k); setLayersCollapsed(false); }} className="h-[24px] px-3 text-xs rounded-t cursor-pointer -mb-px"
+                style={active ? { background: 'var(--ui-surface)', color: 'var(--ui-strong)', border: '1px solid var(--ui-border)', borderBottomColor: 'var(--ui-surface)' } : { color: 'var(--ui-muted)', border: '1px solid transparent' }}>
+                {label}
+              </button>
+            );
+          })}
+          <button id="toggle-layers-panel" onClick={() => setLayersCollapsed(!layersCollapsed)} title={layersCollapsed ? '展開' : '收合'} aria-label={layersCollapsed ? '展開圖層面板' : '收合圖層面板'} aria-expanded={!layersCollapsed}
+            className="ml-auto self-center w-6 h-6 flex items-center justify-center rounded cursor-pointer hover:bg-white/5" style={{ color: 'var(--ui-muted)' }}>
+            {layersCollapsed ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+          </button>
         </div>
-        <div className="flex-1 min-h-0 overflow-y-auto p-1.5">
-          {bottomTab === 'layers'
-            ? <LayerPanel elements={elements} hidden={hiddenLayers} onToggle={toggleLayer} onShowAll={() => setHiddenLayers([])} extra={simRefLayerRow} />
-            : <div className="p-1"><QuantityPanel elements={visibleElements} onExport={handleExportQuantities} /></div>}
-        </div>
+        {!layersCollapsed && (
+          <div className="flex-1 min-h-0 overflow-y-auto p-1.5">
+            {bottomTab === 'layers'
+              ? <LayerPanel elements={elements} hidden={hiddenLayers} onToggle={toggleLayer} onShowAll={() => setHiddenLayers([])} extra={simRefLayerRow} />
+              : <div className="p-1"><QuantityPanel elements={visibleElements} onExport={handleExportQuantities} /></div>}
+          </div>
+        )}
       </div>
     </div>
   ) : (
@@ -1271,59 +1294,6 @@ export default function App() {
       <div className="flex-1 min-h-0 overflow-y-auto">{simRightPanelEl}</div>
     </div>
   );
-
-  // ---------- 指令列 ----------
-  const cmdPrompt = isCad
-    ? (activeTool === 'select' ? '指令:' : activeTool === 'map_scale' ? '底圖比例校正：拖曳出已知長度的線段' : `${toolDef?.label ?? ''}：${toolDef?.desc ?? ''}`)
-    : (simTool === 'select' ? '指令:' : `${simToolDef?.label ?? ''}：${simToolDef?.desc ?? ''}`);
-  const cmdSuggestions = useMemo(() => [
-    ...ALL_TOOLS.map(t => t.label), ...SIM_TOOLS.map(t => t.label),
-    '縮放全圖', '復原', '重做', '刪除', '原地複製', '旋轉', '儲存', '開啟', '範本', '模擬', '繪圖', 'PNG', 'DXF', 'CSV',
-    ...Object.keys(TOOL_ALIASES),
-  ], []);
-  const runCommand = (raw: string) => {
-    const text = raw.trim();
-    const up = text.toUpperCase();
-    pushCmd(`指令: ${text}`);
-    const actions: [string[], () => void][] = [
-      [['U', 'UNDO', '復原'], () => (isCad ? handleUndo() : simStore.undo())],
-      [['REDO', '重做'], () => (isCad ? handleRedo() : simStore.redo())],
-      [['Z', 'ZE', 'ZOOM', '縮放全圖', '全圖'], zoomToFit],
-      [['E', 'ERASE', 'DEL', '刪除'], () => (hasSelection ? handleContextAction('delete') : pushCmd('沒有選取的物件。'))],
-      [['CO', 'COPY', '原地複製', '複製'], () => (hasSelection ? handleContextAction('duplicate') : pushCmd('沒有選取的物件。'))],
-      [['RO', 'ROTATE', '旋轉'], () => (hasSelection ? handleContextAction('rotate90') : pushCmd('沒有選取的物件。'))],
-      [['SAVE', '儲存'], handleSaveProject],
-      [['OPEN', '開啟'], () => fileInputRef.current?.click()],
-      [['TEMPLATE', '範本'], handleLoadDemo],
-      [['PNG'], handleExportPNG], [['DXF'], handleExportDXF], [['CSV'], handleExportQuantities],
-      [['SIM', '模擬', '軌跡模擬'], () => handleModeChange('simulation')],
-      [['CAD', '繪圖'], () => handleModeChange('cad')],
-      [['GRID', '網格'], () => setShowGrid(!showGrid)],
-      [['HELP', '?', '說明'], () => setShowHelp(true)],
-    ];
-    const act = actions.find(([names]) => names.includes(up) || names.includes(text));
-    if (act) { act[1](); return; }
-    if (!isCad) {
-      const st = [SIM_SELECT_DEF, ...SIM_TOOLS].find(t => t.label === text || t.key === up || t.label.includes(text));
-      if (st) { simStore.setTool(st.id); return; }
-      pushCmd(`找不到指令「${text}」。軌跡模擬可輸入：點選＋半徑（P）、路口轉彎（I）、鋼筆（N）、筆刷（B）。`);
-      return;
-    }
-    const tool: CadTool | undefined = TOOL_ALIASES[up]
-      ?? ALL_TOOLS.find(t => t.label === text || t.id.toLowerCase() === text.toLowerCase())?.id
-      ?? ALL_TOOLS.find(t => t.label.includes(text) || (t.keywords || '').split(/\s+/).includes(text))?.id;
-    if (tool) { toolFromCommandRef.current = true; setActiveTool(tool); return; }
-    pushCmd(`找不到指令「${text}」。輸入 HELP 查看可用指令。`);
-  };
-  // 由功能區或快捷鍵切換工具時也記錄到指令列（由指令列切換的已記錄過）
-  const lastToolRef = useRef<CadTool>(activeTool);
-  const toolFromCommandRef = useRef(false);
-  useEffect(() => {
-    if (lastToolRef.current === activeTool) return;
-    lastToolRef.current = activeTool;
-    if (activeTool !== 'select' && !toolFromCommandRef.current) pushCmd(`指令: ${toolDef?.label ?? activeTool}`);
-    toolFromCommandRef.current = false;
-  }, [activeTool]);
 
   const statusToggles: StatusToggle[] = [
     { label: '網格', on: showGrid, onClick: () => setShowGrid(!showGrid), title: '顯示網格' },
@@ -1352,7 +1322,6 @@ export default function App() {
         </div>
         {rightPanel}
       </div>
-      <CommandLine history={cmdHistory} prompt={cmdPrompt} onSubmit={runCommand} suggestions={cmdSuggestions} typeToFocus={isCad} />
       <StatusBar coordRef={coordRef} scaleRef={scaleRef} toggles={statusToggles} right={<span className="whitespace-nowrap shrink-0 pr-1">單位 公尺</span>} />
       {showHelp && <HelpDialog onClose={() => setShowHelp(false)} />}
       {sharedOverlaysEl}
@@ -1360,26 +1329,15 @@ export default function App() {
   );
 }
 
-/** CAD 風格的英文指令別名 */
-const TOOL_ALIASES: Record<string, CadTool> = {
-  SEL: 'select', CENTER: 'yellow_double', CL: 'yellow_double', LANE: 'white_dashed', DASH: 'white_dashed', EDGE: 'white_solid',
-  STOP: 'stop_line', SL: 'stop_line', YIELD: 'yield_line', XWALK: 'crosswalk', CW: 'crosswalk',
-  RED: 'red_solid', YEL: 'yellow_solid', BOX: 'grid_box', CH: 'channelization', HATCH: 'channelization', SW: 'Sidewalk', BIKE: 'bicycle_lane',
-  PARK: 'parking_space', PZ: 'parking_zone', MOTO: 'moto_box', TURN: 'moto_turn_box',
-  ARROW: 'road_arrow', AR: 'road_arrow', RT: 'road_text', WORD: 'road_text', DT: 'text_label', TEXT: 'text_label',
-  DI: 'measurement', DIST: 'measurement', ANG: 'angular_dimension', ARC: 'arc_3point', A: 'arc_3point', XL: 'guideline', C: 'sketch_circle', BL: 'BuildingLine',
-};
-
 function HelpDialog({ onClose }: { onClose: () => void }) {
   const rows: [string, string][] = [
     ['V', '選取工具'], ['Enter／雙擊', '完成目前線段'], ['Esc', '第一次：完成或放棄目前繪製；第二次：回到選取'],
     ['Shift', '繪製時鎖定水平／垂直；旋轉時每 15°'], ['Space＋拖曳／中鍵', '平移畫面'], ['Ctrl+Z／Ctrl+Y', '復原／重做'],
-    ['Ctrl+C／V／D', '複製／貼上／原地複製'], ['Delete', '刪除選取物件'], ['直接打字', '在指令列輸入工具名稱或指令'],
+    ['Ctrl+C／V／D', '複製／貼上／原地複製'], ['Delete', '刪除選取物件'],
   ];
-  const cmds: [string, string][] = [
-    ['Z', '縮放全圖'], ['U／REDO', '復原／重做'], ['E', '刪除選取'], ['CO／RO', '原地複製／旋轉 90°'],
-    ['STOP、LANE、CENTER、EDGE', '停止線、車道線、分向限制線、路面邊線'], ['CW、AR、RT', '行人穿越道、指向線、路面標字'],
-    ['DI、ANG', '測距、角度'], ['PNG、DXF、CSV', '匯出'], ['SIM／CAD', '切換軌跡模擬／CAD 繪圖'],
+  const sim: [string, string][] = [
+    ['P／I／N／B', '點選＋半徑／路口轉彎／鋼筆／筆刷'], ['Enter、雙擊、右鍵', '完成目前軌跡'], ['Backspace', '刪除上一點或選取的節點'],
+    ['Space（單按）', '播放／暫停'], ['Shift', '以 15° 鎖定方向'], ['Alt', '鋼筆：拖曳手柄做尖角'],
   ];
   const table = (title: string, data: [string, string][]) => (
     <div>
@@ -1393,16 +1351,15 @@ function HelpDialog({ onClose }: { onClose: () => void }) {
   );
   return (
     <div className="fixed inset-0 z-[400] bg-black/60 flex items-center justify-center p-4" onClick={onClose}>
-      <div id="help-dialog" className="w-full max-w-2xl p-5 shadow-lg text-xs space-y-4" style={{ background: 'var(--ui-surface)', border: '1px solid var(--ui-border)', color: 'var(--ui-text)' }} onClick={e => e.stopPropagation()}>
+      <div id="help-dialog" className="w-full max-w-2xl p-5 rounded shadow-lg text-xs space-y-4" style={{ background: 'var(--ui-surface)', border: '1px solid var(--ui-border)', color: 'var(--ui-text)' }} onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between">
-          <h3 className="text-sm font-bold" style={{ color: 'var(--ui-strong)' }}>快捷鍵與指令</h3>
-          <button onClick={onClose} aria-label="關閉" className="p-1 hover:bg-white/5 cursor-pointer"><X className="w-4 h-4" /></button>
+          <h3 className="text-sm font-bold" style={{ color: 'var(--ui-strong)' }}>快捷鍵</h3>
+          <button onClick={onClose} aria-label="關閉" className="p-1 rounded hover:bg-white/5 cursor-pointer"><X className="w-4 h-4" /></button>
         </div>
         <div className="grid md:grid-cols-2 gap-5">
-          {table('快捷鍵', rows)}
-          {table('指令列', cmds)}
+          {table('CAD 繪圖', rows)}
+          {table('軌跡模擬', sim)}
         </div>
-        <p style={{ color: 'var(--ui-muted)' }}>指令列也接受工具的中文名稱，例如「停止線」「機車停等區」。</p>
       </div>
     </div>
   );

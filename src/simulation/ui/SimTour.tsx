@@ -19,9 +19,9 @@ export default function SimTour({ onClose }: { onClose: () => void }) {
   const s = steps[i];
   return (
     <div className="fixed inset-0 z-[300] bg-black/50 flex items-center justify-center p-4" onClick={close}>
-      <div id="sim-tour" className="w-full max-w-md rounded-lg p-5 shadow-lg" style={{ background: 'var(--ui-surface, #14161c)', border: '1px solid var(--ui-border, #2d3039)', color: 'var(--ui-text, #e2e8f0)' }} onClick={e => e.stopPropagation()}>
+      <div id="sim-tour" className="w-full max-w-md rounded p-5 shadow-lg" style={{ background: 'var(--ui-surface, #14161c)', border: '1px solid var(--ui-border, #2d3039)', color: 'var(--ui-text, #e2e8f0)' }} onClick={e => e.stopPropagation()}>
         <div className="flex items-center gap-3 mb-3">
-          <span className="w-10 h-10 rounded-md flex items-center justify-center" style={{ background: 'var(--ui-accent-soft, rgba(59,130,246,.15))', color: 'var(--ui-accent, #3b82f6)' }}>{s.icon}</span>
+          <span className="w-10 h-10 rounded flex items-center justify-center" style={{ background: 'var(--ui-accent-soft, rgba(59,130,246,.15))', color: 'var(--ui-accent, #3b82f6)' }}>{s.icon}</span>
           <div>
             <div className="text-[11px]" style={{ color: 'var(--ui-muted, #94a3b8)' }}>軌跡模擬 {i + 1}／{steps.length}</div>
             <h3 className="text-base font-bold">{s.title}</h3>
