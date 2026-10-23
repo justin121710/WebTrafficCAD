@@ -901,6 +901,10 @@ interface CadCanvasProps {
   insets?: { top: number; right: number; bottom: number; left: number };
   /** 數值改變時將視圖縮放至全圖（載入專案／範本時由 App 觸發） */
   fitRequest?: number;
+  /** 游標世界座標與縮放（px/m）變動時通知外層狀態列 */
+  onCursorMove?: (x: number, y: number, zoom: number) => void;
+  /** 由外層狀態列顯示座標時，隱藏畫布內建的座標列 */
+  hideStatusBar?: boolean;
   elements: CadElement[];
   onAddElement: (el: CadElement) => void;
   onUpdateElement: (el: CadElement) => void;
@@ -948,6 +952,8 @@ export default function CadCanvas({
   canvasBackground = '#101216',
   insets = { top: 0, right: 0, bottom: 0, left: 0 },
   fitRequest,
+  onCursorMove,
+  hideStatusBar = false,
   elements,
   onAddElement,
   onUpdateElement,
@@ -1000,6 +1006,7 @@ export default function CadCanvas({
   const [isPanning, setIsPanning] = useState(false);
   const [panStart, setPanStart] = useState({ x: 0, y: 0 });
   const [mouseWorld, setMouseWorld] = useState<Point2D>({ x: 0, y: 0 });
+  useEffect(() => { onCursorMove?.(mouseWorld.x, mouseWorld.y, viewport.zoom); }, [mouseWorld, viewport.zoom]);
   const [snapTarget, setSnapTarget] = useState<SnapTarget | null>(null);
 
   // Advanced Tools States and Refs
@@ -5613,13 +5620,13 @@ export default function CadCanvas({
       })()}
 
       {/* Touch Navigation Helpers on Right Bottom corner */}
-      <div id="canvas-status-bar" style={{ bottom: 16 + insets.bottom, left: 16 + insets.left }} className="absolute bottom-4 left-4 flex gap-4 text-[10px] font-mono px-3 py-1.5 rounded-md pointer-events-none z-10 bg-zinc-900/60 border border-zinc-800/20 text-zinc-500">
+      {!hideStatusBar && <div id="canvas-status-bar" style={{ bottom: 16 + insets.bottom, left: 16 + insets.left }} className="absolute bottom-4 left-4 flex gap-4 text-[10px] font-mono px-3 py-1.5 rounded-md pointer-events-none z-10 bg-zinc-900/60 border border-zinc-800/20 text-zinc-500">
         <span className="text-zinc-300">X {mouseWorld.x.toFixed(2)}　Y {mouseWorld.y.toFixed(2)} m</span>
         <span title="以 96 dpi 螢幕估算的出圖比例">比例 1:{(() => { const n = 3780 / viewport.zoom; const m = Math.pow(10, Math.floor(Math.log10(n)) - 1); return Math.round(n / m) * m; })()}</span>
         <span className="hidden xl:inline">Shift 正交／15°</span>
         <span className="hidden xl:inline">Space 或中鍵 平移</span>
         <span className="hidden xl:inline">Esc 完成／取消</span>
-      </div>
+      </div>}
 
       {/* Dynamic Scale Bar on Right Bottom corner */}
       <div style={{ bottom: 16 + insets.bottom, right: 16 + insets.right }} className="absolute bottom-4 right-4 flex flex-col items-center select-none pointer-events-none z-10 font-mono text-[10px] gap-1 transition-all text-white drop-shadow-[0_1.5px_1.5px_rgba(0,0,0,0.8)]">

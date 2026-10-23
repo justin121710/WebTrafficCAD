@@ -2944,7 +2944,7 @@ export default function PropsPanel({
   return (
     <div
       id="right-property-panel"
-      className="w-full h-full p-4 flex flex-col select-none bg-[#14161c] text-slate-300"
+      className="w-full p-3 flex flex-col select-none text-slate-300"
       // 開始修改任何欄位前先記錄一筆復原點（相同內容不會重複記錄）
       onFocusCapture={(e) => { const t = e.target as HTMLElement; if (t.matches('input, select, textarea')) onSaveHistory?.(); }}
       onPointerDownCapture={(e) => { const t = e.target as HTMLElement; if (t.matches('input[type="range"], button')) onSaveHistory?.(); }}

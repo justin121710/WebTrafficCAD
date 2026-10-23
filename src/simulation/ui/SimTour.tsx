@@ -12,7 +12,7 @@ export default function SimTour({ onClose }: { onClose: () => void }) {
   const [i, setI] = useState(0);
   const steps = [
     { icon: <Truck className="w-6 h-6" />, title: '選車種', body: '在右側「車輛」選擇設計車種（小客車、單體貨車、市區公車、半聯結車），可勾選多個車種套疊比較。修改尺寸會自動另存為自訂車種。' },
-    { icon: <Route className="w-6 h-6" />, title: '畫路徑', body: '左側建議用「點選＋半徑」：依序點節點，轉角自動以指定半徑圓弧連接；或用「路口轉彎」指定進出路口的位置與方向。Enter 完成、Esc 取消、Ctrl+Z 復原。' },
+    { icon: <Route className="w-6 h-6" />, title: '畫路徑', body: '上方功能區建議用「點選＋半徑」：依序點節點，轉角自動以指定半徑圓弧連接；或用「路口轉彎」指定進出路口的位置與方向。Enter 完成、Esc 取消、Ctrl+Z 復原。' },
     { icon: <ListChecks className="w-6 h-6" />, title: '看結果', body: '掃掠範圍與淨距帶會立即完整顯示；右側「結果」列出轉角、迴轉半徑、內輪差、掃掠寬度與衝突位置，可匯出檢核表，DXF／PNG 也會一併輸出。' },
   ];
   const close = () => { try { localStorage.setItem(KEY, '1'); } catch { /* ignore */ } onClose(); };

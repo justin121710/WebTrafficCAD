@@ -307,7 +307,7 @@ function PathTab({ store, polished }: { store: SimStore; polished?: boolean }) {
         </div>
         {!paths.length && !store.draft && (
           <p className="text-xs py-5 text-center leading-relaxed" style={{ color: 'var(--ui-muted)' }}>
-            還沒有軌跡。從左側選一種繪製方式開始，<br />建議用「點選＋半徑」或「路口轉彎」。
+            還沒有軌跡。從上方功能區選一種繪製方式開始，<br />建議用「點選＋半徑」或「路口轉彎」。
           </p>
         )}
       </div>

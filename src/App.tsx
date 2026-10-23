@@ -24,21 +24,21 @@ import SimPanel from './simulation/ui/SimPanel';
 import { getSimulationPrimitives, simulationLegend, exportableEntries } from './simulation/exportPrims';
 import SimHud from './simulation/ui/SimHud';
 import SimTour, { simTourSeen } from './simulation/ui/SimTour';
-import { GuidedSimSidebar, MinimalSimRail, PolishedSimDock } from './simulation/ui/SimToolPalette';
-import Toolbar from './components/Toolbar';
+import { SIM_TOOLS, SIM_SELECT_DEF } from './simulation/ui/SimToolPalette';
+import { renderToolIcon } from './components/Toolbar';
 import PropsPanel from './components/PropsPanel';
 import CadCanvas, { transformElement, getElementBoundingBox } from './components/CadCanvas';
 import { exportElementsToDXF } from './dxf';
 import { renderElementsToPng } from './exportPng';
-import { computeQuantities, layerKeyOf } from './markings';
+import { computeQuantities, layerKeyOf, MARKING_NAMES } from './markings';
 import { buildCrossroadTemplate } from './templates';
 import { saveAutosave, loadAutosave, clearAutosave } from './autosave';
-import { UiStyle, loadUiStyle, saveUiStyle } from './ui/uiStyle';
-import StylePicker from './ui/StylePicker';
-import { MinimalToolRail, GuidedToolSidebar, PolishedDock } from './ui/ToolPalette';
-import { ExportPanel, SettingsPanel, LayerPanel, QuantityPanel, ArrowTypeBar, ConfirmDialog, AutosaveBanner, ViewSettings, Toggle } from './ui/Panels';
+import { TOOL_CATEGORIES, ALL_TOOLS } from './ui/toolCatalog';
+import { MenuBar, MenuDef, MenuItem, RibbonTabs, Ribbon, RibbonGroup, RibbonBigButton, RibbonButton, RibbonCheck, CommandLine, StatusBar, StatusToggle } from './ui/Drafting';
+import { LayerPanel, QuantityPanel, ArrowTypeBar, ConfirmDialog, AutosaveBanner, Toggle } from './ui/Panels';
+import logoUrl from './assets/logo.svg';
 import { PaletteName } from './renderPrimitives';
-import { Compass, Info, CheckCircle2, AlertTriangle, RotateCcw, RotateCw, Image as ImageIcon, Download, Upload, Trash2, Ruler, X, Grid, ChevronLeft, ChevronRight, Play, Pause, Sliders, Layers, Truck, Lock, Unlock, GitBranch, MapPin, Save, FolderOpen, ChevronDown, PenTool, Paintbrush } from 'lucide-react';
+import { Info, CheckCircle2, AlertTriangle, RotateCcw, RotateCw, Image as ImageIcon, Upload, Trash2, Ruler, X, MousePointer2, Copy, ClipboardPaste, CopyPlus, Maximize, FileCode2, Table, Download } from 'lucide-react';
 
 export default function App() {
   // App Mode State: 'cad' | 'simulation' (預設為 'cad')
@@ -47,12 +47,6 @@ export default function App() {
   // 軌跡模擬狀態集中在 simStore（src/simulation/store.ts）
   const sim = useSimStore();
   const [showSimTour, setShowSimTour] = useState<boolean>(false);
-  const [windowWidth, setWindowWidth] = useState<number>(() => (typeof window !== 'undefined' ? window.innerWidth : 1440));
-  useEffect(() => {
-    const onResize = () => setWindowWidth(window.innerWidth);
-    window.addEventListener('resize', onResize);
-    return () => window.removeEventListener('resize', onResize);
-  }, []);
   const [simDocVersion, setSimDocVersion] = useState<number>(0);
 
   // Central elements state (Geometries Array)
@@ -88,13 +82,13 @@ export default function App() {
   // Undo / Redo system historical timeline
   const [historyStack, setHistoryStack] = useState<CadElement[][]>([]);
   const [redoStack, setRedoStack] = useState<CadElement[][]>([]);
-  const [isPropsCollapsed, setIsPropsCollapsed] = useState<boolean>(false);
 
   // Custom persistent toast state for graceful sandboxed alerts
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
 
   const showToast = (message: string, type: 'success' | 'error' | 'info' = 'info') => {
     setToast({ message, type });
+    pushCmd(message);
   };
 
   useEffect(() => {
@@ -125,11 +119,11 @@ export default function App() {
     includeSimulation: true,
   });
   const [fitRequest, setFitRequest] = useState<number>(0);
-  const [uiStyle, setUiStyleState] = useState<UiStyle>(() => loadUiStyle());
-  const setUiStyle = (st: UiStyle) => { setUiStyleState(st); saveUiStyle(st); };
-  const [modernMenu, setModernMenu] = useState<null | 'file' | 'export' | 'view'>(null);
-  const [rightTab, setRightTab] = useState<'props' | 'layers' | 'qty'>('props');
-  const [isRightPanelOpen, setIsRightPanelOpen] = useState<boolean>(true);
+  const [ribbonTab, setRibbonTab] = useState<'draw' | 'view' | 'output'>('draw');
+  const [bottomTab, setBottomTab] = useState<'layers' | 'qty'>('layers');
+  const [showHelp, setShowHelp] = useState<boolean>(false);
+  const [cmdHistory, setCmdHistory] = useState<string[]>(['WebTrafficCAD 已就緒。直接打字可輸入工具名稱或指令，例如 停止線、STOP、Z（縮放全圖）；HELP 查看全部。']);
+  const pushCmd = (line: string) => setCmdHistory(h => [...h.slice(-49), line]);
   const [hiddenLayers, setHiddenLayers] = useState<string[]>([]);
   const [snapToIntersection, setSnapToIntersection] = useState<boolean>(true);
   const [confirmDialog, setConfirmDialog] = useState<{ title: string; message: string; confirmLabel: string; onConfirm: () => void } | null>(null);
@@ -141,7 +135,6 @@ export default function App() {
   const skipDirtyRef = useRef<boolean>(false);
   const projectFileBase = () => `${(projectName || 'WebTrafficCAD').replace(/[\\/:*?"<>|]/g, '_')}_${new Date().toISOString().slice(0, 10)}`;
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [isExportDropdownOpen, setIsExportDropdownOpen] = useState<boolean>(false);
 
 
 
@@ -156,8 +149,6 @@ export default function App() {
   const [showGrid, setShowGrid] = useState<boolean>(true);
   const [minorGridInterval, setMinorGridInterval] = useState<number>(1);
   const [majorGridInterval, setMajorGridInterval] = useState<number>(5);
-  const [isGridSettingsOpen, setIsGridSettingsOpen] = useState<boolean>(false);
-  const [isSnapSettingsOpen, setIsSnapSettingsOpen] = useState<boolean>(false);
 
   // Register Global Hotkeys (Ctrl+Z, Ctrl+Y, V to select, and Delete/Backspace to delete selected elements)
   useEffect(() => {
@@ -263,19 +254,6 @@ export default function App() {
     simStore.onDocChange = () => setSimDocVersion(v => v + 1);
   });
 
-
-  // 點擊外部時關閉匯出選單
-  useEffect(() => {
-    if (!isExportDropdownOpen) return;
-    const handleOutsideClick = (e: MouseEvent) => {
-      const target = e.target as HTMLElement;
-      if (!target.closest('#export-dropdown-container')) {
-        setIsExportDropdownOpen(false);
-      }
-    };
-    window.addEventListener('click', handleOutsideClick);
-    return () => window.removeEventListener('click', handleOutsideClick);
-  }, [isExportDropdownOpen]);
 
   const saveHistory = (currentElements: CadElement[]) => {
     try {
@@ -717,18 +695,6 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKey);
   });
 
-  // 新版介面選單：點擊選單外任何地方即關閉（玻璃面板的 backdrop-filter 會限制 fixed 遮罩，因此改用全域監聽）
-  useEffect(() => {
-    if (!modernMenu) return;
-    const onDown = (e: PointerEvent) => {
-      if (!(e.target as HTMLElement).closest('[data-menu-root]')) setModernMenu(null);
-    };
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setModernMenu(null); };
-    window.addEventListener('pointerdown', onDown, true);
-    window.addEventListener('keydown', onKey);
-    return () => { window.removeEventListener('pointerdown', onDown, true); window.removeEventListener('keydown', onKey); };
-  }, [modernMenu]);
-
   // ---------- 自動儲存 ----------
   // 啟動時檢查是否有上次未存檔的自動儲存
   useEffect(() => {
@@ -850,14 +816,6 @@ export default function App() {
     reader.readAsDataURL(file);
   };
 
-  const viewSettings: ViewSettings = {
-    showGrid, setShowGrid, minorGridInterval, setMinorGridInterval, majorGridInterval, setMajorGridInterval,
-    snapToGrid, setSnapToGrid, snapToEndpoint, setSnapToEndpoint, snapToMidpoint, setSnapToMidpoint,
-    snapToNearest, setSnapToNearest, snapToIntersection, setSnapToIntersection,
-    bgImage, setBgImage, onUploadBg: handleUploadBg,
-    isCalibrating: activeTool === 'map_scale',
-    onCalibrate: () => setActiveTool(activeTool === 'map_scale' ? 'select' : 'map_scale'),
-  };
 
   // CAD 圖層面板：軌跡模擬結果的唯讀參考圖層
   const simRefLayerRow = sim.doc.paths.length > 0 ? (
@@ -867,531 +825,30 @@ export default function App() {
     </div>
   ) : null;
 
-  const exportPanelEl = (
-    <ExportPanel
-      options={exportOptions}
-      setOptions={setExportOptions}
-      projectName={projectName}
-      setProjectName={setProjectName}
-      onPng={() => { handleExportPNG(); setModernMenu(null); setIsExportDropdownOpen(false); }}
-      onDxf={() => { handleExportDXF(); setModernMenu(null); setIsExportDropdownOpen(false); }}
-      onCsv={() => { handleExportQuantities(); setModernMenu(null); setIsExportDropdownOpen(false); }}
-      hiddenCount={hiddenLayers.length}
-    />
-  );
-
   const hasToolConfig = activeTool === 'parking_space' || activeTool === 'parking_zone' || activeTool === 'road_arrow';
   const hasSelection = !!selectedElement || selectedElementIds.length > 0;
-  // 簡潔風格：屬性面板只在有選取、工具有參數或模擬模式時出現
-  const minimalPanelVisible = appMode === 'simulation' || hasSelection || hasToolConfig || rightTab !== 'props';
-  const polishedPanelVisible = isRightPanelOpen && (appMode === 'simulation' || hasSelection || hasToolConfig || rightTab !== 'props');
-  const canvasInsets = uiStyle === 'polished'
-    ? { top: 64, right: polishedPanelVisible ? 352 : 0, bottom: 112, left: 0 }
-    : { top: 0, right: 0, bottom: 0, left: 0 };
 
-  const modeSwitchEl = (
-          <div className="flex items-center bg-[#0a0b0e] border border-[#2d3039] rounded-lg p-0.5 select-none shrink-0">
-            <button
-              onClick={() => handleModeChange('cad')}
-              className={`px-4 py-1 text-xs font-bold rounded-md transition-all cursor-pointer ${
-                appMode === 'cad'
-                  ? 'bg-blue-600 text-white shadow-sm font-extrabold'
-                  : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              CAD 繪圖
-            </button>
-            <button
-              onClick={() => handleModeChange('simulation')}
-              className={`px-4 py-1 text-xs font-bold rounded-md transition-all cursor-pointer ${
-                appMode === 'simulation'
-                  ? 'bg-blue-600 text-white shadow-sm font-extrabold'
-                  : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              軌跡模擬
-            </button>
-          </div>
-  );
-  const historyBtnsEl = (
-<>
-          {/* Clear Canvas Button */}
-          <button
-            onClick={() => {
-              if (appMode === 'cad') {
-                handleClearCanvas();
-              } else {
-                simStore.clearAll();
-              }
-            }}
-            disabled={appMode === 'cad' ? elements.length === 0 : (sim.doc.paths.length === 0 && !sim.draft)}
-            className="flex items-center justify-center w-8 h-8 rounded bg-[#1f2229] border border-[#2d3039] hover:bg-slate-800 disabled:opacity-30 disabled:hover:bg-[#1f2229] disabled:cursor-not-allowed transition-all text-slate-350 cursor-pointer"
-            title={appMode === 'cad' ? "清空 CAD 標線畫布" : "一次清除所有軌跡"}
-          >
-            <Trash2 className="w-4 h-4 text-red-400" />
-          </button>
+  // ---------- 狀態列：游標座標與比例直接寫入 DOM，避免每次移動滑鼠都重繪整個 App ----------
+  const coordRef = useRef<HTMLSpanElement>(null);
+  const scaleRef = useRef<HTMLSpanElement>(null);
+  const handleCursorMove = useCallback((x: number, y: number, zoom: number) => {
+    if (coordRef.current) coordRef.current.textContent = `${x.toFixed(3)}, ${y.toFixed(3)}`;
+    if (scaleRef.current) {
+      const n = 3780 / zoom;
+      const m = Math.pow(10, Math.floor(Math.log10(n)) - 1);
+      scaleRef.current.textContent = `比例 1:${Math.round(n / m) * m}`;
+    }
+  }, []);
 
-          {/* Undo Button (Symbol Only) */}
-          <button
-            onClick={appMode === 'cad' ? handleUndo : () => simStore.undo()}
-            disabled={appMode === 'cad' ? historyStack.length === 0 : !sim.canUndo()}
-            className="flex items-center justify-center w-8 h-8 rounded bg-[#1f2229] border border-[#2d3039] hover:bg-slate-800 disabled:opacity-30 disabled:hover:bg-[#1f2229] disabled:cursor-not-allowed transition-all text-slate-300 cursor-pointer"
-            title="撤銷 (Ctrl+Z)"
-          >
-            <RotateCcw className="w-4 h-4 text-slate-400" />
-          </button>
-
-          {/* Redo Button (Symbol Only) */}
-          <button
-            onClick={appMode === 'cad' ? handleRedo : () => simStore.redo()}
-            disabled={appMode === 'cad' ? redoStack.length === 0 : !sim.canRedo()}
-            className="flex items-center justify-center w-8 h-8 rounded bg-[#1f2229] border border-[#2d3039] hover:bg-slate-800 disabled:opacity-30 disabled:hover:bg-[#1f2229] disabled:cursor-not-allowed transition-all text-slate-300 cursor-pointer"
-            title="重做 (Ctrl+Y)"
-          >
-            <RotateCw className="w-4 h-4 text-slate-400" />
-          </button>
-
-</>
-  );
-  const fileBtnsEl = (
-<>
-          {/* Save Project (JSON) */}
-          <button
-            id="save-project-btn"
-            onClick={handleSaveProject}
-            className="flex items-center justify-center w-8 h-8 rounded bg-emerald-500/10 border border-emerald-500/30 hover:bg-emerald-500/20 text-emerald-400 cursor-pointer transition-all shrink-0"
-            title="儲存專案 (JSON)"
-          >
-            <Save className="w-4 h-4 text-emerald-400" />
-          </button>
-
-          {/* Load Project (JSON) */}
-          <button
-            id="load-project-btn"
-            onClick={() => fileInputRef.current?.click()}
-            className="flex items-center justify-center w-8 h-8 rounded bg-amber-500/10 border border-amber-500/30 hover:bg-amber-500/20 text-amber-400 cursor-pointer transition-all shrink-0"
-            title="開啟專案 (JSON)"
-          >
-            <FolderOpen className="w-4 h-4 text-amber-400" />
-          </button>
-          <input
-            type="file"
-            ref={fileInputRef}
-            accept=".json"
-            onChange={handleLoadProject}
-            style={{ display: 'none' }}
-          />
-
-</>
-  );
-  const classicExportEl = (
-          <div id="export-dropdown-container" className="relative shrink-0">
-            <button
-              id="export-dropdown-toggle-btn"
-              onClick={() => setIsExportDropdownOpen(!isExportDropdownOpen)}
-              className="flex items-center gap-1.5 h-8 px-3 text-xs rounded bg-[#1f2229] border border-[#2d3039] hover:bg-slate-800 text-blue-400 font-medium cursor-pointer transition-all shrink-0"
-              title="匯出工程圖 (PNG) 或 AutoCAD DXF 向量檔"
-            >
-              <Download className="w-3.5 h-3.5 text-blue-400" />
-              <span className="hidden xl:inline">匯出</span>
-              <ChevronDown className="w-3 h-3 text-blue-400/70" />
-            </button>
-            {isExportDropdownOpen && (
-              <div className="ui-classic absolute right-0 top-full mt-1.5 w-72 rounded-lg bg-[#1f2229] border border-[#2d3039] shadow-xl p-3 z-30">
-                {exportPanelEl}
-              </div>
-            )}
-          </div>
-  );
-  const gridPopoverEl = (
-          <div className="relative">
-            <button
-              id="grid-settings-toggle-btn"
-              onClick={() => {
-                setIsGridSettingsOpen(!isGridSettingsOpen);
-                setIsSnapSettingsOpen(false);
-              }}
-              className={`flex items-center gap-1.5 h-8 px-3 text-xs rounded transition-all cursor-pointer font-medium ${
-                isGridSettingsOpen || !showGrid
-                  ? 'bg-blue-600/10 text-blue-400 border border-blue-500/40' 
-                  : 'bg-[#1f2229] border border-[#2d3039] hover:bg-slate-800 text-slate-300'
-              }`}
-              title="網格背景配置與尺寸間距設定"
-            >
-              <Grid className="w-3.5 h-3.5 text-blue-400" />
-              <span className="hidden xl:inline">網格</span>
-            </button>
-
-            {isGridSettingsOpen && (
-              <>
-              <div className="fixed inset-0 z-40 cursor-default" onClick={() => setIsGridSettingsOpen(false)} />
-              <div 
-                id="grid-settings-popup"
-                className="absolute right-0 mt-2 w-64 bg-[#14161c] border border-[#2d3039] rounded-lg p-3.5 shadow-lg z-50 text-left space-y-3"
-                style={{ top: '100%' }}
-              >
-                <div className="flex items-center justify-between border-b border-[#2d3039] pb-2 mb-1">
-                  <span className="text-xs font-bold text-slate-200 flex items-center gap-1">
-                    <Grid className="w-3.5 h-3.5 text-blue-400" />
-                    <span>網格</span>
-                  </span>
-                  <button 
-                    onClick={() => setIsGridSettingsOpen(false)}
-                    className="text-slate-500 hover:text-slate-300 text-xs cursor-pointer"
-                  >
-                    ✕
-                  </button>
-                </div>
-
-                {/* Show/Hide switch */}
-                <div className="flex items-center justify-between">
-                  <span className="text-xs text-slate-400">啟用背景網格</span>
-                  <button
-                    id="toggle-grid-vis-btn"
-                    onClick={() => setShowGrid(!showGrid)}
-                    className={`w-10 h-5 rounded-full p-0.5 transition-colors cursor-pointer ${
-                      showGrid ? 'bg-blue-600' : 'bg-[#1f2229] border border-[#2d3039]'
-                    }`}
-                  >
-                    <div className={`bg-white w-4 h-4 rounded-full transition-transform ${
-                      showGrid ? 'translate-x-5' : 'translate-x-0'
-                    }`} />
-                  </button>
-                </div>
-
-                {showGrid && (
-                  <>
-                    {/* Minor Grid Input */}
-                    <div className="space-y-1">
-                      <div className="flex justify-between text-[11px]">
-                        <span className="text-slate-400">細網格間距</span>
-                        <span className="text-blue-400 font-bold font-mono">
-                          {minorGridInterval === 0 ? "無" : `${minorGridInterval} m`}
-                        </span>
-                      </div>
-                      <div className="grid grid-cols-5 gap-1">
-                        {[0, 0.2, 0.5, 1, 2].map((val) => (
-                          <button
-                            key={val}
-                            onClick={() => {
-                              setMinorGridInterval(val);
-                              if (val > 0 && val >= majorGridInterval) {
-                                setMajorGridInterval(val * 5);
-                              }
-                            }}
-                            className={`py-1 text-[10px] rounded border font-mono transition-colors cursor-pointer ${
-                              minorGridInterval === val
-                                ? 'bg-blue-600 text-white border-blue-500'
-                                : 'bg-[#1f2229] hover:bg-slate-800 border-[#2d3039] text-slate-400'
-                            }`}
-                          >
-                            {val === 0 ? "無" : `${val}m`}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* Major Grid Input */}
-                    <div className="space-y-1">
-                      <div className="flex justify-between text-[11px]">
-                        <span className="text-slate-400">粗網格間距</span>
-                        <span className="text-blue-400 font-bold font-mono">
-                          {majorGridInterval === 0 ? "無" : `${majorGridInterval} m`}
-                        </span>
-                      </div>
-                      <div className="grid grid-cols-5 gap-1">
-                        {[0, 2, 5, 10, 20].map((val) => (
-                          <button
-                            key={val}
-                            onClick={() => {
-                              setMajorGridInterval(val);
-                            }}
-                            disabled={val !== 0 && minorGridInterval !== 0 && val <= minorGridInterval}
-                            className={`py-1 text-[10px] rounded border font-mono transition-colors cursor-pointer disabled:opacity-25 disabled:cursor-not-allowed ${
-                              majorGridInterval === val
-                                ? 'bg-blue-600 text-white border-blue-500'
-                                : 'bg-[#1f2229] hover:bg-slate-800 border-[#2d3039] text-slate-400'
-                            }`}
-                          >
-                            {val === 0 ? "無" : `${val}m`}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  </>
-                )}
-              </div>
-              </>
-            )}
-          </div>
-  );
-  const snapPopoverEl = (
-          <div className="relative">
-            <button
-              id="snap-settings-toggle-btn"
-              onClick={() => {
-                setIsSnapSettingsOpen(!isSnapSettingsOpen);
-                setIsGridSettingsOpen(false);
-              }}
-              className={`flex items-center gap-1.5 h-8 px-3 text-xs rounded transition-all cursor-pointer font-medium ${
-                isSnapSettingsOpen || (snapToGrid || snapToEndpoint || snapToMidpoint || snapToNearest || snapToIntersection)
-                  ? 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/40'
-                  : 'bg-[#1f2229] border border-[#2d3039] hover:bg-slate-800 text-slate-300'
-              }`}
-              title="鎖點設定 (Snap Settings)"
-            >
-              <Compass className="w-3.5 h-3.5 text-cyan-400" />
-              <span className="hidden xl:inline">鎖點</span>
-            </button>
-
-            {isSnapSettingsOpen && (
-              <>
-                {/* Click outside backdrop overlay */}
-                <div 
-                  className="fixed inset-0 z-40 cursor-default" 
-                  onClick={() => setIsSnapSettingsOpen(false)} 
-                />
-                <div 
-                  id="snap-checkboxes-header-popup"
-                  className="absolute right-0 mt-2 w-48 bg-[#14161c] border border-[#2d3039] rounded-lg p-3.5 shadow-lg z-50 text-left space-y-2.5 text-xs select-none"
-                  style={{ top: '100%' }}
-                >
-                  <div className="flex items-center justify-between border-b border-[#2d3039] pb-2 mb-1">
-                    <span className="text-xs font-bold text-slate-200 flex items-center gap-1">
-                      <Compass className="w-3.5 h-3.5 text-cyan-400" />
-                      <span>鎖點</span>
-                    </span>
-                    <button 
-                      onClick={() => setIsSnapSettingsOpen(false)}
-                      className="text-slate-500 hover:text-slate-300 text-xs cursor-pointer"
-                    >
-                      ✕
-                    </button>
-                  </div>
-                  <button 
-                    onClick={() => setSnapToGrid(!snapToGrid)} 
-                    className="flex items-center justify-between w-full hover:bg-[#1f2229] p-1.5 rounded-md transition-colors text-slate-300 hover:text-white text-left cursor-pointer"
-                  >
-                    <span>網格</span>
-                    <span className={`text-[9px] font-extrabold px-1.5 py-0.5 rounded ${snapToGrid ? 'bg-cyan-500/20 text-cyan-400' : 'bg-slate-800 text-slate-500'}`}>
-                      {snapToGrid ? 'ON' : 'OFF'}
-                    </span>
-                  </button>
-                  <button 
-                    onClick={() => setSnapToEndpoint(!snapToEndpoint)} 
-                    className="flex items-center justify-between w-full hover:bg-[#1f2229] p-1.5 rounded-md transition-colors text-slate-300 hover:text-white text-left cursor-pointer"
-                  >
-                    <span>端點</span>
-                    <span className={`text-[9px] font-extrabold px-1.5 py-0.5 rounded ${snapToEndpoint ? 'bg-cyan-500/20 text-cyan-400' : 'bg-slate-800 text-slate-500'}`}>
-                      {snapToEndpoint ? 'ON' : 'OFF'}
-                    </span>
-                  </button>
-                  <button 
-                    onClick={() => setSnapToMidpoint(!snapToMidpoint)} 
-                    className="flex items-center justify-between w-full hover:bg-[#1f2229] p-1.5 rounded-md transition-colors text-slate-300 hover:text-white text-left cursor-pointer"
-                  >
-                    <span>中點</span>
-                    <span className={`text-[9px] font-extrabold px-1.5 py-0.5 rounded ${snapToMidpoint ? 'bg-cyan-500/20 text-cyan-400' : 'bg-slate-800 text-slate-500'}`}>
-                      {snapToMidpoint ? 'ON' : 'OFF'}
-                    </span>
-                  </button>
-                  <button 
-                    onClick={() => setSnapToNearest(!snapToNearest)} 
-                    className="flex items-center justify-between w-full hover:bg-[#1f2229] p-1.5 rounded-md transition-colors text-slate-300 hover:text-white text-left cursor-pointer"
-                  >
-                    <span>最近點</span>
-                    <span className={`text-[9px] font-extrabold px-1.5 py-0.5 rounded ${snapToNearest ? 'bg-cyan-500/20 text-cyan-400' : 'bg-slate-800 text-slate-500'}`}>
-                      {snapToNearest ? 'ON' : 'OFF'}
-                    </span>
-                  </button>
-                  <button 
-                    onClick={() => setSnapToIntersection(!snapToIntersection)} 
-                    className="flex items-center justify-between w-full hover:bg-[#1f2229] p-1.5 rounded-md transition-colors text-slate-300 hover:text-white text-left cursor-pointer"
-                  >
-                    <span>交點</span>
-                    <span className={`text-[9px] font-extrabold px-1.5 py-0.5 rounded ${snapToIntersection ? 'bg-cyan-500/20 text-cyan-400' : 'bg-slate-800 text-slate-500'}`}>
-                      {snapToIntersection ? 'ON' : 'OFF'}
-                    </span>
-                  </button>
-                </div>
-              </>
-            )}
-          </div>
-  );
-  const bgManagerEl = (
-!bgImage ? (
-            <div className="relative flex items-center h-8 rounded bg-[#1f2229] border border-dashed border-blue-500/35 hover:border-blue-500 hover:bg-slate-800 transition-all text-xs font-medium text-blue-450 cursor-pointer overflow-hidden px-3">
-              <input 
-                id="bg-image-uploader"
-                type="file" 
-                accept="image/*" 
-                onChange={(e) => {
-                  const file = e.target.files?.[0];
-                  if (!file) return;
-                  const reader = new FileReader();
-                  reader.onload = (event) => {
-                    const src = event.target?.result as string;
-                    const img = new Image();
-                    img.onload = () => {
-                      setBgImage({
-                        src,
-                        x: 0,
-                        y: 0,
-                        widthMeters: img.width / 20, 
-                        heightMeters: img.height / 20,
-                        opacity: 0.6,
-                        isCalibrated: false,
-                        pixelPerMeter: 20,
-                        fileName: file.name
-                      });
-                    };
-                    img.src = src;
-                  };
-                  reader.readAsDataURL(file);
-                }}
-                className="absolute inset-0 opacity-0 cursor-pointer w-full h-full" 
-              />
-              <Upload className="w-3.5 h-3.5 mr-1.5 text-blue-400" />
-              <span className="hidden xl:inline">上傳底圖</span>
-            </div>
-          ) : (
-            <div className="flex items-center gap-2 bg-[#0f1115] border border-[#2d3039] rounded px-2.5 h-8 text-xs select-none">
-              <div className="flex items-center gap-1 max-w-[150px] shrink-0">
-                <span className="text-[10px] text-zinc-400 font-bold truncate" title={bgImage.fileName || "底圖已載入"}>
-                  {bgImage.fileName || "底圖"}
-                </span>
-                <span className="text-[9px] text-zinc-500 whitespace-nowrap hidden sm:inline">
-                  ({bgImage.widthMeters.toFixed(1)}m × {bgImage.heightMeters.toFixed(1)}m)
-                </span>
-              </div>
-
-              <div className="h-4 w-px bg-zinc-800" />
-
-              {/* Opacity control */}
-              <div className="flex items-center gap-1.5">
-                <span className="text-[9px] text-zinc-500 whitespace-nowrap">不透明度</span>
-                <input
-                  type="range"
-                  min="0.1"
-                  max="1.0"
-                  step="0.05"
-                  value={bgImage.opacity || 0.6}
-                  onChange={(e) => {
-                    const nextVal = parseFloat(e.target.value);
-                    setBgImage((prev: any) => prev ? { ...prev, opacity: nextVal } : null);
-                  }}
-                  className="w-12 h-1 accent-blue-500 bg-zinc-800 rounded appearance-none cursor-pointer"
-                />
-                <span className="text-[9px] font-mono text-zinc-400 w-6 text-right">{Math.round((bgImage.opacity || 0.6) * 100)}%</span>
-              </div>
-
-              <div className="h-4 w-px bg-zinc-800" />
-
-              {/* Calibration Controls */}
-              {activeTool === 'map_scale' ? (
-                <button
-                  onClick={() => {
-                    setActiveTool('select');
-                  }}
-                  className="flex items-center gap-1 px-2 h-5 text-[10px] bg-red-950 hover:bg-red-900 border border-red-500/25 rounded text-red-200 font-medium transition-colors cursor-pointer"
-                  title="取消比例尺校正"
-                >
-                  <span className="w-1.5 h-1.5 rounded-full bg-red-500 inline-block" />
-                  <span>取消校正</span>
-                </button>
-              ) : (
-                <button
-                  onClick={() => setActiveTool('map_scale')}
-                  className={`flex items-center gap-1 px-2 h-5 text-[10px] rounded border font-medium transition-colors cursor-pointer ${
-                    bgImage.isCalibrated
-                      ? 'bg-emerald-950/20 hover:bg-emerald-950/40 border-emerald-500/20 text-emerald-400'
-                      : 'bg-amber-950/20 hover:bg-amber-950/40 border-amber-500/20 text-amber-400'
-                  }`}
-                  title="開始拖曳劃出已知長度（如比例尺條或兩點距離）進行校正"
-                >
-                  <Ruler className="w-3 h-3 text-amber-505" />
-                  <span>{bgImage.isCalibrated ? '重新校正' : '校正比例尺'}</span>
-                </button>
-              )}
-
-              {/* Remove Button */}
-              <button
-                onClick={() => {
-                  setBgImage(null);
-                  if (activeTool === 'map_scale') setActiveTool('select');
-                }}
-                className="p-1 text-zinc-500 hover:text-red-400 hover:bg-red-950/30 rounded transition-colors cursor-pointer ml-1"
-                title="移除底圖"
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-              </button>
-            </div>
-          )
-  );
-  const classicToolbarEl = (
-          <>
-            <Toolbar 
-              activeTool={activeTool} 
-              setActiveTool={setActiveTool} 
-              onLoadDemo={handleLoadDemo}
-              designVehicle={designVehicle}
-              setDesignVehicle={setDesignVehicle}
-              snapToGrid={snapToGrid}
-              setSnapToGrid={setSnapToGrid}
-              snapToEndpoint={snapToEndpoint}
-              setSnapToEndpoint={setSnapToEndpoint}
-              snapToMidpoint={snapToMidpoint}
-              setSnapToMidpoint={setSnapToMidpoint}
-              snapToNearest={snapToNearest}
-              setSnapToNearest={setSnapToNearest}
-              roadArrowConfig={roadArrowConfig}
-              setRoadArrowConfig={setRoadArrowConfig}
-            />
-            {/* Floating style selector for road_arrow - Rendered outside Toolbar to prevent boundary clipping */}
-            {activeTool === 'road_arrow' && (
-              <div className="flex flex-col gap-1.5 p-2.5 bg-[#1f2229] border border-[#2d3039] rounded-lg w-[115px] absolute left-[153px] top-[290px] z-50 shadow-lg shadow-black/80 animate-fade-in">
-                <span className="text-[10px] font-bold text-cyan-400 border-b border-[#2d3039]/50 pb-1 text-center">箭頭樣式</span>
-                <div className="flex flex-col gap-1.5 w-full mt-1.5">
-                  {[
-                    { type: 'straight', name: '直行' },
-                    { type: 'left', name: '左轉' },
-                    { type: 'right', name: '右轉' },
-                    { type: 'straight_left', name: '直左' },
-                    { type: 'straight_right', name: '直右' }
-                  ].map(item => (
-                    <button 
-                      key={item.type}
-                      onClick={() => { 
-                        setRoadArrowConfig({
-                          ...roadArrowConfig,
-                          arrowType: item.type
-                        }); 
-                      }} 
-                      className={`px-2 py-1 rounded text-[11px] font-bold cursor-pointer text-left transition-all ${
-                        roadArrowConfig.arrowType === item.type 
-                          ? 'bg-blue-600 text-white' 
-                          : 'text-slate-300 hover:bg-[#252830] hover:text-white'
-                      }`} 
-                    >
-                      {item.name}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-          </>
-  );
-  // 軌跡模擬左側工具（依介面風格與 CAD 工具列一致）
-  // 視窗較窄時改用細窄圖示列，讓出畫布空間
-  const simLeftPanelEl = uiStyle === 'minimal' || windowWidth < 1180 ? <MinimalSimRail /> : <GuidedSimSidebar />;
   const canvasAreaEl = (
         <div className="flex-1 h-full min-w-0 relative flex flex-col">
-          <CadCanvas 
+          <CadCanvas
             onContextAction={handleContextAction}
             canPaste={canPaste}
-            insets={canvasInsets}
-            canvasBackground={uiStyle === 'polished' ? '#0e1116' : uiStyle === 'minimal' ? '#0f1012' : '#111214'}
+            canvasBackground="#1b1e23"
             fitRequest={fitRequest}
+            onCursorMove={handleCursorMove}
+            hideStatusBar
             snapToIntersection={snapToIntersection}
             elements={visibleElements}
             onAddElement={handleAddElement}
@@ -1425,7 +882,7 @@ export default function App() {
           appMode={appMode}
           focusRequest={sim.focus}
           />
-          {appMode === 'simulation' && <SimHud bottom={canvasInsets.bottom} polished={uiStyle === 'polished'} />}
+          {appMode === 'simulation' && <SimHud />}
         </div>
   );
   const propsPanelEl = (
@@ -1503,7 +960,7 @@ export default function App() {
                 }}
               />
   );
-  const simRightPanelEl = <SimPanel polished={uiStyle === 'polished'} projectName={projectName} />;
+  const simRightPanelEl = <SimPanel projectName={projectName} />;
 
   const sharedOverlaysEl = (
     <>
@@ -1558,7 +1015,7 @@ export default function App() {
 
       {/* Embedded Elegant Toast notification */}
       {toast && (
-        <div id="app-toast" role="status" className={`fixed ${uiStyle === 'polished' ? 'bottom-36' : 'bottom-16'} left-1/2 -translate-x-1/2 z-[250] max-w-md bg-[#1b1d22] border border-zinc-700/70 text-zinc-100 pl-3 pr-1.5 py-2 rounded-md shadow-lg flex items-center gap-2.5`}>
+        <div id="app-toast" role="status" className={`fixed bottom-[96px] left-1/2 -translate-x-1/2 z-[250] max-w-md bg-[#1b1d22] border border-zinc-700/70 text-zinc-100 pl-3 pr-1.5 py-2 rounded-md shadow-lg flex items-center gap-2.5`}>
           {toast.type === 'success' ? <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400" />
             : toast.type === 'error' ? <AlertTriangle className="w-4 h-4 shrink-0 text-amber-400" />
             : <Info className="w-4 h-4 shrink-0 text-sky-400" />}
@@ -1575,360 +1032,377 @@ export default function App() {
     </>
   );
 
+
   // ====================================================================
-  // 新版介面（A 簡潔／B 直覺／C 美觀）：共用相同狀態與功能，只改變版面與外觀
+  // 製圖桌介面：選單列＋功能區＋畫布／性質面板＋指令列＋狀態列
   // ====================================================================
-  const renderModernLayout = () => {
-    const v = uiStyle as 'minimal' | 'guided' | 'polished';
-    const isPolished = v === 'polished';
-    const isGuided = v === 'guided';
+  const isCad = appMode === 'cad';
+  const zoomToFit = () => setFitRequest(n => n + 1);
+  const toolDef = ALL_TOOLS.find(t => t.id === activeTool);
+  const simTool = sim.ui.tool;
+  const simToolDef = [SIM_SELECT_DEF, ...SIM_TOOLS].find(t => t.id === simTool);
 
-    const iconBtn = (id: string, title: string, icon: React.ReactNode, onClick: () => void, disabled = false, label?: string) => (
-      <button
-        id={id}
-        title={title}
-        onClick={onClick}
-        disabled={disabled}
-        className={`flex items-center gap-1.5 h-8 ${label ? 'px-2.5' : 'w-8 justify-center'} rounded-lg text-xs cursor-pointer transition-colors disabled:opacity-30 disabled:cursor-not-allowed hover:bg-white/10`}
-        style={{ color: 'var(--ui-text)' }}
-      >
-        {icon}
-        {label && <span className="whitespace-nowrap hidden xl:inline">{label}</span>}
-      </button>
-    );
+  const editItems: MenuItem[] = [
+    { label: '復原', shortcut: 'Ctrl+Z', onClick: isCad ? handleUndo : () => simStore.undo(), disabled: isCad ? historyStack.length === 0 : !sim.canUndo(), id: 'undo-btn' },
+    { label: '重做', shortcut: 'Ctrl+Y', onClick: isCad ? handleRedo : () => simStore.redo(), disabled: isCad ? redoStack.length === 0 : !sim.canRedo(), id: 'redo-btn' },
+    { label: '複製', shortcut: 'Ctrl+C', onClick: () => handleContextAction('copy'), disabled: !isCad || !hasSelection, separator: true },
+    { label: '貼上', shortcut: 'Ctrl+V', onClick: () => handleContextAction('paste'), disabled: !isCad || !canPaste },
+    { label: '原地複製', shortcut: 'Ctrl+D', onClick: () => handleContextAction('duplicate'), disabled: !isCad || !hasSelection },
+    { label: '旋轉 90°', onClick: () => handleContextAction('rotate90'), disabled: !isCad || !hasSelection },
+    { label: '刪除', shortcut: 'Del', onClick: () => handleContextAction('delete'), disabled: !isCad || !hasSelection, danger: true, separator: true },
+  ];
+  const menus: MenuDef[] = [
+    {
+      key: 'file', label: '檔案', items: [
+        { label: '開啟專案…', onClick: () => fileInputRef.current?.click(), id: 'load-project-btn' },
+        { label: '儲存專案（JSON）', onClick: handleSaveProject, id: 'save-project-btn' },
+        { label: '載入十字路口範本', onClick: handleLoadDemo, separator: true, id: 'menu-template-btn' },
+        { label: isCad ? '清空畫布…' : '清除所有軌跡', onClick: () => (isCad ? handleClearCanvas() : simStore.clearAll()), danger: true, disabled: isCad ? elements.length === 0 : (sim.doc.paths.length === 0 && !sim.draft), id: 'menu-clear-btn' },
+        { label: '匯出工程圖 PNG', onClick: handleExportPNG, separator: true },
+        { label: '匯出 AutoCAD DXF', onClick: handleExportDXF },
+        { label: '匯出數量計算表 CSV', onClick: handleExportQuantities, disabled: !isCad },
+      ],
+    },
+    { key: 'edit', label: '編輯', items: editItems },
+    {
+      key: 'view', label: '檢視', items: [
+        { label: '縮放全圖', shortcut: 'Z', onClick: zoomToFit },
+        { label: showGrid ? '隱藏網格' : '顯示網格', onClick: () => setShowGrid(!showGrid) },
+        { label: '功能區：繪圖', onClick: () => setRibbonTab('draw'), separator: true },
+        { label: '功能區：檢視', onClick: () => setRibbonTab('view') },
+        { label: '功能區：輸出', onClick: () => setRibbonTab('output') },
+      ],
+    },
+    { key: 'help', label: '說明', items: [{ label: '快捷鍵與指令', onClick: () => setShowHelp(true) }] },
+  ];
 
-    const menuBtn = (key: 'file' | 'export' | 'view', label: string, icon: React.ReactNode, id: string) => (
-      <button
-        id={id}
-        data-menu-root
-        onClick={() => setModernMenu(modernMenu === key ? null : key)}
-        className="flex items-center gap-1.5 h-8 px-2.5 rounded-lg text-xs cursor-pointer transition-colors hover:bg-white/10"
-        style={modernMenu === key ? { background: 'var(--ui-accent-soft)', color: 'var(--ui-accent)' } : { color: 'var(--ui-text)' }}
-      >
-        {icon}
-        <span className="whitespace-nowrap hidden lg:inline">{label}</span>
-        <ChevronDown className="w-3 h-3 opacity-60" />
-      </button>
-    );
-
-    const popover = (key: 'file' | 'export' | 'view', content: React.ReactNode, width = 'w-80') => modernMenu === key && (
-      <>
-        <div
-          data-menu-root
-          id={`menu-${key}`}
-          className={`absolute right-0 top-full mt-2 ${width} max-h-[75vh] overflow-y-auto p-3 z-50 shadow-lg ${isPolished ? 'glass' : ''}`}
-          style={isPolished ? { borderRadius: 16 } : { background: 'var(--ui-surface)', border: '1px solid var(--ui-border)', borderRadius: 12 }}
-        >
-          {content}
-        </div>
-      </>
-    );
-
-    const fileMenu = (
-      <div className="space-y-1 text-xs" style={{ color: 'var(--ui-text)' }}>
-        {[
-          { id: 'save-project-btn', label: '儲存專案（JSON）', icon: <Save className="w-4 h-4" />, onClick: handleSaveProject },
-          { id: 'load-project-btn', label: '開啟專案…', icon: <FolderOpen className="w-4 h-4" />, onClick: () => fileInputRef.current?.click() },
-          { id: 'menu-template-btn', label: '載入十字路口範本', icon: <MapPin className="w-4 h-4" />, onClick: handleLoadDemo },
-          { id: 'menu-clear-btn', label: appMode === 'cad' ? '清空畫布…' : '清除所有軌跡', icon: <Trash2 className="w-4 h-4 text-red-400" />, onClick: () => (appMode === 'cad' ? handleClearCanvas() : simStore.clearAll()) },
-        ].map(item => (
-          <button key={item.id} id={item.id} onClick={() => { item.onClick(); setModernMenu(null); }} className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg cursor-pointer hover:bg-white/10 text-left">
-            {item.icon}<span>{item.label}</span>
-          </button>
-        ))}
-        <p className="text-[10.5px] px-2.5 pt-2" style={{ color: 'var(--ui-muted)', borderTop: '1px solid var(--ui-border)' }}>
-          {isDirty ? '有尚未存檔的變更；內容已自動暫存在此瀏覽器。' : '所有變更都已儲存。'}
-        </p>
-      </div>
-    );
-
-    const modeSwitch = (
-      <div className={`flex items-center p-0.5 ${isPolished ? 'rounded-full' : 'rounded-lg'}`} style={{ background: isPolished ? 'rgba(255,255,255,0.06)' : 'var(--ui-surface2)', border: '1px solid var(--ui-border)' }}>
-        {([['cad', 'CAD 繪圖'], ['simulation', '軌跡模擬']] as const).map(([m, label]) => {
-          const active = appMode === m;
-          return (
-            <button
-              key={m}
-              id={`mode-${m}`}
-              onClick={() => handleModeChange(m)}
-              className={`px-3.5 py-1 text-xs font-bold whitespace-nowrap cursor-pointer transition-all ${isPolished ? 'rounded-full' : 'rounded-md'} ${active && isPolished ? 'accent-gradient' : ''}`}
-              style={active ? (isPolished ? {} : { background: 'var(--ui-accent)', color: 'var(--ui-accent-text)' }) : { color: 'var(--ui-muted)' }}
-            >
-              {label}
-            </button>
-          );
-        })}
-      </div>
-    );
-
-    const history = (
-      <>
-        {iconBtn('undo-btn', '復原（Ctrl+Z）', <RotateCcw className="w-4 h-4" />, appMode === 'cad' ? handleUndo : () => simStore.undo(), appMode === 'cad' ? historyStack.length === 0 : !sim.canUndo(), isGuided ? '復原' : undefined)}
-        {iconBtn('redo-btn', '重做（Ctrl+Y）', <RotateCw className="w-4 h-4" />, appMode === 'cad' ? handleRedo : () => simStore.redo(), appMode === 'cad' ? redoStack.length === 0 : !sim.canRedo(), isGuided ? '重做' : undefined)}
-      </>
-    );
-
-    const dirtyBadge = (
-      <span className="text-[10.5px] hidden lg:flex items-center gap-1 whitespace-nowrap" style={{ color: autosaveFailed ? '#f87171' : 'var(--ui-muted)' }} title={autosaveFailed ? '瀏覽器儲存空間不足或被封鎖，請立即另存專案檔' : isDirty ? '已自動暫存於瀏覽器，建議另存專案檔' : '已儲存'}>
-        <span className="w-1.5 h-1.5 rounded-full" style={{ background: autosaveFailed ? '#ef4444' : isDirty ? '#f59e0b' : '#22c55e' }} />
-        {autosaveFailed ? '自動暫存失敗' : isDirty ? '已自動暫存' : '已儲存'}
-      </span>
-    );
-
-    const projectNameInput = (
+  const modeSwitch = (
+    <div className="flex ml-3" style={{ border: '1px solid var(--ui-border)' }}>
+      {([['cad', 'CAD 繪圖'], ['simulation', '軌跡模擬']] as const).map(([m, label]) => (
+        <button key={m} id={`mode-${m}`} onClick={() => handleModeChange(m)} className="h-[22px] px-3 text-xs cursor-pointer"
+          style={appMode === m ? { background: 'var(--ui-accent)', color: 'var(--ui-accent-text)' } : { color: 'var(--ui-muted)' }}>
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+  const menuRight = (
+    <>
       <input
         id="project-name-header"
         value={projectName}
         onChange={e => setProjectName(e.target.value)}
-        className="hidden md:block bg-transparent text-xs font-medium outline-none px-1.5 py-1 rounded-md hover:bg-white/5 focus:bg-white/5 w-32 xl:w-40 truncate"
+        className="hidden md:block bg-transparent text-xs outline-none px-1.5 h-[22px] w-40 text-right hover:bg-white/5 focus:bg-white/5"
         style={{ color: 'var(--ui-text)' }}
-        title="圖名（會用於匯出檔名與圖框）"
+        title="圖名（用於匯出檔名與圖框）"
+        aria-label="圖名"
       />
-    );
+      <span className="text-[11px] hidden lg:inline whitespace-nowrap ml-1" style={{ color: autosaveFailed ? '#f87171' : 'var(--ui-muted)' }}
+        title={autosaveFailed ? '瀏覽器儲存空間不足或被封鎖，請立即另存專案檔' : isDirty ? '已自動暫存於瀏覽器，建議另存專案檔' : '已儲存'}>
+        ·　{autosaveFailed ? '自動暫存失敗' : isDirty ? '已自動暫存' : '已儲存'}
+      </span>
+      {modeSwitch}
+    </>
+  );
 
-    const viewPanel = (
-      <div className="space-y-4">
-        <SettingsPanel v={viewSettings} />
-        {v === 'minimal' && appMode === 'cad' && (
-          <div style={{ borderTop: '1px solid var(--ui-border)' }} className="pt-3">
-            <LayerPanel elements={elements} hidden={hiddenLayers} onToggle={toggleLayer} onShowAll={() => setHiddenLayers([])} extra={simRefLayerRow} />
-          </div>
-        )}
-      </div>
-    );
-
-    const rightTabs = (
-      <div className="flex gap-1 p-1 m-3 mb-0 rounded-lg" style={{ background: 'var(--ui-surface2)' }}>
-        {([['props', '屬性'], ['layers', '圖層'], ['qty', '數量']] as const).map(([k, label]) => (
-          <button key={k} id={`right-tab-${k}`} onClick={() => setRightTab(k)} className={`flex-1 py-1.5 text-xs cursor-pointer transition-all ${isPolished ? 'rounded-lg' : 'rounded-md'} ${rightTab === k && isPolished ? 'accent-gradient' : ''}`}
-            style={rightTab === k ? (isPolished ? {} : { background: 'var(--ui-accent)', color: 'var(--ui-accent-text)', fontWeight: 700 }) : { color: 'var(--ui-muted)' }}>
-            {label}
-          </button>
+  const icon = (id: CadTool) => renderToolIcon(id);
+  const selectIcon = <MousePointer2 />;
+  const drawRibbon = isCad ? (
+    <>
+      <RibbonGroup title="選取">
+        <RibbonBigButton id="tool-btn-select" icon={selectIcon} label="選取" active={activeTool === 'select'} onClick={() => setActiveTool('select')} title="選取與編輯（V）" />
+      </RibbonGroup>
+      {TOOL_CATEGORIES.map(cat => (
+        <RibbonGroup key={cat.key} title={cat.title}>
+          {cat.tools.map(t => (
+            <RibbonButton key={t.id} id={`tool-btn-${t.id}`} icon={icon(t.id)} label={t.label} title={t.desc} active={activeTool === t.id} onClick={() => setActiveTool(t.id)} />
+          ))}
+        </RibbonGroup>
+      ))}
+      <RibbonGroup title="修改">
+        <RibbonButton icon={<Copy />} label="複製" title="Ctrl+C" disabled={!hasSelection} onClick={() => handleContextAction('copy')} />
+        <RibbonButton icon={<ClipboardPaste />} label="貼上" title="Ctrl+V" disabled={!canPaste} onClick={() => handleContextAction('paste')} />
+        <RibbonButton icon={<CopyPlus />} label="原地複製" title="Ctrl+D" disabled={!hasSelection} onClick={() => handleContextAction('duplicate')} />
+        <RibbonButton icon={<RotateCw />} label="旋轉 90°" disabled={!hasSelection} onClick={() => handleContextAction('rotate90')} />
+        <RibbonButton icon={<RotateCcw />} label="反轉 90°" disabled={!hasSelection} onClick={() => handleContextAction('rotate-90')} />
+        <RibbonButton icon={<Trash2 />} label="刪除" title="Delete" disabled={!hasSelection} onClick={() => handleContextAction('delete')} />
+      </RibbonGroup>
+    </>
+  ) : (
+    <>
+      <RibbonGroup title="選取">
+        <RibbonBigButton id="sim-tool-select" icon={selectIcon} label="選取" active={simTool === 'select'} onClick={() => simStore.setTool('select')} title={SIM_SELECT_DEF.desc} />
+      </RibbonGroup>
+      <RibbonGroup title="繪製車輛軌跡">
+        {SIM_TOOLS.map(t => (
+          <RibbonButton key={t.id} id={`sim-tool-${t.id}`} icon={t.icon} label={`${t.label}（${t.key}）`} title={t.desc} active={simTool === t.id} onClick={() => simStore.setTool(t.id)} />
         ))}
-      </div>
-    );
+      </RibbonGroup>
+      <RibbonGroup title="檢核流程">
+        {([['vehicle', '① 選車種'], ['path', '② 畫路徑'], ['result', '③ 看結果']] as const).map(([k, label]) => (
+          <RibbonButton key={k} label={label} active={sim.ui.rightTab === k} onClick={() => simStore.setUi({ rightTab: k })} />
+        ))}
+      </RibbonGroup>
+    </>
+  );
 
-    const rightBody = appMode === 'cad'
-      ? (rightTab === 'props'
-          ? (hasSelection || hasToolConfig
-              ? propsPanelEl
-              : <div className="p-6 text-center text-xs" style={{ color: 'var(--ui-muted)' }}>
-                  <div className="text-3xl mb-2">⌖</div>
-                  點選圖面上的標線即可在這裡調整尺寸、座標與規格。
-                  <div className="mt-3 text-[11px] leading-relaxed">小技巧：框選可多選；Delete 刪除；Shift 拖曳鎖定方向；Esc 結束繪製。</div>
-                </div>)
-          : rightTab === 'layers'
-            ? <div className="p-3"><LayerPanel elements={elements} hidden={hiddenLayers} onToggle={toggleLayer} onShowAll={() => setHiddenLayers([])} extra={simRefLayerRow} /></div>
-            : <div className="p-3"><QuantityPanel elements={visibleElements} onExport={handleExportQuantities} /></div>)
-      : simRightPanelEl;
-
-    const fileInput = <input type="file" ref={fileInputRef} accept=".json" onChange={handleLoadProject} style={{ display: 'none' }} />;
-    const arrowBar = appMode === 'cad' && activeTool === 'road_arrow' && (
-      <ArrowTypeBar value={roadArrowConfig.arrowType} onChange={(t) => setRoadArrowConfig({ ...roadArrowConfig, arrowType: t as any })} style={{ top: isPolished ? 76 : 12 }} />
-    );
-
-    // ---------------- C・美觀：滿版畫布＋浮動玻璃面板 ----------------
-    if (isPolished) {
-      return (
-        <div id="webtrafficcad-app-root" className="ui-polished relative h-screen w-screen overflow-hidden font-sans" style={{ background: '#0e1116', color: 'var(--ui-text)' }}>
-          {fileInput}
-          <div className="absolute inset-0 flex">{canvasAreaEl}</div>
-          {arrowBar}
-
-          {/* 頂部浮動列 */}
-          <div className="absolute top-3 left-1/2 -translate-x-1/2 z-40 glass rounded-full pl-4 pr-1.5 py-1.5 flex items-center gap-2 max-w-[calc(100vw-24px)]">
-            <span className="w-2.5 h-2.5 rounded-full accent-gradient shrink-0" />
-            <span className="text-[13px] font-bold tracking-wide whitespace-nowrap">WebTrafficCAD</span>
-            <span className="w-px h-5" style={{ background: 'var(--ui-border)' }} />
-            {projectNameInput}
-            {dirtyBadge}
-            <span className="w-px h-5" style={{ background: 'var(--ui-border)' }} />
-            {modeSwitch}
-            <span className="w-px h-5" style={{ background: 'var(--ui-border)' }} />
-            {history}
-            <div className="relative">{menuBtn('file', '檔案', <FolderOpen className="w-4 h-4" />, 'menu-file-btn')}{popover('file', fileMenu, 'w-64')}</div>
-            <div className="relative">{menuBtn('view', '檢視', <Grid className="w-4 h-4" />, 'menu-view-btn')}{popover('view', viewPanel)}</div>
-            <div className="relative">
-              <button id="export-dropdown-toggle-btn" data-menu-root onClick={() => setModernMenu(modernMenu === 'export' ? null : 'export')} className="flex items-center gap-1.5 h-8 px-3.5 rounded-full text-xs font-bold whitespace-nowrap cursor-pointer accent-gradient shadow-lg">
-                <Download className="w-4 h-4" /> 匯出
-              </button>
-              {popover('export', exportPanelEl)}
+  const gridSelect = (label: string, value: number, options: number[], onChange: (n: number) => void, isDisabled?: (n: number) => boolean) => (
+    <label className="flex items-center gap-1.5 h-[24px] px-1.5 text-xs whitespace-nowrap">
+      <span style={{ color: 'var(--ui-muted)' }}>{label}</span>
+      <select value={value} onChange={e => onChange(parseFloat(e.target.value))} className="h-[20px] text-xs outline-none cursor-pointer" style={{ background: 'var(--ui-bg)', color: 'var(--ui-text)', border: '1px solid var(--ui-border)' }}>
+        {options.map(n => <option key={n} value={n} disabled={isDisabled?.(n)}>{n === 0 ? '無' : `${n} m`}</option>)}
+      </select>
+    </label>
+  );
+  const viewRibbon = (
+    <>
+      <RibbonGroup title="視圖">
+        <RibbonBigButton icon={<Maximize />} label="縮放全圖" onClick={zoomToFit} title="指令：Z" />
+      </RibbonGroup>
+      <RibbonGroup title="網格">
+        <RibbonCheck label="顯示網格" checked={showGrid} onChange={() => setShowGrid(!showGrid)} />
+        {gridSelect('細網格', minorGridInterval, [0, 0.2, 0.5, 1, 2], n => { setMinorGridInterval(n); if (n > 0 && n >= majorGridInterval) setMajorGridInterval(n * 5); })}
+        {gridSelect('粗網格', majorGridInterval, [0, 2, 5, 10, 20], setMajorGridInterval, n => n !== 0 && minorGridInterval !== 0 && n <= minorGridInterval)}
+      </RibbonGroup>
+      <RibbonGroup title="物件鎖點">
+        <RibbonCheck id="snap-endpoint" label="端點" checked={snapToEndpoint} onChange={() => setSnapToEndpoint(!snapToEndpoint)} />
+        <RibbonCheck id="snap-midpoint" label="中點" checked={snapToMidpoint} onChange={() => setSnapToMidpoint(!snapToMidpoint)} />
+        <RibbonCheck id="snap-intersection" label="交點" checked={snapToIntersection} onChange={() => setSnapToIntersection(!snapToIntersection)} />
+        <RibbonCheck id="snap-nearest" label="最近點／垂足" checked={snapToNearest} onChange={() => setSnapToNearest(!snapToNearest)} />
+        <RibbonCheck id="snap-grid" label="格點" checked={snapToGrid} onChange={() => setSnapToGrid(!snapToGrid)} />
+      </RibbonGroup>
+      <RibbonGroup title="底圖">
+        {!bgImage ? (
+          <label className="row-span-3 flex flex-col items-center justify-center gap-1 w-[76px] text-xs cursor-pointer hover:bg-white/5 [&_svg]:w-6 [&_svg]:h-6" style={{ color: 'var(--ui-text)' }}>
+            <Upload />
+            <span className="text-center leading-tight">上傳航照<br />或現況圖</span>
+            <input id="bg-image-uploader" type="file" accept="image/*" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) handleUploadBg(f); e.target.value = ''; }} />
+          </label>
+        ) : (
+          <>
+            <span className="h-[24px] px-1.5 text-xs flex items-center max-w-[180px] truncate" style={{ color: 'var(--ui-muted)' }} title={bgImage.fileName}>{bgImage.fileName || '底圖'}（{bgImage.widthMeters.toFixed(0)}×{bgImage.heightMeters.toFixed(0)} m）</span>
+            <label className="flex items-center gap-1.5 h-[24px] px-1.5 text-xs">
+              <span style={{ color: 'var(--ui-muted)' }}>不透明度</span>
+              <input type="range" min="0.1" max="1" step="0.05" value={bgImage.opacity || 0.6} onChange={e => { const n = parseFloat(e.target.value); setBgImage((prev: any) => prev ? { ...prev, opacity: n } : null); }} className="w-20" />
+              <span className="font-mono w-8 text-right">{Math.round((bgImage.opacity || 0.6) * 100)}%</span>
+            </label>
+            <div className="flex">
+              <RibbonButton icon={<Ruler />} label={activeTool === 'map_scale' ? '取消校正' : bgImage.isCalibrated ? '重新校正' : '校正比例'} active={activeTool === 'map_scale'} onClick={() => setActiveTool(activeTool === 'map_scale' ? 'select' : 'map_scale')} />
+              <RibbonButton icon={<Trash2 />} label="移除" onClick={() => { setBgImage(null); if (activeTool === 'map_scale') setActiveTool('select'); }} />
             </div>
-            <StylePicker value={uiStyle} onChange={setUiStyle} compact buttonClassName="w-8 h-8 rounded-full flex items-center justify-center cursor-pointer hover:bg-white/10" />
-          </div>
-
-          {/* 模擬模式左側面板 */}
-          {appMode === 'simulation' && <PolishedSimDock />}
-
-          {/* 右側浮動屬性卡 */}
-          {polishedPanelVisible ? (
-            <div id="right-property-panel" className="absolute right-3 top-20 bottom-28 w-[336px] z-30 glass rounded-lg flex flex-col overflow-hidden">
-              <div className="flex items-center">
-                <div className="flex-1">{appMode === 'cad' && rightTabs}</div>
-                <button onClick={() => setIsRightPanelOpen(false)} className="mr-3 mt-3 p-1 rounded-md hover:bg-white/10 cursor-pointer" title="收合"><ChevronRight className="w-4 h-4" /></button>
-              </div>
-              <div className="flex-1 overflow-y-auto">{rightBody}</div>
-            </div>
-          ) : appMode === 'cad' && (
-            <div className="absolute right-3 top-20 z-30 flex flex-col gap-2">
-              <button id="open-layers-btn" onClick={() => { setIsRightPanelOpen(true); setRightTab('layers'); }} className="glass rounded-xl w-10 h-10 flex items-center justify-center cursor-pointer" title="圖層"><Layers className="w-4 h-4" /></button>
-              <button id="open-qty-btn" onClick={() => { setIsRightPanelOpen(true); setRightTab('qty'); }} className="glass rounded-xl w-10 h-10 flex items-center justify-center cursor-pointer" title="數量"><Ruler className="w-4 h-4" /></button>
-            </div>
-          )}
-
-          {/* 底部工具 Dock */}
-          {appMode === 'cad' && <PolishedDock activeTool={activeTool} setActiveTool={(t) => { setActiveTool(t); if (t !== 'select') setIsRightPanelOpen(true); }} onLoadTemplate={handleLoadDemo} />}
-
-          {sharedOverlaysEl}
-        </div>
-      );
-    }
-
-    // ---------------- A・簡潔 / B・直覺：上方列＋左工具＋右面板 ----------------
-    return (
-      <div id="webtrafficcad-app-root" className={`ui-${v} flex flex-col h-screen w-screen overflow-hidden font-sans`} style={{ background: 'var(--ui-bg)', color: 'var(--ui-text)' }}>
-        {fileInput}
-        <header className={`flex items-center gap-2 px-3 shrink-0 z-20 ${isGuided ? 'h-12' : 'h-11'}`} style={{ background: 'var(--ui-surface)', borderBottom: '1px solid var(--ui-border)' }}>
-          <span className="text-[13px] font-bold tracking-wide whitespace-nowrap" style={{ color: 'var(--ui-accent)' }}>{isGuided ? 'WebTrafficCAD' : 'WTC'}</span>
-          {projectNameInput}
-          {dirtyBadge}
-          <div className="flex-1" />
-          {modeSwitch}
-          <div className="flex-1" />
-          {history}
-          <span className="w-px h-5 mx-1" style={{ background: 'var(--ui-border)' }} />
-          {isGuided ? (
-            <>
-              {iconBtn('save-project-btn', '儲存專案（JSON）', <Save className="w-4 h-4" />, handleSaveProject, false, '儲存')}
-              {iconBtn('load-project-btn', '開啟專案（JSON）', <FolderOpen className="w-4 h-4" />, () => fileInputRef.current?.click(), false, '開啟')}
-              {iconBtn('clear-btn', appMode === 'cad' ? '清空畫布' : '清除所有軌跡', <Trash2 className="w-4 h-4 text-red-400" />, () => (appMode === 'cad' ? handleClearCanvas() : simStore.clearAll()), appMode === 'cad' ? elements.length === 0 : (sim.doc.paths.length === 0 && !sim.draft), '清空')}
-            </>
-          ) : (
-            <div className="relative">{menuBtn('file', '檔案', <FolderOpen className="w-4 h-4" />, 'menu-file-btn')}{popover('file', fileMenu, 'w-64')}</div>
-          )}
-          <div className="relative">{menuBtn('view', isGuided ? '鎖點與底圖' : '檢視', <Grid className="w-4 h-4" />, 'menu-view-btn')}{popover('view', viewPanel)}</div>
-          <div className="relative">
-            <button id="export-dropdown-toggle-btn" data-menu-root onClick={() => setModernMenu(modernMenu === 'export' ? null : 'export')} className="flex items-center gap-1.5 h-8 px-3 rounded-lg text-xs font-bold whitespace-nowrap cursor-pointer" style={{ background: 'var(--ui-accent)', color: 'var(--ui-accent-text)' }}>
-              <Download className="w-4 h-4" /> 匯出
-            </button>
-            {popover('export', exportPanelEl)}
-          </div>
-          <StylePicker value={uiStyle} onChange={setUiStyle} compact={!isGuided} buttonClassName="flex items-center gap-1.5 h-8 px-2 rounded-lg text-xs cursor-pointer hover:bg-white/10" />
-        </header>
-
-        <div className="flex flex-1 min-h-0 relative">
-          {appMode === 'cad'
-            ? (isGuided
-                ? <GuidedToolSidebar activeTool={activeTool} setActiveTool={setActiveTool} onLoadTemplate={handleLoadDemo} />
-                : <MinimalToolRail activeTool={activeTool} setActiveTool={setActiveTool} onLoadTemplate={handleLoadDemo} />)
-            : simLeftPanelEl}
-
-          <div className="flex-1 min-w-0 h-full relative flex">
-            {canvasAreaEl}
-            {arrowBar}
-          </div>
-
-          {(isGuided || minimalPanelVisible) && (
-            <div id="right-property-panel" className={`${isGuided ? 'w-80' : 'w-72'} h-full shrink-0 flex flex-col`} style={{ background: 'var(--ui-surface)', borderLeft: '1px solid var(--ui-border)' }}>
-              {appMode === 'cad' && (isGuided ? rightTabs : (
-                <div className="flex items-center justify-between px-3 pt-2">
-                  <span className="text-[11px] font-bold" style={{ color: 'var(--ui-muted)' }}>{rightTab === 'props' ? '屬性' : rightTab === 'layers' ? '圖層' : '數量'}</span>
-                  <button onClick={() => { setSelectedElement(null); setSelectedElementIds([]); setRightTab('props'); if (hasToolConfig) setActiveTool('select'); }} className="p-1 rounded hover:bg-white/10 cursor-pointer" title="關閉"><X className="w-3.5 h-3.5" /></button>
-                </div>
-              ))}
-              <div className="flex-1 overflow-y-auto">{rightBody}</div>
-            </div>
-          )}
-        </div>
-
-        {/* 簡潔風格：底部細狀態列（圖層、數量捷徑） */}
-        {v === 'minimal' && appMode === 'cad' && (
-          <footer className="h-7 shrink-0 flex items-center gap-4 px-3 text-[11px]" style={{ background: 'var(--ui-surface)', borderTop: '1px solid var(--ui-border)', color: 'var(--ui-muted)' }}>
-            <span>{elements.length} 個物件{hiddenLayers.length > 0 ? `（${hiddenLayers.length} 個圖層隱藏）` : ''}</span>
-            <button id="footer-layers-btn" onClick={() => setRightTab(rightTab === 'layers' ? 'props' : 'layers')} className="cursor-pointer hover:underline">圖層</button>
-            <button id="footer-qty-btn" onClick={() => setRightTab(rightTab === 'qty' ? 'props' : 'qty')} className="cursor-pointer hover:underline">數量</button>
-          </footer>
+          </>
         )}
+      </RibbonGroup>
+    </>
+  );
 
-        {sharedOverlaysEl}
+  const outputRibbon = (
+    <>
+      <RibbonGroup title="匯出">
+        <RibbonBigButton id="export-png-btn" icon={<ImageIcon />} label="工程圖 PNG" onClick={handleExportPNG} />
+        <RibbonBigButton id="export-dxf-btn" icon={<FileCode2 />} label="AutoCAD DXF" onClick={handleExportDXF} />
+        {isCad && <RibbonBigButton id="export-csv-btn" icon={<Table />} label="數量表 CSV" onClick={handleExportQuantities} />}
+      </RibbonGroup>
+      <RibbonGroup title="出圖設定">
+        <label className="flex items-center gap-1.5 h-[24px] px-1.5 text-xs whitespace-nowrap">
+          <span style={{ color: 'var(--ui-muted)' }}>配色</span>
+          <select value={exportOptions.palette} onChange={e => setExportOptions({ ...exportOptions, palette: e.target.value as PaletteName })} className="h-[20px] text-xs outline-none cursor-pointer" style={{ background: 'var(--ui-bg)', color: 'var(--ui-text)', border: '1px solid var(--ui-border)' }}>
+            <option value="print">白底列印</option>
+            <option value="screen">深色簡報</option>
+          </select>
+        </label>
+        <RibbonCheck label="圖框、比例尺、指北針" checked={exportOptions.titleBlock} onChange={() => setExportOptions({ ...exportOptions, titleBlock: !exportOptions.titleBlock })} />
+        <RibbonCheck label="尺寸標註" checked={exportOptions.includeAnnotations} onChange={() => setExportOptions({ ...exportOptions, includeAnnotations: !exportOptions.includeAnnotations })} />
+        <RibbonCheck label="輔助線／輔助圓" checked={exportOptions.includeConstruction} onChange={() => setExportOptions({ ...exportOptions, includeConstruction: !exportOptions.includeConstruction })} />
+        <RibbonCheck id="export-include-sim" label="軌跡模擬結果" checked={exportOptions.includeSimulation} onChange={() => setExportOptions({ ...exportOptions, includeSimulation: !exportOptions.includeSimulation })} />
+        {hiddenLayers.length > 0 && <span className="h-[24px] px-1.5 text-[11px] flex items-center whitespace-nowrap" style={{ color: '#f0a92b' }}>{hiddenLayers.length} 個圖層隱藏中，不會匯出</span>}
+      </RibbonGroup>
+      <RibbonGroup title="圖名">
+        <input id="project-name-input" value={projectName} onChange={e => setProjectName(e.target.value)} aria-label="圖名"
+          className="h-[22px] w-48 px-1.5 text-xs outline-none" style={{ background: 'var(--ui-bg)', color: 'var(--ui-text)', border: '1px solid var(--ui-border)' }} />
+      </RibbonGroup>
+    </>
+  );
+
+  // ---------- 右側：性質（上）＋圖層／數量（下） ----------
+  const selectionLabel = selectedElementIds.length > 1
+    ? `${selectedElementIds.length} 個物件`
+    : selectedElement
+      ? `${MARKING_NAMES[(selectedElement as any).hatchPattern === 'cross' ? 'grid_box' : selectedElement.type] || selectedElement.type}（1）`
+      : hasToolConfig && toolDef ? `${toolDef.label}：放置參數` : '未選取物件';
+  const rightPanel = isCad ? (
+    <div id="right-property-panel" className="w-[300px] shrink-0 h-full flex flex-col min-h-0" style={{ background: 'var(--ui-surface)', borderLeft: '1px solid var(--ui-border)' }}>
+      <div className="flex items-center justify-between h-[28px] px-2.5 shrink-0 text-xs" style={{ background: 'var(--ui-ribbon)', borderBottom: '1px solid var(--ui-border)' }}>
+        <span className="font-bold" style={{ color: 'var(--ui-strong)' }}>性質</span>
+        <span className="truncate ml-2" style={{ color: 'var(--ui-muted)' }}>{selectionLabel}</span>
       </div>
-    );
-  };
+      <div className="flex-1 min-h-0 overflow-y-auto">
+        {hasSelection || hasToolConfig ? propsPanelEl : (
+          <div className="p-4 text-xs leading-relaxed" style={{ color: 'var(--ui-muted)' }}>
+            點選圖面上的物件，即可在這裡修改尺寸、座標與規格。
+            <ul className="mt-2 space-y-0.5">
+              <li>框選可一次選取多個物件</li>
+              <li>Delete 刪除；Ctrl+C／V／D 複製、貼上、原地複製</li>
+              <li>繪製時按 Shift 鎖定水平／垂直</li>
+              <li>直接打字即可在下方指令列輸入工具名稱</li>
+            </ul>
+          </div>
+        )}
+      </div>
+      <div className="h-[38%] min-h-[180px] shrink-0 flex flex-col" style={{ borderTop: '1px solid var(--ui-border)' }}>
+        <div className="flex items-end h-[26px] px-1.5 shrink-0" style={{ background: 'var(--ui-ribbon)', borderBottom: '1px solid var(--ui-border)' }}>
+          {([['layers', '圖層'], ['qty', '數量']] as const).map(([k, label]) => (
+            <button key={k} id={`right-tab-${k}`} onClick={() => setBottomTab(k)} className="h-[24px] px-3 text-xs cursor-pointer -mb-px"
+              style={bottomTab === k ? { background: 'var(--ui-surface)', color: 'var(--ui-strong)', border: '1px solid var(--ui-border)', borderBottomColor: 'var(--ui-surface)' } : { color: 'var(--ui-muted)', border: '1px solid transparent' }}>
+              {label}
+            </button>
+          ))}
+        </div>
+        <div className="flex-1 min-h-0 overflow-y-auto p-1.5">
+          {bottomTab === 'layers'
+            ? <LayerPanel elements={elements} hidden={hiddenLayers} onToggle={toggleLayer} onShowAll={() => setHiddenLayers([])} extra={simRefLayerRow} />
+            : <div className="p-1"><QuantityPanel elements={visibleElements} onExport={handleExportQuantities} /></div>}
+        </div>
+      </div>
+    </div>
+  ) : (
+    <div id="right-property-panel" className="w-[320px] shrink-0 h-full flex flex-col min-h-0" style={{ background: 'var(--ui-surface)', borderLeft: '1px solid var(--ui-border)' }}>
+      <div className="flex-1 min-h-0 overflow-y-auto">{simRightPanelEl}</div>
+    </div>
+  );
 
-  if (uiStyle !== 'classic') {
-    return renderModernLayout();
-  }
+  // ---------- 指令列 ----------
+  const cmdPrompt = isCad
+    ? (activeTool === 'select' ? '指令:' : activeTool === 'map_scale' ? '底圖比例校正：拖曳出已知長度的線段' : `${toolDef?.label ?? ''}：${toolDef?.desc ?? ''}`)
+    : (simTool === 'select' ? '指令:' : `${simToolDef?.label ?? ''}：${simToolDef?.desc ?? ''}`);
+  const cmdSuggestions = useMemo(() => [
+    ...ALL_TOOLS.map(t => t.label), ...SIM_TOOLS.map(t => t.label),
+    '縮放全圖', '復原', '重做', '刪除', '原地複製', '旋轉', '儲存', '開啟', '範本', '模擬', '繪圖', 'PNG', 'DXF', 'CSV',
+    ...Object.keys(TOOL_ALIASES),
+  ], []);
+  const runCommand = (raw: string) => {
+    const text = raw.trim();
+    const up = text.toUpperCase();
+    pushCmd(`指令: ${text}`);
+    const actions: [string[], () => void][] = [
+      [['U', 'UNDO', '復原'], () => (isCad ? handleUndo() : simStore.undo())],
+      [['REDO', '重做'], () => (isCad ? handleRedo() : simStore.redo())],
+      [['Z', 'ZE', 'ZOOM', '縮放全圖', '全圖'], zoomToFit],
+      [['E', 'ERASE', 'DEL', '刪除'], () => (hasSelection ? handleContextAction('delete') : pushCmd('沒有選取的物件。'))],
+      [['CO', 'COPY', '原地複製', '複製'], () => (hasSelection ? handleContextAction('duplicate') : pushCmd('沒有選取的物件。'))],
+      [['RO', 'ROTATE', '旋轉'], () => (hasSelection ? handleContextAction('rotate90') : pushCmd('沒有選取的物件。'))],
+      [['SAVE', '儲存'], handleSaveProject],
+      [['OPEN', '開啟'], () => fileInputRef.current?.click()],
+      [['TEMPLATE', '範本'], handleLoadDemo],
+      [['PNG'], handleExportPNG], [['DXF'], handleExportDXF], [['CSV'], handleExportQuantities],
+      [['SIM', '模擬', '軌跡模擬'], () => handleModeChange('simulation')],
+      [['CAD', '繪圖'], () => handleModeChange('cad')],
+      [['GRID', '網格'], () => setShowGrid(!showGrid)],
+      [['HELP', '?', '說明'], () => setShowHelp(true)],
+    ];
+    const act = actions.find(([names]) => names.includes(up) || names.includes(text));
+    if (act) { act[1](); return; }
+    if (!isCad) {
+      const st = [SIM_SELECT_DEF, ...SIM_TOOLS].find(t => t.label === text || t.key === up || t.label.includes(text));
+      if (st) { simStore.setTool(st.id); return; }
+      pushCmd(`找不到指令「${text}」。軌跡模擬可輸入：點選＋半徑（P）、路口轉彎（I）、鋼筆（N）、筆刷（B）。`);
+      return;
+    }
+    const tool: CadTool | undefined = TOOL_ALIASES[up]
+      ?? ALL_TOOLS.find(t => t.label === text || t.id.toLowerCase() === text.toLowerCase())?.id
+      ?? ALL_TOOLS.find(t => t.label.includes(text) || (t.keywords || '').split(/\s+/).includes(text))?.id;
+    if (tool) { toolFromCommandRef.current = true; setActiveTool(tool); return; }
+    pushCmd(`找不到指令「${text}」。輸入 HELP 查看可用指令。`);
+  };
+  // 由功能區或快捷鍵切換工具時也記錄到指令列（由指令列切換的已記錄過）
+  const lastToolRef = useRef<CadTool>(activeTool);
+  const toolFromCommandRef = useRef(false);
+  useEffect(() => {
+    if (lastToolRef.current === activeTool) return;
+    lastToolRef.current = activeTool;
+    if (activeTool !== 'select' && !toolFromCommandRef.current) pushCmd(`指令: ${toolDef?.label ?? activeTool}`);
+    toolFromCommandRef.current = false;
+  }, [activeTool]);
+
+  const statusToggles: StatusToggle[] = [
+    { label: '網格', on: showGrid, onClick: () => setShowGrid(!showGrid), title: '顯示網格' },
+    { label: '格點鎖點', on: snapToGrid, onClick: () => setSnapToGrid(!snapToGrid) },
+    { label: '端點', on: snapToEndpoint, onClick: () => setSnapToEndpoint(!snapToEndpoint), title: '端點鎖點' },
+    { label: '中點', on: snapToMidpoint, onClick: () => setSnapToMidpoint(!snapToMidpoint), title: '中點鎖點' },
+    { label: '交點', on: snapToIntersection, onClick: () => setSnapToIntersection(!snapToIntersection), title: '交點鎖點' },
+    { label: '最近點', on: snapToNearest, onClick: () => setSnapToNearest(!snapToNearest), title: '最近點／垂足鎖點' },
+  ];
+
+  const fileInput = <input type="file" ref={fileInputRef} accept=".json" onChange={handleLoadProject} style={{ display: 'none' }} />;
+  const arrowBar = isCad && activeTool === 'road_arrow' && (
+    <ArrowTypeBar value={roadArrowConfig.arrowType} onChange={(t) => setRoadArrowConfig({ ...roadArrowConfig, arrowType: t as any })} style={{ top: 12 }} />
+  );
 
   return (
-    <div id="webtrafficcad-app-root" className="ui-classic flex flex-col h-screen w-screen bg-[#0a0b0e] text-slate-300 overflow-hidden font-sans">
-      {/* CAD App Elegant Top Header */}
-      <header className="flex items-center justify-between px-4 xl:px-6 py-3 bg-[#14161c] border-b border-[#2d3039] shrink-0 select-none h-12 z-20">
-        <div className="flex items-center gap-6 shrink-0">
-          <div>
-            <h1 className="text-sm font-bold text-slate-100">
-              WebTrafficCAD
-            </h1>
-          </div>
-
-          {/* App Mode Switcher (左右合體按鈕) */}
-          {modeSwitchEl}
+    <div id="webtrafficcad-app-root" className="ui-drafting flex flex-col h-screen w-screen overflow-hidden text-xs" style={{ background: 'var(--ui-bg)', color: 'var(--ui-text)' }}>
+      {fileInput}
+      <MenuBar logoSrc={logoUrl} menus={menus} right={menuRight} />
+      <RibbonTabs tabs={[['draw', '繪圖'], ['view', '檢視'], ['output', '輸出']]} value={ribbonTab} onChange={k => setRibbonTab(k as any)} />
+      <Ribbon>{ribbonTab === 'draw' ? drawRibbon : ribbonTab === 'view' ? viewRibbon : outputRibbon}</Ribbon>
+      <div className="flex flex-1 min-h-0 relative">
+        <div className="flex-1 min-w-0 h-full relative flex">
+          {canvasAreaEl}
+          {arrowBar}
         </div>
-
-        {/* Global Control Group: Undo, Redo, Exports, and Background Image Management */}
-        {/* 視窗較窄時隱藏按鈕文字（保留圖示與提示），避免與左側模式切換重疊 */}
-        <div className="flex items-center gap-3 shrink-0 pl-4">
-          {historyBtnsEl}
-          <div className="h-4 w-px bg-[#2d3039]" />
-          {fileBtnsEl}
-          <div className="h-4 w-px bg-[#2d3039]" />
-          {classicExportEl}
-          <div className="h-4 w-px bg-[#2d3039]" />
-          {gridPopoverEl}
-          {snapPopoverEl}
-          <div className="h-4 w-px bg-[#2d3039]" />
-          {bgManagerEl}
-
-          <div className="h-4 w-px bg-[#2d3039]" />
-          <StylePicker value={uiStyle} onChange={setUiStyle} />
-
-        </div>
-      </header>
-
-      {/* Main CAD Interactive Workspace Grid */}
-      <div className="flex flex-1 min-h-0 w-full relative">
-        {/* Left Sidebar (CAD Toolbar / Simulation control) */}
-        {appMode === 'cad' ? classicToolbarEl : simLeftPanelEl}
-
-        {/* Central CAD Infinite Canvas */}
-        {canvasAreaEl}
-
-        {/* Collapsible Wrapper for Right Details Panel */}
-        <div 
-          id="props-collapsible-wrapper"
-          className={`relative h-full flex shrink-0 transition-all duration-300 ease-in-out select-none bg-[#14161c] ${
-            isPropsCollapsed ? 'w-0' : 'w-80 border-l border-[#2d3039]'
-          }`}
-        >
-          {/* Smooth overlay vertical collapse button */}
-          <button
-            id="toggle-props-panel-btn"
-            onClick={() => setIsPropsCollapsed(!isPropsCollapsed)}
-            className="absolute top-1/2 -left-3.5 -translate-y-1/2 z-35 flex items-center justify-center w-3.5 h-12 bg-[#1f2229] hover:bg-slate-800 border border-[#2d3039] hover:text-white rounded-l-md cursor-pointer transition-all text-slate-400 font-bold"
-            title={isPropsCollapsed ? '展開右側屬性控制台' : '隱藏右側屬性控制台'}
-          >
-            {isPropsCollapsed ? (
-              <ChevronLeft className="w-3 h-3 text-slate-400 hover:text-white" />
-            ) : (
-              <ChevronRight className="w-3 h-3 text-slate-400 hover:text-white" />
-            )}
-          </button>
-
-          <div className="w-80 h-full overflow-y-auto">
-            {appMode === 'cad' ? propsPanelEl : simRightPanelEl}
-          </div>
-        </div>
+        {rightPanel}
       </div>
+      <CommandLine history={cmdHistory} prompt={cmdPrompt} onSubmit={runCommand} suggestions={cmdSuggestions} typeToFocus={isCad} />
+      <StatusBar coordRef={coordRef} scaleRef={scaleRef} toggles={statusToggles} right={<span className="whitespace-nowrap shrink-0 pr-1">單位 公尺</span>} />
+      {showHelp && <HelpDialog onClose={() => setShowHelp(false)} />}
       {sharedOverlaysEl}
+    </div>
+  );
+}
+
+/** CAD 風格的英文指令別名 */
+const TOOL_ALIASES: Record<string, CadTool> = {
+  SEL: 'select', CENTER: 'yellow_double', CL: 'yellow_double', LANE: 'white_dashed', DASH: 'white_dashed', EDGE: 'white_solid',
+  STOP: 'stop_line', SL: 'stop_line', YIELD: 'yield_line', XWALK: 'crosswalk', CW: 'crosswalk',
+  RED: 'red_solid', YEL: 'yellow_solid', BOX: 'grid_box', CH: 'channelization', HATCH: 'channelization', SW: 'Sidewalk', BIKE: 'bicycle_lane',
+  PARK: 'parking_space', PZ: 'parking_zone', MOTO: 'moto_box', TURN: 'moto_turn_box',
+  ARROW: 'road_arrow', AR: 'road_arrow', RT: 'road_text', WORD: 'road_text', DT: 'text_label', TEXT: 'text_label',
+  DI: 'measurement', DIST: 'measurement', ANG: 'angular_dimension', ARC: 'arc_3point', A: 'arc_3point', XL: 'guideline', C: 'sketch_circle', BL: 'BuildingLine',
+};
+
+function HelpDialog({ onClose }: { onClose: () => void }) {
+  const rows: [string, string][] = [
+    ['V', '選取工具'], ['Enter／雙擊', '完成目前線段'], ['Esc', '第一次：完成或放棄目前繪製；第二次：回到選取'],
+    ['Shift', '繪製時鎖定水平／垂直；旋轉時每 15°'], ['Space＋拖曳／中鍵', '平移畫面'], ['Ctrl+Z／Ctrl+Y', '復原／重做'],
+    ['Ctrl+C／V／D', '複製／貼上／原地複製'], ['Delete', '刪除選取物件'], ['直接打字', '在指令列輸入工具名稱或指令'],
+  ];
+  const cmds: [string, string][] = [
+    ['Z', '縮放全圖'], ['U／REDO', '復原／重做'], ['E', '刪除選取'], ['CO／RO', '原地複製／旋轉 90°'],
+    ['STOP、LANE、CENTER、EDGE', '停止線、車道線、分向限制線、路面邊線'], ['CW、AR、RT', '行人穿越道、指向線、路面標字'],
+    ['DI、ANG', '測距、角度'], ['PNG、DXF、CSV', '匯出'], ['SIM／CAD', '切換軌跡模擬／CAD 繪圖'],
+  ];
+  const table = (title: string, data: [string, string][]) => (
+    <div>
+      <div className="font-bold mb-1.5" style={{ color: 'var(--ui-strong)' }}>{title}</div>
+      {data.map(([k, v]) => (
+        <div key={k} className="flex gap-3 py-[3px]" style={{ borderTop: '1px solid var(--ui-border)' }}>
+          <span className="font-mono w-32 shrink-0">{k}</span><span style={{ color: 'var(--ui-muted)' }}>{v}</span>
+        </div>
+      ))}
+    </div>
+  );
+  return (
+    <div className="fixed inset-0 z-[400] bg-black/60 flex items-center justify-center p-4" onClick={onClose}>
+      <div id="help-dialog" className="w-full max-w-2xl p-5 shadow-lg text-xs space-y-4" style={{ background: 'var(--ui-surface)', border: '1px solid var(--ui-border)', color: 'var(--ui-text)' }} onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-bold" style={{ color: 'var(--ui-strong)' }}>快捷鍵與指令</h3>
+          <button onClick={onClose} aria-label="關閉" className="p-1 hover:bg-white/5 cursor-pointer"><X className="w-4 h-4" /></button>
+        </div>
+        <div className="grid md:grid-cols-2 gap-5">
+          {table('快捷鍵', rows)}
+          {table('指令列', cmds)}
+        </div>
+        <p style={{ color: 'var(--ui-muted)' }}>指令列也接受工具的中文名稱，例如「停止線」「機車停等區」。</p>
+      </div>
     </div>
   );
 }

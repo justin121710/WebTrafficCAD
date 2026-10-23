@@ -94,41 +94,15 @@ button.sim-color-picker-btn {
 
 
 
-/* ===================== 介面風格（UI style）色彩變數 ===================== */
-.ui-classic {
-  --ui-bg: #0a0b0e; --ui-surface: #14161c; --ui-surface2: #1f2229; --ui-border: #2d3039;
-  --ui-text: #e2e8f0; --ui-muted: #94a3b8; --ui-accent: #3b82f6; --ui-accent-text: #ffffff;
-  --ui-accent-soft: rgba(59, 130, 246, 0.14); --ui-radius: 8px;
+/* ===================== 製圖桌介面色彩變數 ===================== */
+.ui-drafting {
+  --ui-bg: #23272e; --ui-surface: #262b33; --ui-surface2: #2f3540; --ui-border: #3b424d;
+  --ui-text: #dde1e6; --ui-strong: #ffffff; --ui-muted: #9aa3ae; --ui-accent: #4aa3ff; --ui-accent-text: #ffffff;
+  --ui-accent-soft: rgba(74, 163, 255, 0.16); --ui-radius: 3px;
+  --ui-menubar: #1b1e23; --ui-ribbon: #2c313a; --ui-cmd: #15181c; --ui-canvas: #1b1e23;
+  font-family: 'Noto Sans TC', 'Microsoft JhengHei', 'PingFang TC', system-ui, sans-serif;
 }
-/* A・簡潔：石墨灰、細邊框、單一藍色強調 */
-.ui-minimal {
-  --ui-bg: #0d0e10; --ui-surface: #141518; --ui-surface2: #1c1d21; --ui-border: #26272c;
-  --ui-text: #e7e8ea; --ui-muted: #8b8f98; --ui-accent: #4f8cff; --ui-accent-text: #ffffff;
-  --ui-accent-soft: rgba(79, 140, 255, 0.14); --ui-radius: 8px;
-}
-/* B・直覺：中性深灰底、低彩度藍強調、較大點擊範圍 */
-.ui-guided {
-  --ui-bg: #111214; --ui-surface: #17181b; --ui-surface2: #202226; --ui-border: #2b2d32;
-  --ui-text: #e4e5e7; --ui-muted: #93969d; --ui-accent: #4a86e8; --ui-accent-text: #ffffff;
-  --ui-accent-soft: rgba(74, 134, 232, 0.14); --ui-radius: 6px;
-}
-/* C・美觀：深色半透明面板、柔和藍紫強調 */
-.ui-polished {
-  --ui-bg: #0e1116; --ui-surface: rgba(22, 25, 31, 0.88); --ui-surface2: rgba(48, 53, 63, 0.6); --ui-border: rgba(148, 156, 170, 0.18);
-  --ui-text: #e9ebef; --ui-muted: #9ca3af; --ui-accent: #7c8cf0; --ui-accent-text: #ffffff;
-  --ui-accent-soft: rgba(124, 140, 240, 0.16); --ui-radius: 10px;
-}
-.ui-polished .glass {
-  background: var(--ui-surface);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-  border: 1px solid var(--ui-border);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
-}
-.ui-polished .accent-gradient {
-  background: var(--ui-accent);
-  color: var(--ui-accent-text);
-}
+.ui-drafting .font-mono { font-family: 'JetBrains Mono', 'Cascadia Mono', Consolas, ui-monospace, monospace; }
 .ui-tip {
   pointer-events: none;
   position: absolute;
