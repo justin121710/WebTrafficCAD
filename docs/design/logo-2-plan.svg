@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="WebTrafficCAD">
+  <title>WebTrafficCAD：平面道路＋懸停游標</title>
+  <defs><clipPath id="tile"><rect width="64" height="64" rx="12"/></clipPath></defs>
+  <g clip-path="url(#tile)">
+    <rect width="64" height="64" fill="#1d2127"/>
+    <rect x="12" y="0" width="40" height="64" fill="#3a3d42"/>
+    <path d="M15 0H17.5V64H15Z M46.5 0H49V64H46.5Z" fill="#f2f3f5"/>
+    <path d="M30.75 2H33.25V12H30.75Z M30.75 20H33.25V30H30.75Z M30.75 38H33.25V48H30.75Z M30.75 56H33.25V64H30.75Z" fill="#f2b705"/>
+    <path d="M29 21V45.6L35.5 39.6L39.9 49.3L44.2 47.4L40 37.8H48.6Z" fill="#000000" fill-opacity="0.45"/>
+    <path d="M24 12V36.6L30.5 30.6L34.9 40.3L39.2 38.4L35 28.8H43.6Z" fill="#f2b705" stroke="#111316" stroke-width="1.6" stroke-linejoin="miter"/>
+  </g>
+</svg>
