@@ -13,7 +13,7 @@ export function Toggle({ on, onClick, id }: { on: boolean; onClick: () => void; 
       className="w-9 h-5 rounded-full p-0.5 transition-colors cursor-pointer shrink-0"
       style={{ background: on ? 'var(--ui-accent)' : 'var(--ui-border)' }}
     >
-      <div className={`bg-white w-4 h-4 rounded-full transition-transform ${on ? 'translate-x-4' : ''}`} />
+      <div className={`w-4 h-4 rounded-full transition-transform ${on ? 'translate-x-4' : ''}`} style={{ background: on ? 'var(--ui-accent-text)' : '#ffffff' }} />
     </button>
   );
 }

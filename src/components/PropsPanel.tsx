@@ -1,6 +1,8 @@
-import { useState } from 'react';
-import { MARKING_SPEC, MARKING_NAMES, getMotoBoxCorners, roadTextSpan } from '../markings';
+import React, { useState } from 'react';
+import { MARKING_SPEC, MARKING_NAMES, LAYERS, layerKeyOf, getMotoBoxCorners, roadTextSpan } from '../markings';
 import { CadDesignVehicle, cadVehicle, cadMinPathRadius } from '../simulation/vehicles';
+import { CadElement, ThreeCenterCurveElement, IslandElement, TextElement, Point2D } from '../types';
+import { calculateWidening, distance, sampleCubicBezier, getMaxSteeringAngleForPath, generateParkingZoneSlots, offsetSegment, getPathOffsetCurves } from '../geometry';
 
 /** 設計車種名稱（全介面統一） */
 export const DESIGN_VEHICLE_LABELS: Record<string, string> = {
@@ -14,212 +16,142 @@ export const cadVehicleNote = (v: string) => {
   const veh = cadVehicle(v as CadDesignVehicle);
   return `${veh.name}：軸距 ${veh.L} m、最大轉角 ${veh.maxSteerDeg}°、最小引導線半徑 ${cadMinPathRadius(v as CadDesignVehicle)} m`;
 };
-import { CadElement, ThreeCenterCurveElement, IslandElement, TextElement, Point2D } from '../types';
-import { calculateWidening, distance, sampleCubicBezier, getMaxSteeringAngleForPath, generateParkingZoneSlots, offsetSegment, getPathOffsetCurves } from '../geometry';
-import { 
-  Compass, 
-  HelpCircle, 
-  Download, 
-  Type, 
-  Check, 
-  Grid, 
-  Triangle 
-} from 'lucide-react';
 
-function renderPropsIcon(type: string) {
-  const baseClass = "w-4 h-4 inline-block shrink-0";
-  switch (type) {
-    case 'select':
-      return (
-        <svg viewBox="0 0 24 24" className={baseClass} fill="none" stroke="currentColor" strokeWidth="1.5">
-          <path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z" fill="currentColor" />
-          <path d="M13 13l6 6" />
-        </svg>
-      );
-    case 'sketch_circle':
-      return (
-        <svg viewBox="0 0 24 24" className={baseClass} fill="none" stroke="currentColor" strokeWidth="1.5">
-          <circle cx="12" cy="12" r="8" strokeDasharray="3,3" />
-          <path d="M12 2v2M12 20v2M2 12h2M20 12h2" />
-          <circle cx="12" cy="12" r="1.5" fill="currentColor" />
-        </svg>
-      );
-    case 'guideline':
-      return (
-        <svg viewBox="0 0 24 24" className={baseClass} fill="none" stroke="currentColor" strokeWidth="1.5">
-          <line x1="2" y1="12" x2="22" y2="12" strokeDasharray="4,2,1,2" />
-          <line x1="5" y1="4" x2="19" y2="20" stroke="currentColor" strokeDasharray="2,2" opacity="0.6" />
-        </svg>
-      );
-    case 'yellow_double':
-      return (
-        <svg viewBox="0 0 24 24" className={baseClass} fill="none" strokeWidth="2.5">
-          <line x1="8" y1="3" x2="8" y2="21" stroke="#FFCC00" />
-          <line x1="16" y1="3" x2="16" y2="21" stroke="#FFCC00" />
-        </svg>
-      );
-    case 'white_double':
-      return (
-        <svg viewBox="0 0 24 24" className={baseClass} fill="none" stroke="currentColor" strokeWidth="2.5">
-          <line x1="8" y1="3" x2="8" y2="21" />
-          <line x1="16" y1="3" x2="16" y2="21" />
-        </svg>
-      );
-    case 'white_solid':
-      return (
-        <svg viewBox="0 0 24 24" className={baseClass} fill="none" stroke="currentColor" strokeWidth="3">
-          <line x1="12" y1="3" x2="12" y2="21" />
-        </svg>
-      );
-    case 'white_dashed':
-      return (
-        <svg viewBox="0 0 24 24" className={baseClass} fill="none" stroke="currentColor" strokeWidth="2">
-          <line x1="12" y1="3" x2="12" y2="21" strokeDasharray="5,4" />
-        </svg>
-      );
-    case 'yellow_dashed':
-      return (
-        <svg viewBox="0 0 24 24" className={baseClass} fill="none" stroke="#eab308" strokeWidth="2">
-          <line x1="12" y1="3" x2="12" y2="21" strokeDasharray="5,4" />
-        </svg>
-      );
-    case 'crossing_dashed':
-      return (
-        <svg viewBox="0 0 24 24" className={baseClass} fill="none" stroke="currentColor" strokeWidth="3">
-          <line x1="12" y1="3" x2="12" y2="21" strokeDasharray="3,3" />
-        </svg>
-      );
-    case 'stop_line':
-      return (
-        <svg viewBox="0 0 24 24" className={baseClass} fill="none" stroke="currentColor" strokeWidth="4">
-          <line x1="3" y1="12" x2="21" y2="12" />
-        </svg>
-      );
-    case 'yield_line':
-      return (
-        <svg viewBox="0 0 24 24" className={baseClass} fill="none" stroke="currentColor" strokeWidth="2">
-          <path d="M3 6h18L12 21 3 6z" fill="currentColor" fillOpacity="0.1" />
-        </svg>
-      );
-    case 'BuildingLine':
-      return (
-        <svg viewBox="0 0 24 24" className={baseClass} fill="none" stroke="currentColor" strokeWidth="1.5">
-          <path d="M3 21h18M5 21V8l7-4 7 4v13" />
-          <line x1="9" y1="12" x2="15" y2="12" />
-          <line x1="9" y1="16" x2="15" y2="16" />
-        </svg>
-      );
-    case 'reversible_lane':
-      return (
-        <svg viewBox="0 0 24 24" className={baseClass} fill="none" stroke="currentColor" strokeWidth="2">
-          <line x1="8" y1="3" x2="8" y2="21" strokeDasharray="5,4" />
-          <line x1="16" y1="3" x2="16" y2="21" strokeDasharray="5,4" />
-        </svg>
-      );
-    case 'Sidewalk':
-      return (
-        <svg viewBox="0 0 24 24" className={baseClass} fill="none" stroke="currentColor" strokeWidth="1.2">
-          <rect x="4" y="4" width="16" height="16" rx="1.5" />
-          <line x1="4" y1="9" x2="20" y2="9" />
-          <line x1="4" y1="15" x2="20" y2="15" />
-          <line x1="9" y1="4" x2="9" y2="9" />
-          <line x1="15" y1="4" x2="15" y2="9" />
-          <line x1="6" y1="9" x2="6" y2="15" />
-          <line x1="12" y1="9" x2="12" y2="15" />
-          <line x1="18" y1="9" x2="18" y2="15" />
-          <line x1="10" y1="15" x2="10" y2="20" />
-          <line x1="16" y1="15" x2="16" y2="20" />
-        </svg>
-      );
-    case 'channelization':
-      return (
-        <svg viewBox="0 0 24 24" className={baseClass} fill="none" stroke="currentColor" strokeWidth="1.5">
-          <rect x="4" y="4" width="16" height="16" rx="1.5" />
-          <line x1="4" y1="12" x2="12" y2="4" />
-          <line x1="4" y1="20" x2="20" y2="4" />
-          <line x1="12" y1="20" x2="20" y2="12" />
-        </svg>
-      );
-    case 'crosswalk':
-      return (
-        <svg viewBox="0 0 24 24" className={baseClass} fill="none" stroke="currentColor" strokeWidth="1.5">
-          <rect x="3" y="5" width="18" height="14" rx="2" strokeDasharray="2,2" />
-          <rect x="6" y="7" width="2" height="10" fill="currentColor" />
-          <rect x="11" y="7" width="2" height="10" fill="currentColor" />
-          <rect x="16" y="7" width="2" height="10" fill="currentColor" />
-        </svg>
-      );
-    case 'bicycle_lane':
-      return (
-        <svg viewBox="0 0 24 24" className={baseClass} fill="none" stroke="currentColor" strokeWidth="1.5">
-          <circle cx="5.5" cy="14" r="2.5" />
-          <circle cx="18.5" cy="14" r="2.5" />
-          <path d="M12 14v-4l3-3M8 10h8" />
-        </svg>
-      );
-    case 'parking_space':
-      return (
-        <svg viewBox="0 0 24 24" className={baseClass} fill="none" stroke="currentColor" strokeWidth="1.5">
-          <rect x="8" y="3.2" width="8" height="17.6" rx="1.5" />
-          <path d="M10.5 15V8h2.5a2 2 0 0 1 0 4H10.5" strokeWidth="1.8" />
-        </svg>
-      );
-    case 'parking_zone':
-      return (
-        <svg viewBox="0 0 24 24" className={baseClass} fill="none" stroke="currentColor" strokeWidth="1.5">
-          <path d="M10.5 7.5V2h3a1.5 1.5 0 0 1 0 3h-3" strokeWidth="1.8" />
-          <rect x="5" y="9" width="5" height="11" rx="1" fill="currentColor" fillOpacity="0.1" />
-          <rect x="14" y="9" width="5" height="11" rx="1" fill="currentColor" fillOpacity="0.1" />
-          <line x1="2" y1="14.5" x2="22" y2="14.5" strokeDasharray="2,2" />
-          <circle cx="2" cy="14.5" r="1.5" fill="currentColor" />
-          <circle cx="22" cy="14.5" r="1.5" fill="currentColor" />
-        </svg>
-      );
-    case 'smart_path':
-      return (
-        <svg viewBox="0 0 24 24" className={baseClass} fill="none" stroke="currentColor" strokeWidth="1.5">
-          <rect x="6" y="4" width="12" height="16" rx="3" />
-          <path d="M8 9h8" />
-          <rect x="8" y="10" width="8" height="6" rx="1" fill="currentColor" fillOpacity="0.1" />
-          <rect x="4" y="6" width="2" height="3" rx="0.5" fill="currentColor" />
-          <rect x="18" y="6" width="2" height="3" rx="0.5" fill="currentColor" />
-          <rect x="4" y="15" width="2" height="3" rx="0.5" fill="currentColor" />
-          <rect x="18" y="15" width="2" height="3" rx="0.5" fill="currentColor" />
-        </svg>
-      );
-    case 'three_center_curve':
-      return (
-        <svg viewBox="0 0 24 24" className={baseClass} fill="none" stroke="currentColor" strokeWidth="1.5">
-          <path d="M4 20C4 11.163 11.163 4 20 4" />
-          <line x1="4" y1="20" x2="4" y2="16" />
-          <line x1="20" y1="4" x2="16" y2="4" />
-        </svg>
-      );
-    case 'island':
-      return (
-        <svg viewBox="0 0 24 24" className={baseClass} fill="none" stroke="currentColor" strokeWidth="1.5">
-          <rect x="4" y="4" width="16" height="16" rx="1.5" />
-          <line x1="4" y1="12" x2="12" y2="4" />
-          <line x1="4" y1="20" x2="20" y2="4" />
-          <line x1="12" y1="20" x2="20" y2="12" />
-        </svg>
-      );
-    case 'text':
-      return (
-        <svg viewBox="0 0 24 24" className={baseClass} fill="none" stroke="currentColor" strokeWidth="1.5">
-          <path d="M4 7V4h16v3M9 20h6M12 4v16" />
-        </svg>
-      );
-    case 'road_arrow':
-      return (
-        <svg viewBox="0 0 24 24" className={baseClass} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M12 19V5M12 5l-5 5M12 5l5 5" />
-        </svg>
-      );
-    default:
-      return null;
-  }
+/* ==================================================================
+ * 性質表格（製圖桌介面）：區段標題列＋「名稱｜數值」兩欄列
+ * ================================================================== */
+
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <div className="h-[22px] px-2.5 flex items-center text-[11px] font-bold" style={{ background: 'var(--ui-ribbon)', color: 'var(--ui-muted)', borderBottom: '1px solid var(--ui-border)' }}>{title}</div>
+      <div>{children}</div>
+    </div>
+  );
 }
+
+function Row({ label, children, title }: { label: string; children: React.ReactNode; title?: string }) {
+  return (
+    <div className="grid grid-cols-[104px_minmax(0,1fr)] items-center min-h-[26px]" style={{ borderBottom: '1px solid var(--ui-border-soft)' }} title={title}>
+      <span className="px-2.5 text-xs truncate" style={{ color: 'var(--ui-muted)' }}>{label}</span>
+      <div className="px-1.5 py-[2px] min-w-0 text-xs flex items-center gap-1" style={{ color: 'var(--ui-text)' }}>{children}</div>
+    </div>
+  );
+}
+
+const fieldStyle: React.CSSProperties = { background: 'var(--ui-field)', color: 'var(--ui-text)', border: '1px solid var(--ui-border)' };
+const fieldCls = 'h-[21px] px-1.5 text-xs outline-none focus:border-[var(--ui-accent)] min-w-0';
+
+/** 數值欄：輸入中不打斷，Enter／離開時套用並限制範圍；↑↓ 以步距調整 */
+function Num({ value, onChange, min = -Infinity, max = Infinity, step = 0.1, unit, digits = 2, id }: {
+  value: number; onChange: (v: number) => void; min?: number; max?: number; step?: number; unit?: string; digits?: number; id?: string;
+}) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const clamp = (v: number) => Math.min(max, Math.max(min, v));
+  const fmt = (v: number) => String(Number((isFinite(v) ? v : 0).toFixed(digits)));
+  const commit = () => {
+    if (draft === null) return;
+    const v = parseFloat(draft);
+    if (!isNaN(v) && clamp(v) !== value) onChange(clamp(v));
+    setDraft(null);
+  };
+  return (
+    <>
+      <input
+        id={id}
+        type="text"
+        inputMode="decimal"
+        value={draft ?? fmt(value)}
+        onChange={e => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={e => {
+          if (e.key === 'Enter') { commit(); (e.target as HTMLInputElement).blur(); }
+          else if (e.key === 'Escape') { setDraft(null); (e.target as HTMLInputElement).blur(); }
+          else if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+            e.preventDefault();
+            const base = draft !== null && !isNaN(parseFloat(draft)) ? parseFloat(draft) : value;
+            const next = clamp(Number((base + (e.key === 'ArrowUp' ? step : -step)).toFixed(6)));
+            setDraft(null);
+            onChange(next);
+          }
+        }}
+        className={`${fieldCls} flex-1 text-right font-mono`}
+        style={fieldStyle}
+      />
+      {unit !== undefined && <span className="w-5 shrink-0 text-[11px]" style={{ color: 'var(--ui-muted)' }}>{unit}</span>}
+    </>
+  );
+}
+
+function Text({ value, onChange, id, placeholder }: { value: string; onChange: (v: string) => void; id?: string; placeholder?: string }) {
+  return <input id={id} type="text" value={value} placeholder={placeholder} onChange={e => onChange(e.target.value)} className={`${fieldCls} flex-1`} style={fieldStyle} />;
+}
+
+function Select<T extends string>({ value, options, onChange, id }: { value: T; options: [T, string][]; onChange: (v: T) => void; id?: string }) {
+  return (
+    <select id={id} value={value} onChange={e => onChange(e.target.value as T)} className={`${fieldCls} flex-1 cursor-pointer`} style={fieldStyle}>
+      {options.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+    </select>
+  );
+}
+
+function Seg<T extends string>({ value, options, onChange }: { value: T; options: [T, string][]; onChange: (v: T) => void }) {
+  return (
+    <div className="flex flex-1" style={{ border: '1px solid var(--ui-border)' }}>
+      {options.map(([v, l]) => (
+        <button key={v} type="button" aria-pressed={value === v} onClick={() => onChange(v)} className="flex-1 h-[19px] px-1 text-[11px] cursor-pointer whitespace-nowrap"
+          style={value === v ? { background: 'var(--ui-accent)', color: 'var(--ui-accent-text)' } : { color: 'var(--ui-muted)' }}>
+          {l}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function Check({ checked, onChange, id, label }: { checked: boolean; onChange: (v: boolean) => void; id?: string; label?: string }) {
+  return (
+    <label className="flex items-center gap-1.5 cursor-pointer text-xs">
+      <input id={id} type="checkbox" checked={checked} onChange={e => onChange(e.target.checked)} className="m-0 cursor-pointer" style={{ accentColor: 'var(--ui-accent)' }} />
+      {label && <span>{label}</span>}
+    </label>
+  );
+}
+
+function Val({ children, tone }: { children: React.ReactNode; tone?: 'ok' | 'bad' }) {
+  return <span className="font-mono px-1 truncate" style={{ color: tone === 'bad' ? '#f87171' : tone === 'ok' ? '#5ccf8a' : 'var(--ui-text)' }}>{children}</span>;
+}
+
+function Btn({ children, onClick, danger, primary, id, disabled }: { children: React.ReactNode; onClick: () => void; danger?: boolean; primary?: boolean; id?: string; disabled?: boolean; key?: React.Key }) {
+  return (
+    <button id={id} type="button" disabled={disabled} onClick={onClick} className="flex-1 h-[24px] px-2 text-xs cursor-pointer whitespace-nowrap disabled:opacity-35 enabled:hover:brightness-125"
+      style={primary ? { background: 'var(--ui-accent)', color: 'var(--ui-accent-text)', border: '1px solid var(--ui-accent)' }
+        : { background: 'var(--ui-surface2)', color: danger ? '#f87171' : 'var(--ui-text)', border: '1px solid var(--ui-border)' }}>
+      {children}
+    </button>
+  );
+}
+
+function Actions({ children }: { children: React.ReactNode }) {
+  return <div className="flex gap-1.5 px-2.5 py-2">{children}</div>;
+}
+
+function Note({ children }: { children: React.ReactNode }) {
+  return <p className="px-2.5 py-1.5 text-[11px] leading-relaxed" style={{ color: 'var(--ui-muted)' }}>{children}</p>;
+}
+
+const deg = (rad: number) => ((Math.round((rad * 180) / Math.PI) % 360) + 540) % 360 - 180;
+const rad = (d: number) => (d * Math.PI) / 180;
+const m = (v: number, d = 2) => `${v.toFixed(d)} m`;
+
+const LINE_TYPES = ['yellow_double', 'yellow_dashed', 'white_dashed', 'white_solid', 'white_double', 'reversible_lane', 'crossing_dashed', 'stop_line', 'yield_line', 'red_solid', 'yellow_solid', 'Sidewalk', 'BuildingLine', 'guideline'];
+const LINE_LABELS: Record<string, string> = {
+  guideline: '輔助線', yellow_double: '分向限制線', white_dashed: '車道線', yellow_dashed: '分向線', white_solid: '路面邊線',
+  white_double: '雙白實線', reversible_lane: '調撥車道線', yield_line: '讓路線', stop_line: '停止線', crossing_dashed: '穿越虛線',
+  Sidewalk: '人行道', BuildingLine: '建築線', red_solid: '禁止臨時停車線', yellow_solid: '禁止停車線',
+};
+const ARROW_LABELS: [string, string][] = [['straight', '直行'], ['left', '左轉'], ['right', '右轉'], ['straight_left', '直行左轉'], ['straight_right', '直行右轉']];
+const SLOT_TYPES: ['car' | 'motorcycle', string][] = [['car', '汽車 2.5×5.5'], ['motorcycle', '機車 0.8×2.0']];
+const slotPreset = (t: 'car' | 'motorcycle') => (t === 'car' ? { slotType: 'car', width: 2.5, length: 5.5 } : { slotType: 'motorcycle', width: 0.8, length: 2.0 });
 
 interface PropsPanelProps {
   selectedElement: CadElement | null;
@@ -227,24 +159,16 @@ interface PropsPanelProps {
   setR2: (r: number) => void;
   designVehicle: 'passenger' | 'semi_trailer' | 'articulated';
   setDesignVehicle: (v: 'passenger' | 'semi_trailer' | 'articulated') => void;
-  
-  // Handlers for modifying elements
   onUpdateElement: (el: CadElement) => void;
   onDeleteElement: (id: string) => void;
   onGenerateIslandFromCurve: (curve: any) => void;
   /** 將車輛軌跡標線送到軌跡模擬做完整檢核 */
   onSimulatePath?: (el: any) => void;
   onAddElement?: (el: CadElement) => void;
-  
-  // Undo helper
   onSaveHistory?: () => void;
-
-  // Multi-anchor selection props
   selectedAnchorIndices?: number[];
   onTranslateSelectedAnchors?: (dx: number, dy: number) => void;
   onClearSelectedAnchors?: () => void;
-
-  // New configs for default parking items
   activeTool?: string;
   parkingStampConfig?: { slotType: 'car' | 'motorcycle', width: number, length: number, angle: number };
   setParkingStampConfig?: (cfg: any) => void;
@@ -256,10 +180,7 @@ interface PropsPanelProps {
 
 export default function PropsPanel({
   selectedElement,
-  R2,
-  setR2,
   designVehicle,
-  setDesignVehicle,
   onUpdateElement,
   onDeleteElement,
   onGenerateIslandFromCurve,
@@ -277,2685 +198,477 @@ export default function PropsPanel({
   roadArrowConfig,
   setRoadArrowConfig,
 }: PropsPanelProps) {
-  const [nudgeStep, setNudgeStep] = useState<number>(0.1);
+  const [nudgeStep, setNudgeStep] = useState<string>('0.1');
   const [offsetDistance, setOffsetDistance] = useState<number>(3.5);
+  const [nudgeDx, setNudgeDx] = useState<number>(0);
+  const [nudgeDy, setNudgeDy] = useState<number>(0);
 
+  const update = (patch: Record<string, any>) => { if (selectedElement) onUpdateElement({ ...(selectedElement as any), ...patch }); };
+  const del = (label = '刪除') => (
+    <Btn danger id="delete-element-btn" onClick={() => { onSaveHistory?.(); if (selectedElement) onDeleteElement(selectedElement.id); }}>{label}</Btn>
+  );
+
+  /** 平行偏移複製（直線或貝茲路徑） */
   const handleOffsetCopy = (el: CadElement, distM: number) => {
     if (!onAddElement) return;
     onSaveHistory?.();
-    const newId = `${el.type}-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
-    
+    const newId = `${el.type}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     const line = el as any;
     if (line.p1 && line.p2 && (!line.points || line.points.length === 0)) {
       const offset = offsetSegment(line.p1, line.p2, distM);
-      const newEl = {
-        ...line,
-        id: newId,
-        p1: offset.p1,
-        p2: offset.p2
-      };
-      onAddElement(newEl);
+      onAddElement({ ...line, id: newId, p1: offset.p1, p2: offset.p2 });
       return;
     }
-
     if (line.points && line.points.length >= 2) {
-      const cpL = line.cpLeft || line.points;
-      const cpR = line.cpRight || line.points;
-      const offsetPts = getPathOffsetCurves(line.points, cpL, cpR, distM, 25);
-      
-      const newEl = {
-        ...line,
-        id: newId,
-        points: offsetPts,
-        cpLeft: offsetPts,
-        cpRight: offsetPts
-      };
-      onAddElement(newEl);
+      const offsetPts = getPathOffsetCurves(line.points, line.cpLeft || line.points, line.cpRight || line.points, distM, 25);
+      onAddElement({ ...line, id: newId, points: offsetPts, cpLeft: offsetPts, cpRight: offsetPts });
     }
   };
-  
-  // Calculate general widening for current global R2 setting
-  const suggestedWidth = calculateWidening(R2, designVehicle);
+  const offsetSection = (el: CadElement) => onAddElement && (
+    <Section title="平行偏移複製">
+      <Row label="偏移距離"><Num value={offsetDistance} onChange={setOffsetDistance} min={0.1} max={50} step={0.5} unit="m" /></Row>
+      <Actions>
+        <Btn onClick={() => handleOffsetCopy(el, -offsetDistance)}>向左複製</Btn>
+        <Btn onClick={() => handleOffsetCopy(el, offsetDistance)}>向右複製</Btn>
+      </Actions>
+    </Section>
+  );
 
-  // Accurate length estimator checking both straight segments and multi-segment Bezier path subdivisions
+  /** 直線與多段貝茲路徑的長度 */
   const getLineElementLength = (line: any): number => {
     if (line.points && line.points.length > 0) {
       let len = 0;
       for (let i = 0; i < line.points.length - 1; i++) {
-        const pStart = line.points[i];
-        const cpStart = (line.cpRight && line.cpRight[i]) || pStart;
-        const cpEnd = (line.cpLeft && line.cpLeft[i + 1]) || line.points[i + 1];
-        const pEnd = line.points[i + 1];
-        const samples = sampleCubicBezier(pStart, cpStart, cpEnd, pEnd, 15);
-        for (let j = 0; j < samples.length - 1; j++) {
-          len += distance(samples[j], samples[j + 1]);
-        }
+        const pS = line.points[i], pE = line.points[i + 1];
+        const samples = sampleCubicBezier(pS, line.cpRight?.[i] || pS, line.cpLeft?.[i + 1] || pE, pE, 15);
+        for (let j = 0; j < samples.length - 1; j++) len += distance(samples[j], samples[j + 1]);
       }
       return len;
-    } else if (line.p1 && line.p2) {
-      return distance(line.p1, line.p2);
     }
+    if (line.p1 && line.p2) return distance(line.p1, line.p2);
     return 0;
   };
 
-  const renderSelectedElementProps = () => {
-    if (!selectedElement) {
-      if (activeTool === 'parking_space' && parkingStampConfig && setParkingStampConfig) {
-        const slotType = parkingStampConfig.slotType;
-        const length = parkingStampConfig.length;
-        const width = parkingStampConfig.width;
-        const angleDeg = Math.round((parkingStampConfig.angle * 180) / Math.PI);
-        return (
-          <div className="space-y-4">
-            <div className="p-3 bg-[#1f2229]/40 rounded-lg border border-[#2d3039]">
-              <h4 className="text-xs font-semibold text-blue-400 mb-2">停車格印章參數設定</h4>
-              <p className="text-[10px] text-slate-500">（滑鼠單擊即可印下）將依此設定的尺寸與角度放置車格。</p>
-            </div>
+  const layerRow = (el: CadElement) => {
+    const k = layerKeyOf(el);
+    return <Row label="圖層"><Val>{LAYERS[k]?.name || k}</Val></Row>;
+  };
 
-            <div className="space-y-2">
-              <label className="text-xs text-slate-400 block">車格類型</label>
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setParkingStampConfig({
-                      ...parkingStampConfig,
-                      slotType: 'car',
-                      width: 2.5,
-                      length: 5.5
-                    });
-                  }}
-                  className={`px-2 py-2 text-[10px] rounded border text-center cursor-pointer transition-colors ${
-                    slotType === 'car'
-                      ? 'bg-blue-950/40 border-blue-500/65 text-blue-400 font-bold'
-                      : 'bg-[#1f2229] border-[#2d3039] text-slate-400'
-                  }`}
-                >
-                  汽車預設 (2.5m x 5.5m)
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setParkingStampConfig({
-                      ...parkingStampConfig,
-                      slotType: 'motorcycle',
-                      width: 0.8,
-                      length: 2.0
-                    });
-                  }}
-                  className={`px-2 py-2 text-[10px] rounded border text-center cursor-pointer transition-colors ${
-                    slotType === 'motorcycle'
-                      ? 'bg-purple-950/40 border-purple-500/65 text-purple-400 font-bold'
-                      : 'bg-[#1f2229] border-[#2d3039] text-slate-400'
-                  }`}
-                >
-                  機車預設 (0.8m x 2m)
-                </button>
-              </div>
-            </div>
-
-            <div className="space-y-1 text-xs">
-              <div className="flex justify-between">
-                <span className="text-slate-400">長度 (m)</span>
-                <span className="text-slate-200 font-mono font-bold">{length.toFixed(1)} m</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <input
-                  type="range"
-                  min="1.0"
-                  max="8.0"
-                  step="0.1"
-                  value={length}
-                  onChange={(e) => {
-                    setParkingStampConfig({
-                      ...parkingStampConfig,
-                      length: parseFloat(e.target.value)
-                    });
-                  }}
-                  className="flex-1 accent-blue-500 cursor-pointer"
-                />
-                <input
-                  type="number"
-                  min="1.0"
-                  max="8.0"
-                  step="0.1"
-                  value={parseFloat(length.toFixed(1))}
-                  onChange={(e) => {
-                    let val = parseFloat(e.target.value);
-                    if (!isNaN(val)) {
-                      if (val < 1.0) val = 1.0;
-                      if (val > 8.0) val = 8.0;
-                      setParkingStampConfig({
-                        ...parkingStampConfig,
-                        length: val
-                      });
-                    }
-                  }}
-                  className="w-16 bg-[#1f2229] border border-[#2d3039] px-1 py-0.5 rounded text-white text-right focus:outline-none focus:border-blue-500 font-mono text-xs"
-                />
-              </div>
-            </div>
-
-            <div className="space-y-1 text-xs">
-              <div className="flex justify-between">
-                <span className="text-slate-400">寬度 (m)</span>
-                <span className="text-slate-200 font-mono font-bold">{width.toFixed(1)} m</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <input
-                  type="range"
-                  min="0.4"
-                  max="4.0"
-                  step="0.1"
-                  value={width}
-                  onChange={(e) => {
-                    setParkingStampConfig({
-                      ...parkingStampConfig,
-                      width: parseFloat(e.target.value)
-                    });
-                  }}
-                  className="flex-1 accent-blue-500 cursor-pointer"
-                />
-                <input
-                  type="number"
-                  min="0.4"
-                  max="4.0"
-                  step="0.1"
-                  value={parseFloat(width.toFixed(1))}
-                  onChange={(e) => {
-                    let val = parseFloat(e.target.value);
-                    if (!isNaN(val)) {
-                      if (val < 0.4) val = 0.4;
-                      if (val > 4.0) val = 4.0;
-                      setParkingStampConfig({
-                        ...parkingStampConfig,
-                        width: val
-                      });
-                    }
-                  }}
-                  className="w-16 bg-[#1f2229] border border-[#2d3039] px-1 py-0.5 rounded text-white text-right focus:outline-none focus:border-blue-500 font-mono text-xs"
-                />
-              </div>
-            </div>
-
-            <div className="space-y-1 text-xs">
-              <div className="flex justify-between">
-                <span className="text-slate-400">角度 (度)</span>
-                <span className="text-slate-200 font-mono font-bold">{angleDeg}°</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <input
-                  type="range"
-                  min="-180"
-                  max="180"
-                  step="5"
-                  value={angleDeg}
-                  onChange={(e) => {
-                    const rad = (parseFloat(e.target.value) * Math.PI) / 180;
-                    setParkingStampConfig({
-                      ...parkingStampConfig,
-                      angle: rad
-                    });
-                  }}
-                  className="flex-1 accent-blue-500 cursor-pointer"
-                />
-                <input
-                  type="number"
-                  min="-180"
-                  max="180"
-                  step="1"
-                  value={angleDeg}
-                  onChange={(e) => {
-                    let val = parseFloat(e.target.value);
-                    if (!isNaN(val)) {
-                      if (val < -180) val = -180;
-                      if (val > 180) val = 180;
-                      setParkingStampConfig({
-                        ...parkingStampConfig,
-                        angle: (val * Math.PI) / 180
-                      });
-                    }
-                  }}
-                  className="w-16 bg-[#1f2229] border border-[#2d3039] px-1 py-0.5 rounded text-white text-right focus:outline-none focus:border-blue-500 font-mono text-xs"
-                />
-              </div>
-            </div>
-          </div>
-        );
-      }
-
-      if (activeTool === 'parking_zone' && parkingZoneConfig && setParkingZoneConfig) {
-        const slotType = parkingZoneConfig.slotType;
-        const length = parkingZoneConfig.length;
-        const width = parkingZoneConfig.width;
-        const angle = parkingZoneConfig.angle;
-        const gap = parkingZoneConfig.gap;
-        const side = parkingZoneConfig.side;
-        return (
-          <div className="space-y-4">
-            <div className="p-3 bg-[#1f2229]/40 rounded-lg border border-[#2d3039]">
-              <h4 className="text-xs font-semibold text-cyan-400 mb-2">停車區路徑屬性設定</h4>
-              <p className="text-[10px] text-slate-500">以鋼筆工具在畫布上拉出引導路徑後，將在此路徑長度內自動填滿車格。</p>
-            </div>
-
-            <div className="space-y-2">
-              <label className="text-xs text-slate-400 block">車格類型</label>
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setParkingZoneConfig({
-                      ...parkingZoneConfig,
-                      slotType: 'car',
-                      width: 2.5,
-                      length: 5.5
-                    });
-                  }}
-                  className={`px-2 py-2 text-[10px] rounded border text-center cursor-pointer transition-colors ${
-                    slotType === 'car'
-                      ? 'bg-blue-950/40 border-blue-500/65 text-blue-400 font-bold'
-                      : 'bg-[#1f2229] border-[#2d3039] text-slate-400'
-                  }`}
-                >
-                  汽車預設 (2.5m x 5.5m)
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setParkingZoneConfig({
-                      ...parkingZoneConfig,
-                      slotType: 'motorcycle',
-                      width: 0.8,
-                      length: 2.0
-                    });
-                  }}
-                  className={`px-2 py-2 text-[10px] rounded border text-center cursor-pointer transition-colors ${
-                    slotType === 'motorcycle'
-                      ? 'bg-purple-950/40 border-purple-500/65 text-purple-400 font-bold'
-                      : 'bg-[#1f2229] border-[#2d3039] text-slate-400'
-                  }`}
-                >
-                  機車預設 (0.8m x 2m)
-                </button>
-              </div>
-            </div>
-
-            <div className="space-y-1 text-xs">
-              <div className="flex justify-between">
-                <span className="text-slate-400">長度 (m)</span>
-                <span className="text-slate-200 font-mono font-bold">{length.toFixed(1)} m</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <input
-                  type="range"
-                  min="1.0"
-                  max="8.0"
-                  step="0.1"
-                  value={length}
-                  onChange={(e) => {
-                    setParkingZoneConfig({
-                      ...parkingZoneConfig,
-                      length: parseFloat(e.target.value)
-                    });
-                  }}
-                  className="flex-1 accent-blue-500 cursor-pointer"
-                />
-                <input
-                  type="number"
-                  min="1.0"
-                  max="8.0"
-                  step="0.1"
-                  value={parseFloat(length.toFixed(1))}
-                  onChange={(e) => {
-                    let val = parseFloat(e.target.value);
-                    if (!isNaN(val)) {
-                      if (val < 1.0) val = 1.0;
-                      if (val > 8.0) val = 8.0;
-                      setParkingZoneConfig({
-                        ...parkingZoneConfig,
-                        length: val
-                      });
-                    }
-                  }}
-                  className="w-16 bg-[#1f2229] border border-[#2d3039] px-1 py-0.5 rounded text-white text-right focus:outline-none focus:border-blue-500 font-mono text-xs"
-                />
-              </div>
-            </div>
-
-            <div className="space-y-1 text-xs">
-              <div className="flex justify-between">
-                <span className="text-slate-400">寬度 (m)</span>
-                <span className="text-slate-200 font-mono font-bold">{width.toFixed(1)} m</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <input
-                  type="range"
-                  min="0.4"
-                  max="4.0"
-                  step="0.1"
-                  value={width}
-                  onChange={(e) => {
-                    setParkingZoneConfig({
-                      ...parkingZoneConfig,
-                      width: parseFloat(e.target.value)
-                    });
-                  }}
-                  className="flex-1 accent-blue-500 cursor-pointer"
-                />
-                <input
-                  type="number"
-                  min="0.4"
-                  max="4.0"
-                  step="0.1"
-                  value={parseFloat(width.toFixed(1))}
-                  onChange={(e) => {
-                    let val = parseFloat(e.target.value);
-                    if (!isNaN(val)) {
-                      if (val < 0.4) val = 0.4;
-                      if (val > 4.0) val = 4.0;
-                      setParkingZoneConfig({
-                        ...parkingZoneConfig,
-                        width: val
-                      });
-                    }
-                  }}
-                  className="w-16 bg-[#1f2229] border border-[#2d3039] px-1 py-0.5 rounded text-white text-right focus:outline-none focus:border-blue-500 font-mono text-xs"
-                />
-              </div>
-            </div>
-
-            <div className="space-y-1 text-xs">
-              <div className="flex justify-between">
-                <span className="text-slate-400">相對切線偏角 (度)</span>
-                <span className="text-slate-200 font-mono font-bold">{angle}°</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <input
-                  type="range"
-                  min="-180"
-                  max="180"
-                  step="5"
-                  value={angle}
-                  onChange={(e) => {
-                    setParkingZoneConfig({
-                      ...parkingZoneConfig,
-                      angle: parseInt(e.target.value)
-                    });
-                  }}
-                  className="flex-1 accent-blue-500 cursor-pointer"
-                />
-                <input
-                  type="number"
-                  min="-180"
-                  max="180"
-                  step="1"
-                  value={angle}
-                  onChange={(e) => {
-                    let val = parseFloat(e.target.value);
-                    if (!isNaN(val)) {
-                      if (val < -180) val = -180;
-                      if (val > 180) val = 180;
-                      setParkingZoneConfig({
-                        ...parkingZoneConfig,
-                        angle: val
-                      });
-                    }
-                  }}
-                  className="w-16 bg-[#1f2229] border border-[#2d3039] px-1 py-0.5 rounded text-white text-right focus:outline-none focus:border-blue-500 font-mono text-xs"
-                />
-              </div>
-            </div>
-
-            <div className="space-y-1 text-xs">
-              <div className="flex justify-between">
-                <span className="text-slate-400">車格間距 (m)</span>
-                <span className="text-slate-200 font-mono font-bold">{gap.toFixed(1)} m</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <input
-                  type="range"
-                  min="0.0"
-                  max="3.0"
-                  step="0.1"
-                  value={gap}
-                  onChange={(e) => {
-                    setParkingZoneConfig({
-                      ...parkingZoneConfig,
-                      gap: parseFloat(e.target.value)
-                    });
-                  }}
-                  className="flex-1 accent-blue-500 cursor-pointer"
-                />
-                <input
-                  type="number"
-                  min="0.0"
-                  max="3.0"
-                  step="0.1"
-                  value={parseFloat(gap.toFixed(1))}
-                  onChange={(e) => {
-                    let val = parseFloat(e.target.value);
-                    if (!isNaN(val)) {
-                      if (val < 0.0) val = 0.0;
-                      if (val > 3.0) val = 3.0;
-                      setParkingZoneConfig({
-                        ...parkingZoneConfig,
-                        gap: val
-                      });
-                    }
-                  }}
-                  className="w-16 bg-[#1f2229] border border-[#2d3039] px-1 py-0.5 rounded text-white text-right focus:outline-none focus:border-blue-500 font-mono text-xs"
-                />
-              </div>
-            </div>
-
-            <div className="space-y-1.5 p-3 bg-[#1f2229]/40 border border-[#2d3039] rounded-lg">
-              <div className="flex items-center justify-between">
-                <span className="text-xs text-slate-400 font-medium">配置於路徑左側 (預設為右側)</span>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setParkingZoneConfig({
-                      ...parkingZoneConfig,
-                      side: side === 'right' ? 'left' : 'right'
-                    });
-                  }}
-                  className={`w-10 h-5 rounded-full p-0.5 transition-colors cursor-pointer ${
-                    side === 'left' ? 'bg-cyan-500' : 'bg-zinc-700'
-                  }`}
-                >
-                  <div className={`bg-white w-4 h-4 rounded-full transition-transform ${
-                    side === 'left' ? 'translate-x-5' : 'translate-x-0'
-                  }`} />
-                </button>
-              </div>
-            </div>
-          </div>
-        );
-      }
-      
-      if (activeTool === 'road_arrow' && roadArrowConfig && setRoadArrowConfig) {
-        const arrowType = roadArrowConfig.arrowType;
-        const length = roadArrowConfig.length;
-        const angleDeg = Math.round((roadArrowConfig.angle * 180) / Math.PI);
-        const arrowLabels: Record<string, string> = {
-          straight: '直行',
-          left: '左轉',
-          right: '右轉',
-          straight_left: '直行左轉',
-          straight_right: '直行右轉'
-        };
-
-        return (
-          <div className="space-y-4">
-            <div className="p-3 bg-[#1f2229]/40 rounded-lg border border-[#2d3039]">
-              <h4 className="text-xs font-semibold text-blue-400 mb-2">指向線標記印章設定</h4>
-              <p className="text-[10px] text-slate-500">（滑鼠單擊即可印下，拖曳旋轉）將依此設定的尺寸與角度放置指向箭頭。</p>
-            </div>
-
-            <div className="space-y-1.5 text-xs">
-              <label className="text-slate-400 block font-medium">箭頭類型</label>
-              <select
-                value={arrowType}
-                onChange={(e) => {
-                  setRoadArrowConfig({
-                    ...roadArrowConfig,
-                    arrowType: e.target.value as any
-                  });
-                }}
-                className="w-full bg-[#1f2229] border border-[#2d3039] px-2 py-1.5 rounded text-white focus:outline-none focus:border-blue-500 text-xs"
-              >
-                {Object.entries(arrowLabels).map(([val, label]) => (
-                  <option key={val} value={val} className="bg-[#14161c]">{label}</option>
-                ))}
-              </select>
-            </div>
-
-            <div className="space-y-1 text-xs">
-              <div className="flex justify-between">
-                <span className="text-slate-400">長度 (m)</span>
-                <span className="text-slate-200 font-mono font-bold">{length.toFixed(1)} m</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <input
-                  type="range"
-                  min="1.0"
-                  max="10.0"
-                  step="0.1"
-                  value={length}
-                  onChange={(e) => {
-                    setRoadArrowConfig({
-                      ...roadArrowConfig,
-                      length: parseFloat(e.target.value)
-                    });
-                  }}
-                  className="flex-1 accent-blue-500 cursor-pointer"
-                />
-                <input
-                  type="number"
-                  min="1.0"
-                  max="10.0"
-                  step="0.1"
-                  value={parseFloat(length.toFixed(1))}
-                  onChange={(e) => {
-                    let val = parseFloat(e.target.value);
-                    if (!isNaN(val)) {
-                      if (val < 1.0) val = 1.0;
-                      if (val > 10.0) val = 10.0;
-                      setRoadArrowConfig({
-                        ...roadArrowConfig,
-                        length: val
-                      });
-                    }
-                  }}
-                  className="w-16 bg-[#1f2229] border border-[#2d3039] px-1 py-0.5 rounded text-white text-right focus:outline-none focus:border-blue-500 font-mono text-xs"
-                />
-              </div>
-            </div>
-
-            <div className="space-y-1 text-xs">
-              <div className="flex justify-between">
-                <span className="text-slate-400">角度 (度)</span>
-                <span className="text-slate-200 font-mono font-bold">{angleDeg}°</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <input
-                  type="range"
-                  min="-180"
-                  max="180"
-                  step="5"
-                  value={angleDeg}
-                  onChange={(e) => {
-                    const rad = (parseFloat(e.target.value) * Math.PI) / 180;
-                    setRoadArrowConfig({
-                      ...roadArrowConfig,
-                      angle: rad
-                    });
-                  }}
-                  className="flex-1 accent-blue-500 cursor-pointer"
-                />
-                <input
-                  type="number"
-                  min="-180"
-                  max="180"
-                  step="1"
-                  value={angleDeg}
-                  onChange={(e) => {
-                    let val = parseFloat(e.target.value);
-                    if (!isNaN(val)) {
-                      if (val < -180) val = -180;
-                      if (val > 180) val = 180;
-                      setRoadArrowConfig({
-                        ...roadArrowConfig,
-                        angle: (val * Math.PI) / 180
-                      });
-                    }
-                  }}
-                  className="w-16 bg-[#1f2229] border border-[#2d3039] px-1 py-0.5 rounded text-white text-right focus:outline-none focus:border-blue-500 font-mono text-xs"
-                />
-              </div>
-            </div>
-          </div>
-        );
-      }
-
+  /* ---------------- 放置前的工具參數 ---------------- */
+  const renderToolConfig = () => {
+    if (activeTool === 'parking_space' && parkingStampConfig && setParkingStampConfig) {
+      const c = parkingStampConfig;
       return (
-        <div className="text-slate-500 text-xs text-center py-8 border border-dashed border-[#2d3039] rounded-lg bg-[#1f2229]">
-          在畫布上選擇任何物件以調整其參數
-        </div>
+        <Section title="停車格（放置參數）">
+          <Row label="類型"><Seg value={c.slotType} options={SLOT_TYPES} onChange={t => setParkingStampConfig({ ...c, ...slotPreset(t) })} /></Row>
+          <Row label="長度"><Num value={c.length} onChange={v => setParkingStampConfig({ ...c, length: v })} min={1} max={8} unit="m" /></Row>
+          <Row label="寬度"><Num value={c.width} onChange={v => setParkingStampConfig({ ...c, width: v })} min={0.4} max={4} unit="m" /></Row>
+          <Row label="角度"><Num value={deg(c.angle)} onChange={v => setParkingStampConfig({ ...c, angle: rad(v) })} min={-180} max={180} step={5} digits={0} unit="°" /></Row>
+          <Note>點擊畫布放置；按住往車格長邊方向拖曳可旋轉（Shift 每 15°）。</Note>
+        </Section>
       );
     }
+    if (activeTool === 'parking_zone' && parkingZoneConfig && setParkingZoneConfig) {
+      const c = parkingZoneConfig;
+      return (
+        <Section title="停車區（放置參數）">
+          <Row label="類型"><Seg value={c.slotType} options={SLOT_TYPES} onChange={t => setParkingZoneConfig({ ...c, ...slotPreset(t) })} /></Row>
+          <Row label="長度"><Num value={c.length} onChange={v => setParkingZoneConfig({ ...c, length: v })} min={1} max={8} unit="m" /></Row>
+          <Row label="寬度"><Num value={c.width} onChange={v => setParkingZoneConfig({ ...c, width: v })} min={0.4} max={4} unit="m" /></Row>
+          <Row label="相對切線角度"><Num value={c.angle} onChange={v => setParkingZoneConfig({ ...c, angle: v })} min={-180} max={180} step={5} digits={0} unit="°" /></Row>
+          <Row label="車格間距"><Num value={c.gap} onChange={v => setParkingZoneConfig({ ...c, gap: v })} min={0} max={3} unit="m" /></Row>
+          <Row label="配置側"><Seg value={c.side} options={[['right', '路徑右側'], ['left', '路徑左側']]} onChange={v => setParkingZoneConfig({ ...c, side: v })} /></Row>
+          <Note>沿畫出的路徑自動排滿車格。</Note>
+        </Section>
+      );
+    }
+    if (activeTool === 'road_arrow' && roadArrowConfig && setRoadArrowConfig) {
+      const c = roadArrowConfig;
+      return (
+        <Section title="指向線（放置參數）">
+          <Row label="箭頭類型"><Select value={c.arrowType} options={ARROW_LABELS as any} onChange={v => setRoadArrowConfig({ ...c, arrowType: v })} /></Row>
+          <Row label="長度"><Num value={c.length} onChange={v => setRoadArrowConfig({ ...c, length: v })} min={1} max={10} unit="m" /></Row>
+          <Note>點擊車道中央即放置，會自動對齊行車方向；按住拖曳可自訂朝向。</Note>
+        </Section>
+      );
+    }
+    return <Note>在畫布上選取物件以調整其參數。</Note>;
+  };
 
-    const selectedAnchorsUI = (selectedAnchorIndices && selectedAnchorIndices.length > 0) ? (
-      <div className="p-3 mb-4 rounded-lg space-y-3 border bg-emerald-950/20 border-emerald-500/40 text-slate-350">
-        <div className="flex items-center justify-between">
-          <span className={`text-xs font-semibold text-emerald-400`}>已選取特徵點</span>
-          <button 
-            type="button"
-            onClick={() => onClearSelectedAnchors && onClearSelectedAnchors()}
-            className={`text-[10px] underline cursor-pointer text-slate-400 hover:text-white`}
-          >
-            清除選取
-          </button>
+  /* ---------------- 選取的節點 ---------------- */
+  const anchorsSection = selectedAnchorIndices.length > 0 && onTranslateSelectedAnchors ? (
+    <Section title={`選取的節點（${selectedAnchorIndices.length}）`}>
+      <Row label="步距"><Seg value={nudgeStep} options={[['0.1', '0.1 m'], ['0.5', '0.5 m'], ['1', '1 m']]} onChange={setNudgeStep} /></Row>
+      <Row label="平移">
+        <div className="flex flex-1 gap-1">
+          {([['西', -1, 0, 'nudge-left'], ['北', 0, 1, 'nudge-up'], ['南', 0, -1, 'nudge-down'], ['東', 1, 0, 'nudge-right']] as const).map(([l, dx, dy, id]) => (
+            <Btn key={id} id={id} onClick={() => onTranslateSelectedAnchors(dx * parseFloat(nudgeStep), dy * parseFloat(nudgeStep))}>{l}</Btn>
+          ))}
         </div>
-        
-        <div className="space-y-2">
-          <span className={`text-[11px] block font-medium text-slate-400`}>特徵點平移微調 (公尺)</span>
-          
-          <div className="grid grid-cols-3 gap-1.5 max-w-[150px] mx-auto py-1">
-            <div></div>
-            <button
-              id="nudge-up"
-              type="button"
-              title="往北平移"
-              onClick={() => onTranslateSelectedAnchors && onTranslateSelectedAnchors(0, nudgeStep)}
-              className={"p-1 px-2 text-center rounded text-xs font-bold cursor-pointer transition-all bg-[#1f2229] border border-[#2d3039] text-slate-300 hover:text-white hover:bg-[#2d3039]"}
-            >
-              <span className="flex items-center justify-center gap-1">
-                <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="m18 15-6-6-6 6"/></svg>
-                北
-              </span>
-            </button>
-            <div></div>
-            <button
-              id="nudge-left"
-              type="button"
-              title="往西平移"
-              onClick={() => onTranslateSelectedAnchors && onTranslateSelectedAnchors(-nudgeStep, 0)}
-              className={"p-1 px-2 text-center rounded text-xs font-bold cursor-pointer transition-all bg-[#1f2229] border border-[#2d3039] text-slate-300 hover:text-white hover:bg-[#2d3039]"}
-            >
-              <span className="flex items-center justify-center gap-1">
-                <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6"/></svg>
-                西
-              </span>
-            </button>
-            <div className="flex items-center justify-center">
-              <select
-                id="nudge-step-select"
-                value={String(nudgeStep)}
-                onChange={(e) => setNudgeStep(parseFloat(e.target.value))}
-                className={`bg-transparent text-[10px] font-bold focus:outline-none cursor-pointer ${
-                  'text-emerald-400'
-                }`}
-              >
-                <option value="0.1" className={'bg-[#14161c] text-slate-200'}>0.1</option>
-                <option value="0.5" className={'bg-[#14161c] text-slate-200'}>0.5</option>
-                <option value="1.0" className={'bg-[#14161c] text-slate-200'}>1.0</option>
-              </select>
-            </div>
-            <button
-              id="nudge-right"
-              type="button"
-              title="往東平移"
-              onClick={() => onTranslateSelectedAnchors && onTranslateSelectedAnchors(nudgeStep, 0)}
-              className={"p-1 px-2 text-center rounded text-xs font-bold cursor-pointer transition-all bg-[#1f2229] border border-[#2d3039] text-slate-300 hover:text-white hover:bg-[#2d3039]"}
-            >
-              <span className="flex items-center justify-center gap-1">
-                東
-                <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6"/></svg>
-              </span>
-            </button>
-            <div></div>
-            <button
-              id="nudge-down"
-              type="button"
-              title="往南平移"
-              onClick={() => onTranslateSelectedAnchors && onTranslateSelectedAnchors(0, -nudgeStep)}
-              className={"p-1 px-2 text-center rounded text-xs font-bold cursor-pointer transition-all bg-[#1f2229] border border-[#2d3039] text-slate-300 hover:text-white hover:bg-[#2d3039]"}
-            >
-              <span className="flex items-center justify-center gap-1">
-                南
-                <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6"/></svg>
-              </span>
-            </button>
-            <div></div>
-          </div>
-          
-          <div className="flex gap-2 pt-1 font-mono text-[10px]">
-            <div className="flex-1">
-              <span className={`block text-[9px] text-slate-500`}>水平平移 (公尺)</span>
-              <input 
-                id="translate-custom-dx"
-                type="number" 
-                step="0.05" 
-                placeholder="0.0"
-                className={"w-full border rounded px-1.5 py-0.5 text-xs font-mono focus:outline-none bg-[#15171c] border-[#2d3039] text-slate-200"}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    const val = parseFloat((e.target as HTMLInputElement).value);
-                    if (!isNaN(val) && val !== 0 && onTranslateSelectedAnchors) {
-                      onTranslateSelectedAnchors(val, 0);
-                      (e.target as HTMLInputElement).value = "";
-                    }
-                  }
-                }}
-              />
-            </div>
-            <div className="flex-1">
-              <span className={`block text-[9px] text-slate-500`}>垂直平移 (公尺)</span>
-              <input 
-                id="translate-custom-dy"
-                type="number" 
-                step="0.05" 
-                placeholder="0.0"
-                className={"w-full border rounded px-1.5 py-0.5 text-xs font-mono focus:outline-none bg-[#15171c] border-[#2d3039] text-slate-200"}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    const val = parseFloat((e.target as HTMLInputElement).value);
-                    if (!isNaN(val) && val !== 0 && onTranslateSelectedAnchors) {
-                      onTranslateSelectedAnchors(0, val);
-                      (e.target as HTMLInputElement).value = "";
-                    }
-                  }
-                }}
-              />
-            </div>
-          </div>
-          <p className="text-[9px] text-slate-500 text-center italic">在數值欄位輸入後按下 Enter 可立即套用</p>
-        </div>
-      </div>
-    ) : null;
+      </Row>
+      <Row label="自訂 ΔX"><Num id="translate-custom-dx" value={nudgeDx} onChange={setNudgeDx} step={0.05} unit="m" /></Row>
+      <Row label="自訂 ΔY"><Num id="translate-custom-dy" value={nudgeDy} onChange={setNudgeDy} step={0.05} unit="m" /></Row>
+      <Actions>
+        <Btn primary disabled={!nudgeDx && !nudgeDy} onClick={() => { onTranslateSelectedAnchors(nudgeDx, nudgeDy); setNudgeDx(0); setNudgeDy(0); }}>套用平移</Btn>
+        <Btn onClick={() => onClearSelectedAnchors?.()}>取消選取節點</Btn>
+      </Actions>
+    </Section>
+  ) : null;
 
-    const getInnerProps = () => {
-      switch (selectedElement.type) {
-      case 'guideline':
-      case 'yellow_double':
-      case 'white_double':
-      case 'white_dashed':
-      case 'yellow_dashed':
-      case 'white_solid':
-      case 'reversible_lane':
-      case 'yield_line':
-      case 'stop_line':
-      case 'crossing_dashed':
-      case 'Sidewalk':
-      case 'red_solid':
-      case 'yellow_solid':
-      case 'BuildingLine': {
-        const line = selectedElement as any;
-        const lineLen = getLineElementLength(line);
-        
-        const typeLabels: Record<string, string> = {
-          guideline: '輔助線',
-          yellow_double: '分向限制線',
-          white_dashed: '車道線',
-          yellow_dashed: '分向線',
-          white_solid: '路面邊線',
-          white_double: '雙白實線',
-          reversible_lane: '調撥車道線',
-          yield_line: '讓路線',
-          stop_line: '停止線',
-          crossing_dashed: '穿越虛線',
-          Sidewalk: '人行道鋪面',
-          BuildingLine: '建築線',
-          red_solid: '禁止臨時停車線',
-          yellow_solid: '禁止停車線'
-        };
-
-        // 移動節點時一併平移其控制把手，保持曲線形狀
-        const moveAnchor = (idx: number, axis: 'x' | 'y', value: number) => {
-          if (!line.points || isNaN(value)) return;
-          const d = value - line.points[idx][axis];
-          const shift = (arr: any[] | undefined) => arr ? arr.map((p: any, i: number) => i === idx ? { ...p, [axis]: p[axis] + d } : p) : arr;
-          onSaveHistory?.();
-          onUpdateElement({
-            ...line,
-            points: shift(line.points),
-            cpLeft: shift(line.cpLeft),
-            cpRight: shift(line.cpRight),
-          });
-        };
-        const coordInput = (idx: number, axis: 'x' | 'y') => (
-          <input
-            key={`${line.id}-${idx}-${axis}-${line.points[idx][axis]}`}
-            type="number"
-            step="0.01"
-            defaultValue={Number(line.points[idx][axis].toFixed(3))}
-            onBlur={(e) => moveAnchor(idx, axis, parseFloat(e.target.value))}
-            onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
-            className="w-full bg-[#1f2229] border border-[#2d3039] px-1 py-0.5 rounded text-white text-right font-mono text-[10px] focus:outline-none focus:border-blue-500"
-          />
-        );
+  /* ---------------- 各類物件 ---------------- */
+  const renderElement = (el: CadElement): React.ReactNode => {
+    const e = el as any;
+    switch (el.type) {
+      case 'guideline': case 'yellow_double': case 'white_double': case 'white_dashed': case 'yellow_dashed':
+      case 'white_solid': case 'reversible_lane': case 'yield_line': case 'stop_line': case 'crossing_dashed':
+      case 'Sidewalk': case 'red_solid': case 'yellow_solid': case 'BuildingLine': {
+        const isBezier = !!e.points;
         const widthDefaults: Record<string, number> = {
           white_solid: MARKING_SPEC.edgeLineWidth, stop_line: MARKING_SPEC.stopLineWidth,
           red_solid: MARKING_SPEC.curbLineWidth, yellow_solid: MARKING_SPEC.curbLineWidth,
           white_dashed: MARKING_SPEC.lineWidth, yellow_dashed: MARKING_SPEC.lineWidth,
         };
-        const hasWidth = selectedElement.type in widthDefaults && !line.isLeftTurnGuide;
-        const isDashed = (selectedElement.type === 'white_dashed' || selectedElement.type === 'yellow_dashed') && !line.isLeftTurnGuide;
-        const numField = (label: string, value: number, onChange: (v: number) => void, step = 0.05, unit = 'm') => (
-          <label className="flex items-center justify-between gap-2 text-[10.5px] text-slate-400">
-            <span>{label}</span>
-            <span className="flex items-center gap-1">
-              <input
-                type="number"
-                step={step}
-                min={0.01}
-                value={value}
-                onChange={(e) => { const v = parseFloat(e.target.value); if (!isNaN(v) && v > 0) onChange(v); }}
-                className="w-16 bg-[#1f2229] border border-[#2d3039] px-1.5 py-0.5 rounded text-white text-right font-mono text-xs focus:outline-none focus:border-blue-500"
-              />
-              <span className="text-slate-500">{unit}</span>
-            </span>
-          </label>
-        );
-
-        const isBezier = !!line.points;
-
+        const dashedType = el.type === 'white_dashed' || el.type === 'yellow_dashed';
+        const hasWidth = el.type in widthDefaults && !e.isLeftTurnGuide;
+        const isDashed = dashedType && !e.isLeftTurnGuide;
+        // 移動節點時一併平移其控制把手，保持曲線形狀
+        const moveAnchor = (idx: number, axis: 'x' | 'y', value: number) => {
+          const d = value - e.points[idx][axis];
+          const shift = (arr: any[] | undefined) => arr ? arr.map((p: any, i: number) => (i === idx ? { ...p, [axis]: p[axis] + d } : p)) : arr;
+          onSaveHistory?.();
+          update({ points: shift(e.points), cpLeft: shift(e.cpLeft), cpRight: shift(e.cpRight) });
+        };
+        const last = isBezier ? e.points.length - 1 : 0;
         return (
-          <div className="space-y-4">
-            <div className="p-3 bg-[#1f2229]/40 rounded-lg border border-[#2d3039]">
-              <h4 className="text-xs font-semibold text-slate-300 mb-2 flex items-center gap-1.5">
-                {renderPropsIcon(selectedElement.type)}
-                <span>標線幾何資訊 ({isBezier ? '漸變貝茲曲線' : '直行折線'})</span>
-              </h4>
-              <div className="grid grid-cols-2 gap-x-2 gap-y-1 font-mono text-[10px] text-slate-400">
-                <span>類型:</span> <span className="text-slate-200">{typeLabels[selectedElement.type]}</span>
-                <span>設計實體長:</span> <span className="text-blue-400 font-bold">{lineLen.toFixed(2)} m</span>
-                {isBezier ? (
-                  <>
-                    <span>錨點節點數:</span> <span className="text-slate-300">{line.points.length} 點</span>
-                  </>
-                ) : (
-                  <>
-                    <span>起點 X:</span> <span className="text-slate-300">{line.p1.x.toFixed(2)} m</span>
-                    <span>起點 Y:</span> <span className="text-slate-300">{line.p1.y.toFixed(2)} m</span>
-                    <span>終點 X:</span> <span className="text-slate-300">{line.p2.x.toFixed(2)} m</span>
-                    <span>終點 Y:</span> <span className="text-slate-300">{line.p2.y.toFixed(2)} m</span>
-                  </>
-                )}
-              </div>
-              {isBezier && (
-                <div className="mt-2 pt-2 border-t border-[#2d3039] space-y-1">
-                  <div className="grid grid-cols-[40px_1fr_1fr] gap-1 items-center text-[10px] text-slate-500">
-                    <span></span><span className="text-center">X (m)</span><span className="text-center">Y (m)</span>
-                    <span>起點</span>{coordInput(0, 'x')}{coordInput(0, 'y')}
-                    <span>終點</span>{coordInput(line.points.length - 1, 'x')}{coordInput(line.points.length - 1, 'y')}
-                  </div>
-                  <p className="text-[9.5px] text-slate-500">可直接輸入座標，按 Enter 套用（控制把手會一起移動）。</p>
-                </div>
+          <>
+            <Section title="一般">
+              <Row label="類型">
+                <Select id="line-type-select" value={el.type as string} options={LINE_TYPES.map(t => [t, LINE_LABELS[t]] as [string, string])} onChange={t => { onSaveHistory?.(); update({ type: t }); }} />
+              </Row>
+              {layerRow(el)}
+            </Section>
+            <Section title="幾何">
+              <Row label="長度"><Val>{m(getLineElementLength(e))}</Val></Row>
+              {isBezier ? (
+                <>
+                  <Row label="節點數"><Val>{e.points.length}</Val></Row>
+                  <Row label="起點 X"><Num value={e.points[0].x} onChange={v => moveAnchor(0, 'x', v)} digits={3} step={0.1} unit="m" /></Row>
+                  <Row label="起點 Y"><Num value={e.points[0].y} onChange={v => moveAnchor(0, 'y', v)} digits={3} step={0.1} unit="m" /></Row>
+                  <Row label="終點 X"><Num value={e.points[last].x} onChange={v => moveAnchor(last, 'x', v)} digits={3} step={0.1} unit="m" /></Row>
+                  <Row label="終點 Y"><Num value={e.points[last].y} onChange={v => moveAnchor(last, 'y', v)} digits={3} step={0.1} unit="m" /></Row>
+                </>
+              ) : e.p1 && e.p2 && (
+                <>
+                  <Row label="起點"><Val>{e.p1.x.toFixed(3)}, {e.p1.y.toFixed(3)}</Val></Row>
+                  <Row label="終點"><Val>{e.p2.x.toFixed(3)}, {e.p2.y.toFixed(3)}</Val></Row>
+                </>
               )}
-            </div>
-
-            {(hasWidth || isDashed) && (
-              <div className="space-y-2 p-3 bg-[#1f2229]/40 border border-[#2d3039] rounded-lg">
-                <span className="text-[10.5px] font-bold text-slate-400 block">標線規格</span>
-                {hasWidth && numField('線寬', line.lineWidth ?? widthDefaults[selectedElement.type], (v) => { onSaveHistory?.(); onUpdateElement({ ...line, lineWidth: v }); }, 0.01)}
-                {isDashed && numField('實線段長', line.dashLength ?? MARKING_SPEC.laneDash[0], (v) => { onSaveHistory?.(); onUpdateElement({ ...line, dashLength: v, dashGap: line.dashGap ?? MARKING_SPEC.laneDash[1] }); }, 0.5)}
-                {isDashed && numField('間距', line.dashGap ?? MARKING_SPEC.laneDash[1], (v) => { onSaveHistory?.(); onUpdateElement({ ...line, dashGap: v, dashLength: line.dashLength ?? MARKING_SPEC.laneDash[0] }); }, 0.5)}
-                <p className="text-[9.5px] text-slate-500">預設值依設置規則常用值；不同道路等級或地方規範請自行調整。</p>
-              </div>
+            </Section>
+            {(hasWidth || dashedType) && (
+              <Section title="標線規格">
+                {hasWidth && <Row label="線寬"><Num value={e.lineWidth ?? widthDefaults[el.type]} onChange={v => update({ lineWidth: v })} min={0.01} max={1} step={0.01} unit="m" /></Row>}
+                {isDashed && <Row label="實線段長"><Num value={e.dashLength ?? MARKING_SPEC.laneDash[0]} onChange={v => update({ dashLength: v, dashGap: e.dashGap ?? MARKING_SPEC.laneDash[1] })} min={0.1} step={0.5} unit="m" /></Row>}
+                {isDashed && <Row label="間距"><Num value={e.dashGap ?? MARKING_SPEC.laneDash[1]} onChange={v => update({ dashGap: v, dashLength: e.dashLength ?? MARKING_SPEC.laneDash[0] })} min={0.1} step={0.5} unit="m" /></Row>}
+                {dashedType && <Row label="左彎導引線" title="寬 30 cm、線段 1 m、間距 2 m"><Check id="toggle-left-turn-guide" checked={!!e.isLeftTurnGuide} onChange={v => { onSaveHistory?.(); update({ isLeftTurnGuide: v }); }} label="30 cm，1 m／2 m" /></Row>}
+              </Section>
             )}
-
-            {(selectedElement.type === 'white_dashed' || selectedElement.type === 'yellow_dashed') && (
-              <div className="space-y-1.5 p-3 bg-[#1f2229]/40 border border-[#2d3039] rounded-lg">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs text-slate-400 font-medium">路口左彎導引線 (30cm寬, 1m固/2m隙)</span>
-                  <button
-                    id="toggle-left-turn-guide"
-                    onClick={() => {
-                      onSaveHistory?.();
-                      onUpdateElement({
-                        ...selectedElement,
-                        isLeftTurnGuide: !selectedElement.isLeftTurnGuide
-                      });
-                    }}
-                    className={`w-10 h-5 rounded-full p-0.5 transition-colors cursor-pointer ${
-                      selectedElement.isLeftTurnGuide ? 'bg-cyan-500' : 'bg-zinc-700'
-                    }`}
-                  >
-                    <div className={`bg-white w-4 h-4 rounded-full transition-transform ${
-                      selectedElement.isLeftTurnGuide ? 'translate-x-5' : 'translate-x-0'
-                    }`} />
-                  </button>
-                </div>
-              </div>
-            )}
-
-            <div className="space-y-2">
-              <label className="text-xs text-slate-400 block">轉換標線類型</label>
-              <div className="grid grid-cols-2 gap-1.5">
-                {['guideline', 'yellow_double', 'white_double', 'white_dashed', 'yellow_dashed', 'white_solid', 'reversible_lane', 'BuildingLine', 'yield_line', 'stop_line', 'crossing_dashed', 'Sidewalk', 'red_solid', 'yellow_solid'].map((t) => (
-                  <button
-                    key={t}
-                    id={`type-convert-${t}`}
-                    onClick={() => {
-                      onSaveHistory?.();
-                      onUpdateElement({
-                        ...selectedElement,
-                        type: t as any
-                      });
-                    }}
-                    className={`px-2 py-1.5 text-[10px] rounded border text-center transition-colors cursor-pointer ${
-                      selectedElement.type === t 
-                        ? 'bg-[#2d3039] border-blue-500/50 text-blue-400 font-medium' 
-                        : 'bg-[#1f2229] border-[#2d3039] text-slate-400 hover:text-slate-200 hover:bg-[#2d3039]'
-                    }`}
-                  >
-                    {typeLabels[t] || t}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* 偏移複製控制面板 */}
-            <div className="space-y-2 p-3 bg-[#1f2229]/40 border border-[#2d3039] rounded-lg">
-              <label className="text-[10.5px] font-bold text-slate-400 block">平行偏移複製標線 (Offset Tool)</label>
-              <div className="flex items-center gap-2 pt-1">
-                <span className="text-xs text-slate-400">間距:</span>
-                <input
-                  type="number"
-                  step="0.1"
-                  min="0.1"
-                  max="10.0"
-                  value={offsetDistance}
-                  onChange={(e) => {
-                    const val = parseFloat(e.target.value);
-                    if (!isNaN(val)) setOffsetDistance(val);
-                  }}
-                  className="w-16 bg-[#1f2229] border border-[#2d3039] px-1.5 py-0.5 rounded text-white text-right font-mono text-xs focus:outline-none focus:border-blue-500"
-                />
-                <span className="text-xs text-slate-500">m</span>
-                <button
-                  type="button"
-                  onClick={() => {
-                    handleOffsetCopy(selectedElement, -offsetDistance);
-                  }}
-                  className="px-2.5 py-1 text-[10px] bg-blue-950/40 border border-blue-500/30 text-blue-400 rounded cursor-pointer hover:bg-blue-900/40"
-                >
-                  向左偏移
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    handleOffsetCopy(selectedElement, offsetDistance);
-                  }}
-                  className="px-2.5 py-1 text-[10px] bg-blue-950/40 border border-blue-500/30 text-blue-400 rounded cursor-pointer hover:bg-blue-900/40"
-                >
-                  向右偏移
-                </button>
-              </div>
-            </div>
-
-            <button
-              id="delete-line-btn"
-              onClick={() => {
-                onSaveHistory?.();
-                onDeleteElement(selectedElement.id);
-              }}
-              className="w-full py-2 bg-red-950/20 text-red-400 border border-red-950/40 hover:bg-red-950/40 hover:text-red-300 text-xs rounded transition-colors"
-            >
-              刪除此標線段
-            </button>
-          </div>
+            {offsetSection(el)}
+            <Actions>{del()}</Actions>
+          </>
         );
       }
 
-      case 'bicycle_lane': {
-        const bl = selectedElement as any;
-        const lineLen = getLineElementLength(bl);
+      case 'bicycle_lane':
         return (
-          <div className="space-y-4">
-            <div className="p-3 bg-[#1f2229]/40 rounded-lg border border-[#2d3039]">
-              <h4 className="text-xs font-semibold text-pink-400 mb-2 flex items-center gap-1.5">
-                {renderPropsIcon(selectedElement.type)}
-                <span>腳踏車專用道 (粉紅色)</span>
-              </h4>
-              <div className="grid grid-cols-2 gap-x-2 gap-y-1 font-mono text-[10px] text-slate-400">
-                <span>類型:</span> <span className="text-slate-200">腳踏車專用道</span>
-                <span>長度 L:</span> <span className="text-blue-400 font-bold">{lineLen.toFixed(2)} m</span>
-                <span>寬度 W:</span> <span className="text-slate-250 font-medium">{(bl.width || 1.5).toFixed(1)} m</span>
-              </div>
-            </div>
-
-            <div className="space-y-1.5 pt-1">
-              <div className="flex justify-between text-xs">
-                <span className="text-slate-400">變更車道寬度</span>
-                <span className="text-pink-400 font-mono font-bold">{(bl.width || 1.5).toFixed(1)} m</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <input
-                  id="edit-bicycle-lane-width"
-                  type="range"
-                  min="0.5"
-                  max="5.0"
-                  step="0.1"
-                  value={bl.width || 1.5}
-                  onChange={(e) => {
-                    onUpdateElement({
-                      ...bl,
-                      width: parseFloat(e.target.value)
-                    });
-                  }}
-                  className="flex-1 accent-blue-500 cursor-pointer"
-                />
-                <input
-                  type="number"
-                  min="0.5"
-                  max="5.0"
-                  step="0.1"
-                  value={parseFloat((bl.width || 1.5).toFixed(1))}
-                  onChange={(e) => {
-                    let val = parseFloat(e.target.value);
-                    if (!isNaN(val)) {
-                      if (val < 0.5) val = 0.5;
-                      if (val > 5.0) val = 5.0;
-                      onUpdateElement({
-                        ...bl,
-                        width: val
-                      });
-                    }
-                  }}
-                  className="w-16 bg-[#1f2229] border border-[#2d3039] px-1 py-0.5 rounded text-white text-right focus:outline-none focus:border-blue-500 font-mono text-xs"
-                />
-              </div>
-            </div>
-
-            {/* 偏移複製控制面板 */}
-            <div className="space-y-2 p-3 bg-[#1f2229]/40 border border-[#2d3039] rounded-lg">
-              <label className="text-[10.5px] font-bold text-slate-400 block">平行偏移複製標線 (Offset Tool)</label>
-              <div className="flex items-center gap-2 pt-1">
-                <span className="text-xs text-slate-400">間距:</span>
-                <input
-                  type="number"
-                  step="0.1"
-                  min="0.1"
-                  max="10.0"
-                  value={offsetDistance}
-                  onChange={(e) => {
-                    const val = parseFloat(e.target.value);
-                    if (!isNaN(val)) setOffsetDistance(val);
-                  }}
-                  className="w-16 bg-[#1f2229] border border-[#2d3039] px-1.5 py-0.5 rounded text-white text-right font-mono text-xs focus:outline-none focus:border-blue-500"
-                />
-                <span className="text-xs text-slate-500">m</span>
-                <button
-                  type="button"
-                  onClick={() => {
-                    handleOffsetCopy(selectedElement, -offsetDistance);
-                  }}
-                  className="px-2.5 py-1 text-[10px] bg-blue-950/40 border border-blue-500/30 text-blue-400 rounded cursor-pointer hover:bg-blue-900/40"
-                >
-                  向左偏移
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    handleOffsetCopy(selectedElement, offsetDistance);
-                  }}
-                  className="px-2.5 py-1 text-[10px] bg-blue-950/40 border border-blue-500/30 text-blue-400 rounded cursor-pointer hover:bg-blue-900/40"
-                >
-                  向右偏移
-                </button>
-              </div>
-            </div>
-
-            <button
-              id="delete-bicycle-lane-btn"
-              onClick={() => {
-                onSaveHistory?.();
-                onDeleteElement(bl.id);
-              }}
-              className="w-full py-2 bg-red-950/20 text-red-400 border border-red-950/40 hover:bg-red-950/40 hover:text-red-300 text-xs rounded transition-colors"
-            >
-              刪除此腳踏車道
-            </button>
-          </div>
+          <>
+            <Section title="自行車道">
+              {layerRow(el)}
+              <Row label="長度"><Val>{m(getLineElementLength(e))}</Val></Row>
+              <Row label="寬度"><Num id="edit-bicycle-lane-width" value={e.width || 1.5} onChange={v => update({ width: v })} min={0.5} max={5} unit="m" /></Row>
+            </Section>
+            {offsetSection(el)}
+            <Actions>{del()}</Actions>
+          </>
         );
-      }
 
       case 'parking_space': {
-        const pk = selectedElement as any;
-        const width = pk.width || 2.0;
-        const length = pk.length || 5.0;
-        const slotType = pk.slotType || 'car';
-        const currentAngle = pk.angle !== undefined ? pk.angle : (pk.p2 && pk.p1 ? Math.atan2(pk.p2.y - pk.p1.y, pk.p2.x - pk.p1.x) : 0);
+        const width = e.width || 2.0, length = e.length || 5.0;
+        const slotType: 'car' | 'motorcycle' = e.slotType === 'car' || !e.slotType ? 'car' : 'motorcycle';
+        const angle = e.angle !== undefined ? e.angle : (e.p2 && e.p1 ? Math.atan2(e.p2.y - e.p1.y, e.p2.x - e.p1.x) : 0);
+        // 修改時同步更新印章預設，下一格沿用
+        const set = (patch: Record<string, any>) => {
+          update(patch);
+          if (setParkingStampConfig && parkingStampConfig) setParkingStampConfig({ ...parkingStampConfig, ...patch });
+        };
         return (
-          <div className="space-y-4">
-            <div className="p-3 bg-[#1f2229]/40 rounded-lg border border-[#2d3039]">
-              <h4 className="text-xs font-semibold text-blue-400 mb-2 flex items-center gap-1.5">
-                {renderPropsIcon(selectedElement.type)}
-                <span>機汽車停車位設定</span>
-              </h4>
-              <div className="grid grid-cols-2 gap-x-2 gap-y-1 font-mono text-[10px] text-slate-400">
-                <span>類型:</span> <span className="text-slate-200">{slotType === 'car' ? '汽車停車格' : '機車停車格'}</span>
-                <span>長度:</span> <span className="text-slate-300">{length.toFixed(1)} m</span>
-                <span>寬度:</span> <span className="text-slate-300">{width.toFixed(1)} m</span>
-                <span>線段寬度:</span> <span className="text-slate-300">10 cm</span>
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <label className="text-xs text-slate-400 block">快速車格設定</label>
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  id="preset-car"
-                  onClick={() => {
-                    onSaveHistory?.();
-                    onUpdateElement({
-                      ...pk,
-                      slotType: 'car',
-                      width: 2.5,
-                      length: 5.5
-                    });
-                  }}
-                  className={`px-2 py-2 text-[10px] rounded border text-center transition-colors cursor-pointer ${
-                    slotType === 'car'
-                      ? 'bg-blue-950/40 border-blue-500/65 text-blue-400 font-bold'
-                      : 'bg-[#1f2229] border-[#2d3039] text-slate-400'
-                  }`}
-                >
-                  汽車預設 (2.5m x 5.5m)
-                </button>
-                <button
-                  id="preset-moto"
-                  onClick={() => {
-                    onSaveHistory?.();
-                    onUpdateElement({
-                      ...pk,
-                      slotType: 'moto',
-                      width: 0.8,
-                      length: 2.0
-                    });
-                  }}
-                  className={`px-2 py-2 text-[10px] rounded border text-center transition-colors cursor-pointer ${
-                    slotType === 'moto'
-                      ? 'bg-purple-950/40 border-purple-500/65 text-purple-400 font-bold'
-                      : 'bg-[#1f2229] border-[#2d3039] text-slate-400'
-                  }`}
-                >
-                  機車預設 (0.8m x 2m)
-                </button>
-              </div>
-            </div>
-
-            <div className="space-y-1 text-xs">
-              <div className="flex justify-between">
-                <span className="text-slate-400">長度汽車5m/機車2m (m)</span>
-                <span className="text-slate-200 font-mono font-bold">{length.toFixed(1)} m</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <input
-                  id="edit-parking-length"
-                  type="range"
-                  min="1.0"
-                  max="8.0"
-                  step="0.1"
-                  value={length}
-                  onChange={(e) => {
-                    const val = parseFloat(e.target.value);
-                    onUpdateElement({
-                      ...pk,
-                      length: val
-                    });
-                    if (setParkingStampConfig && parkingStampConfig) {
-                      setParkingStampConfig({
-                        ...parkingStampConfig,
-                        length: val
-                      });
-                    }
-                  }}
-                  className="flex-1 accent-blue-500 cursor-pointer"
-                />
-                <input
-                  type="number"
-                  min="1.0"
-                  max="8.0"
-                  step="0.1"
-                  value={parseFloat(length.toFixed(1))}
-                  onChange={(e) => {
-                    let val = parseFloat(e.target.value);
-                    if (!isNaN(val)) {
-                      if (val < 1.0) val = 1.0;
-                      if (val > 8.0) val = 8.0;
-                      onUpdateElement({
-                        ...pk,
-                        length: val
-                      });
-                      if (setParkingStampConfig && parkingStampConfig) {
-                        setParkingStampConfig({
-                          ...parkingStampConfig,
-                          length: val
-                        });
-                      }
-                    }
-                  }}
-                  className="w-16 bg-[#1f2229] border border-[#2d3039] px-1 py-0.5 rounded text-white text-right focus:outline-none focus:border-blue-500 font-mono text-xs"
-                />
-              </div>
-            </div>
-
-            <div className="space-y-1 text-xs">
-              <div className="flex justify-between">
-                <span className="text-slate-400">寬度汽車2m/機車0.8m (m)</span>
-                <span className="text-slate-200 font-mono font-bold">{width.toFixed(1)} m</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <input
-                  id="edit-parking-width"
-                  type="range"
-                  min="0.4"
-                  max="4.0"
-                  step="0.1"
-                  value={width}
-                  onChange={(e) => {
-                    const val = parseFloat(e.target.value);
-                    onUpdateElement({
-                      ...pk,
-                      width: val
-                    });
-                    if (setParkingStampConfig && parkingStampConfig) {
-                      setParkingStampConfig({
-                        ...parkingStampConfig,
-                        width: val
-                      });
-                    }
-                  }}
-                  className="flex-1 accent-blue-500 cursor-pointer"
-                />
-                <input
-                  type="number"
-                  min="0.4"
-                  max="4.0"
-                  step="0.1"
-                  value={parseFloat(width.toFixed(1))}
-                  onChange={(e) => {
-                    let val = parseFloat(e.target.value);
-                    if (!isNaN(val)) {
-                      if (val < 0.4) val = 0.4;
-                      if (val > 4.0) val = 4.0;
-                      onUpdateElement({
-                        ...pk,
-                        width: val
-                      });
-                      if (setParkingStampConfig && parkingStampConfig) {
-                        setParkingStampConfig({
-                          ...parkingStampConfig,
-                          width: val
-                        });
-                      }
-                    }
-                  }}
-                  className="w-16 bg-[#1f2229] border border-[#2d3039] px-1 py-0.5 rounded text-white text-right focus:outline-none focus:border-blue-500 font-mono text-xs"
-                />
-              </div>
-            </div>
-
-            <div className="space-y-1 text-xs">
-              <div className="flex justify-between">
-                <span className="text-slate-400">車位角度 (度)</span>
-                <span className="text-slate-200 font-mono font-bold">
-                  {Math.round((currentAngle * 180) / Math.PI)}°
-                </span>
-              </div>
-              <div className="flex items-center gap-2">
-                <input
-                  id="edit-parking-angle"
-                  type="range"
-                  min="-180"
-                  max="180"
-                  step="1"
-                  value={Math.round((currentAngle * 180) / Math.PI)}
-                  onChange={(e) => {
-                    const rad = (parseFloat(e.target.value) * Math.PI) / 180;
-                    onUpdateElement({
-                      ...pk,
-                      angle: rad
-                    });
-                    if (setParkingStampConfig && parkingStampConfig) {
-                      setParkingStampConfig({
-                        ...parkingStampConfig,
-                        angle: rad
-                      });
-                    }
-                  }}
-                  className="flex-1 accent-blue-500 cursor-pointer"
-                />
-                <input
-                  type="number"
-                  min="-180"
-                  max="180"
-                  step="1"
-                  value={Math.round((currentAngle * 180) / Math.PI)}
-                  onChange={(e) => {
-                    let val = parseFloat(e.target.value);
-                    if (!isNaN(val)) {
-                      if (val < -180) val = -180;
-                      if (val > 180) val = 180;
-                      const rad = (val * Math.PI) / 180;
-                      onUpdateElement({
-                        ...pk,
-                        angle: rad
-                      });
-                      if (setParkingStampConfig && parkingStampConfig) {
-                        setParkingStampConfig({
-                          ...parkingStampConfig,
-                          angle: rad
-                        });
-                      }
-                    }
-                  }}
-                  className="w-16 bg-[#1f2229] border border-[#2d3039] px-1 py-0.5 rounded text-white text-right focus:outline-none focus:border-blue-500 font-mono text-xs"
-                />
-              </div>
-            </div>
-
-            <div className="space-y-1.5 p-3 bg-[#1f2229]/40 border border-[#2d3039] rounded-lg">
-              <div className="flex items-center justify-between">
-                <span className="text-xs text-slate-400 font-medium">顯示車格尺寸標籤</span>
-                <button
-                  type="button"
-                  onClick={() => {
-                    onUpdateElement({
-                      ...pk,
-                      showSizeLabel: pk.showSizeLabel === false ? true : false
-                    });
-                  }}
-                  className={`w-10 h-5 rounded-full p-0.5 transition-colors cursor-pointer ${
-                    pk.showSizeLabel !== false ? 'bg-cyan-500' : 'bg-zinc-700'
-                  }`}
-                >
-                  <div className={`bg-white w-4 h-4 rounded-full transition-transform ${
-                    pk.showSizeLabel !== false ? 'translate-x-5' : 'translate-x-0'
-                  }`} />
-                </button>
-              </div>
-            </div>
-
-            <button
-              id="delete-parking-space-btn"
-              onClick={() => {
-                onSaveHistory?.();
-                onDeleteElement(pk.id);
-              }}
-              className="w-full py-2 bg-red-950/20 text-red-400 border border-red-950/40 hover:bg-red-950/40 hover:text-red-300 text-xs rounded transition-colors"
-            >
-              刪除此停車格
-            </button>
-          </div>
+          <>
+            <Section title="停車格">
+              {layerRow(el)}
+              <Row label="類型"><Seg value={slotType} options={SLOT_TYPES} onChange={t => set(slotPreset(t))} /></Row>
+              <Row label="長度"><Num id="edit-parking-length" value={length} onChange={v => set({ length: v })} min={1} max={8} unit="m" /></Row>
+              <Row label="寬度"><Num id="edit-parking-width" value={width} onChange={v => set({ width: v })} min={0.4} max={4} unit="m" /></Row>
+              <Row label="角度"><Num id="edit-parking-angle" value={deg(angle)} onChange={v => set({ angle: rad(v) })} min={-180} max={180} step={5} digits={0} unit="°" /></Row>
+              <Row label="尺寸標籤"><Check checked={e.showSizeLabel !== false} onChange={v => update({ showSizeLabel: v })} label="顯示" /></Row>
+            </Section>
+            <Actions>{del()}</Actions>
+          </>
         );
       }
 
       case 'parking_zone': {
-        const zone = selectedElement as any;
-        const width = zone.width || 2.0;
-        const length = zone.length || 5.0;
-        const slotType = zone.slotType || 'car';
-        const angle = zone.angle !== undefined ? zone.angle : 90;
-        const gap = zone.gap !== undefined ? zone.gap : 0.2;
-        const side = zone.side || 'right';
-        
-        const lineLen = getLineElementLength(zone);
         let slotCount = 0;
-        try {
-          slotCount = generateParkingZoneSlots(zone).length;
-        } catch (err) {
-          console.warn("Failed to generate slots for counting", err);
-        }
-
+        try { slotCount = generateParkingZoneSlots(e).length; } catch { /* 路徑不完整時不計 */ }
+        const slotType: 'car' | 'motorcycle' = e.slotType === 'motorcycle' ? 'motorcycle' : 'car';
         return (
-          <div className="space-y-4">
-            <div className="p-3 bg-[#1f2229]/40 rounded-lg border border-[#2d3039]">
-              <h4 className="text-xs font-semibold text-cyan-400 mb-2 flex items-center gap-1.5">
-                {renderPropsIcon(selectedElement.type)}
-                <span>停車區路徑設定</span>
-              </h4>
-              <div className="grid grid-cols-2 gap-x-2 gap-y-1 font-mono text-[10px] text-slate-400">
-                <span>類型:</span> <span className="text-slate-200">{slotType === 'car' ? '汽車停車區' : '機車停車區'}</span>
-                <span>路徑長度:</span> <span className="text-blue-400 font-bold">{lineLen.toFixed(2)} m</span>
-                <span>車格數量:</span> <span className="text-cyan-400 font-bold">{slotCount} 格</span>
-                <span>車格寬度:</span> <span className="text-slate-300">{width.toFixed(1)} m</span>
-                <span>車格長度:</span> <span className="text-slate-300">{length.toFixed(1)} m</span>
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <label className="text-xs text-slate-400 block">快速車格設定</label>
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    onSaveHistory?.();
-                    onUpdateElement({
-                      ...zone,
-                      slotType: 'car',
-                      width: 2.5,
-                      length: 5.5
-                    });
-                  }}
-                  className={`px-2 py-2 text-[10px] rounded border text-center cursor-pointer transition-colors ${
-                    slotType === 'car'
-                      ? 'bg-blue-950/40 border-blue-500/65 text-blue-400 font-bold'
-                      : 'bg-[#1f2229] border-[#2d3039] text-slate-400'
-                  }`}
-                >
-                  汽車預設 (2.5m x 5.5m)
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    onSaveHistory?.();
-                    onUpdateElement({
-                      ...zone,
-                      slotType: 'motorcycle',
-                      width: 0.8,
-                      length: 2.0
-                    });
-                  }}
-                  className={`px-2 py-2 text-[10px] rounded border text-center cursor-pointer transition-colors ${
-                    slotType === 'motorcycle'
-                      ? 'bg-purple-950/40 border-purple-500/65 text-purple-400 font-bold'
-                      : 'bg-[#1f2229] border-[#2d3039] text-slate-400'
-                  }`}
-                >
-                  機車預設 (0.8m x 2m)
-                </button>
-              </div>
-            </div>
-
-            <div className="space-y-1 text-xs">
-              <div className="flex justify-between">
-                <span className="text-slate-400">長度 (m)</span>
-                <span className="text-slate-200 font-mono font-bold">{length.toFixed(1)} m</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <input
-                  type="range"
-                  min="1.0"
-                  max="8.0"
-                  step="0.1"
-                  value={length}
-                  onChange={(e) => {
-                    onUpdateElement({
-                      ...zone,
-                      length: parseFloat(e.target.value)
-                    });
-                  }}
-                  className="w-full accent-blue-500 cursor-pointer flex-1"
-                />
-                <input
-                  type="number"
-                  min="1.0"
-                  max="8.0"
-                  step="0.1"
-                  value={parseFloat(length.toFixed(1))}
-                  onChange={(e) => {
-                    let val = parseFloat(e.target.value);
-                    if (!isNaN(val)) {
-                      if (val < 1.0) val = 1.0;
-                      if (val > 8.0) val = 8.0;
-                      onUpdateElement({
-                        ...zone,
-                        length: val
-                      });
-                    }
-                  }}
-                  className="w-16 bg-[#1f2229] border border-[#2d3039] px-1 py-0.5 rounded text-white text-right focus:outline-none focus:border-blue-500 font-mono text-xs"
-                />
-              </div>
-            </div>
-
-            <div className="space-y-1 text-xs">
-              <div className="flex justify-between">
-                <span className="text-slate-400">寬度 (m)</span>
-                <span className="text-slate-200 font-mono font-bold">{width.toFixed(1)} m</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <input
-                  type="range"
-                  min="0.4"
-                  max="4.0"
-                  step="0.1"
-                  value={width}
-                  onChange={(e) => {
-                    onUpdateElement({
-                      ...zone,
-                      width: parseFloat(e.target.value)
-                    });
-                  }}
-                  className="w-full accent-blue-500 cursor-pointer flex-1"
-                />
-                <input
-                  type="number"
-                  min="0.4"
-                  max="4.0"
-                  step="0.1"
-                  value={parseFloat(width.toFixed(1))}
-                  onChange={(e) => {
-                    let val = parseFloat(e.target.value);
-                    if (!isNaN(val)) {
-                      if (val < 0.4) val = 0.4;
-                      if (val > 4.0) val = 4.0;
-                      onUpdateElement({
-                        ...zone,
-                        width: val
-                      });
-                    }
-                  }}
-                  className="w-16 bg-[#1f2229] border border-[#2d3039] px-1 py-0.5 rounded text-white text-right focus:outline-none focus:border-blue-500 font-mono text-xs"
-                />
-              </div>
-            </div>
-
-            <div className="space-y-1 text-xs">
-              <div className="flex justify-between">
-                <span className="text-slate-400">相對切線偏角 (度)</span>
-                <span className="text-slate-200 font-mono font-bold">{angle}°</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <input
-                  type="range"
-                  min="-180"
-                  max="180"
-                  step="5"
-                  value={angle}
-                  onChange={(e) => {
-                    onUpdateElement({
-                      ...zone,
-                      angle: parseInt(e.target.value)
-                    });
-                  }}
-                  className="w-full accent-blue-500 cursor-pointer flex-1"
-                />
-                <input
-                  type="number"
-                  min="-180"
-                  max="180"
-                  step="1"
-                  value={angle}
-                  onChange={(e) => {
-                    let val = parseFloat(e.target.value);
-                    if (!isNaN(val)) {
-                      if (val < -180) val = -180;
-                      if (val > 180) val = 180;
-                      onUpdateElement({
-                        ...zone,
-                        angle: val
-                      });
-                    }
-                  }}
-                  className="w-16 bg-[#1f2229] border border-[#2d3039] px-1 py-0.5 rounded text-white text-right focus:outline-none focus:border-blue-500 font-mono text-xs"
-                />
-              </div>
-            </div>
-
-            <div className="space-y-1 text-xs">
-              <div className="flex justify-between">
-                <span className="text-slate-400">車格間距 (m)</span>
-                <span className="text-slate-200 font-mono font-bold">{gap.toFixed(1)} m</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <input
-                  type="range"
-                  min="0.0"
-                  max="3.0"
-                  step="0.1"
-                  value={gap}
-                  onChange={(e) => {
-                    onUpdateElement({
-                      ...zone,
-                      gap: parseFloat(e.target.value)
-                    });
-                  }}
-                  className="w-full accent-blue-500 cursor-pointer flex-1"
-                />
-                <input
-                  type="number"
-                  min="0.0"
-                  max="3.0"
-                  step="0.1"
-                  value={parseFloat(gap.toFixed(1))}
-                  onChange={(e) => {
-                    let val = parseFloat(e.target.value);
-                    if (!isNaN(val)) {
-                      if (val < 0.0) val = 0.0;
-                      if (val > 3.0) val = 3.0;
-                      onUpdateElement({
-                        ...zone,
-                        gap: val
-                      });
-                    }
-                  }}
-                  className="w-16 bg-[#1f2229] border border-[#2d3039] px-1 py-0.5 rounded text-white text-right focus:outline-none focus:border-blue-500 font-mono text-xs"
-                />
-              </div>
-            </div>
-
-            <div className="space-y-1.5 p-3 bg-[#1f2229]/40 border border-[#2d3039] rounded-lg">
-              <div className="flex items-center justify-between">
-                <span className="text-xs text-slate-400 font-medium">配置於路徑左側</span>
-                <button
-                  type="button"
-                  onClick={() => {
-                    onSaveHistory?.();
-                    onUpdateElement({
-                      ...zone,
-                      side: side === 'right' ? 'left' : 'right'
-                    });
-                  }}
-                  className={`w-10 h-5 rounded-full p-0.5 transition-colors cursor-pointer ${
-                    side === 'left' ? 'bg-cyan-500' : 'bg-zinc-700'
-                  }`}
-                >
-                  <div className={`bg-white w-4 h-4 rounded-full transition-transform ${
-                    side === 'left' ? 'translate-x-5' : 'translate-x-0'
-                  }`} />
-                </button>
-              </div>
-            </div>
-
-            <div className="space-y-1.5 p-3 bg-[#1f2229]/40 border border-[#2d3039] rounded-lg">
-              <div className="flex items-center justify-between">
-                <span className="text-xs text-slate-400 font-medium">顯示車格尺寸標籤</span>
-                <button
-                  type="button"
-                  onClick={() => {
-                    onUpdateElement({
-                      ...zone,
-                      showSizeLabel: zone.showSizeLabel === false ? true : false
-                    });
-                  }}
-                  className={`w-10 h-5 rounded-full p-0.5 transition-colors cursor-pointer ${
-                    zone.showSizeLabel !== false ? 'bg-cyan-500' : 'bg-zinc-700'
-                  }`}
-                >
-                  <div className={`bg-white w-4 h-4 rounded-full transition-transform ${
-                    zone.showSizeLabel !== false ? 'translate-x-5' : 'translate-x-0'
-                  }`} />
-                </button>
-              </div>
-            </div>
-
-            <button
-              type="button"
-              id="delete-parking-zone-btn"
-              onClick={() => {
-                onSaveHistory?.();
-                onDeleteElement(zone.id);
-              }}
-              className="w-full py-2 bg-red-950/20 text-red-400 border border-red-950/40 hover:bg-red-950/40 hover:text-red-300 text-xs rounded transition-colors"
-            >
-              刪除此停車區
-            </button>
-          </div>
+          <>
+            <Section title="停車區">
+              {layerRow(el)}
+              <Row label="路徑長度"><Val>{m(getLineElementLength(e))}</Val></Row>
+              <Row label="車格數"><Val>{slotCount} 格</Val></Row>
+              <Row label="類型"><Seg value={slotType} options={SLOT_TYPES} onChange={t => update(slotPreset(t))} /></Row>
+              <Row label="車格長度"><Num value={e.length || 5} onChange={v => update({ length: v })} min={1} max={8} unit="m" /></Row>
+              <Row label="車格寬度"><Num value={e.width || 2} onChange={v => update({ width: v })} min={0.4} max={4} unit="m" /></Row>
+              <Row label="相對切線角度"><Num value={e.angle ?? 90} onChange={v => update({ angle: v })} min={-180} max={180} step={5} digits={0} unit="°" /></Row>
+              <Row label="車格間距"><Num value={e.gap ?? 0.2} onChange={v => update({ gap: v })} min={0} max={3} unit="m" /></Row>
+              <Row label="配置側"><Seg value={e.side || 'right'} options={[['right', '路徑右側'], ['left', '路徑左側']]} onChange={v => update({ side: v })} /></Row>
+              <Row label="尺寸標籤"><Check checked={e.showSizeLabel !== false} onChange={v => update({ showSizeLabel: v })} label="顯示" /></Row>
+            </Section>
+            <Actions>{del()}</Actions>
+          </>
         );
       }
 
-      case 'sketch_circle': {
-        const circ = selectedElement as any;
+      case 'sketch_circle':
         return (
-          <div className="space-y-4">
-            <div className="p-3 bg-[#1f2229]/40 rounded-lg border border-[#2d3039] space-y-2">
-              <h4 className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
-                {renderPropsIcon(selectedElement.type)}
-                <span>圓形草稿輔助線</span>
-              </h4>
-              <div className="grid grid-cols-2 gap-x-2 gap-y-1 font-mono text-[10px] text-slate-400">
-                <span>類型:</span> <span className="text-slate-200">圓形輔助</span>
-                <span>圓心 X:</span> <span className="text-slate-300">{circ.center.x.toFixed(2)} m</span>
-                <span>圓心 Y:</span> <span className="text-slate-300">{circ.center.y.toFixed(2)} m</span>
-                <span>圓直徑 D:</span> <span className="text-slate-350">{(circ.radius * 2).toFixed(2)} m</span>
-                <span>面積 A:</span> <span className="text-slate-350">{(Math.PI * circ.radius * circ.radius).toFixed(1)} m²</span>
-              </div>
-            </div>
-
-            <div className="space-y-1.5 pt-1">
-              <div className="flex justify-between text-xs">
-                <span className="text-slate-400">變更圓半徑大小</span>
-                <span className="text-blue-400 font-mono font-bold">{circ.radius.toFixed(1)} m</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <input
-                  id="edit-circle-radius"
-                  type="range"
-                  min="0.5"
-                  max="40.0"
-                  step="0.5"
-                  value={circ.radius}
-                  onChange={(e) => {
-                    onUpdateElement({
-                      ...circ,
-                      radius: parseFloat(e.target.value)
-                    });
-                  }}
-                  className="flex-1 accent-blue-500 cursor-pointer"
-                />
-                <input
-                  type="number"
-                  min="0.5"
-                  max="40.0"
-                  step="0.5"
-                  value={parseFloat(circ.radius.toFixed(1))}
-                  onChange={(e) => {
-                    let val = parseFloat(e.target.value);
-                    if (!isNaN(val)) {
-                      if (val < 0.5) val = 0.5;
-                      if (val > 40.0) val = 40.0;
-                      onUpdateElement({
-                        ...circ,
-                        radius: val
-                      });
-                    }
-                  }}
-                  className="w-16 bg-[#1f2229] border border-[#2d3039] px-1 py-0.5 rounded text-white text-right focus:outline-none focus:border-blue-500 font-mono text-xs"
-                />
-              </div>
-            </div>
-
-            <button
-              id="delete-circle-btn"
-              onClick={() => {
-                onSaveHistory?.();
-                onDeleteElement(circ.id);
-              }}
-              className="w-full py-2 bg-red-950/20 text-red-400 border border-red-950/40 hover:bg-red-950/40 hover:text-red-300 text-xs rounded transition-colors"
-            >
-              刪除此草稿圓
-            </button>
-          </div>
+          <>
+            <Section title="輔助圓">
+              <Row label="圓心"><Val>{e.center.x.toFixed(3)}, {e.center.y.toFixed(3)}</Val></Row>
+              <Row label="半徑"><Num id="edit-circle-radius" value={e.radius} onChange={v => update({ radius: v })} min={0.1} max={200} step={0.5} unit="m" /></Row>
+              <Row label="直徑"><Val>{m(e.radius * 2)}</Val></Row>
+            </Section>
+            <Note>輔助圓不會輸出到工程圖（除非勾選「輔助線／輔助圓」）。</Note>
+            <Actions>{del()}</Actions>
+          </>
         );
-      }
 
       case 'three_center_curve': {
-        const curve = selectedElement as ThreeCenterCurveElement;
-        const curveSuggestedWidth = calculateWidening(curve.R2, designVehicle);
-        
+        const curve = el as ThreeCenterCurveElement;
         return (
-          <div className="space-y-4">
-            <div className="p-3 bg-[#1f2229]/40 rounded-lg border border-[#2d3039] space-y-2">
-              <h4 className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
-                {renderPropsIcon(selectedElement.type)}
-                <span>三心曲線參數</span>
-              </h4>
-              <div className="grid grid-cols-2 gap-x-2 gap-y-1 font-mono text-[10px] text-slate-400">
-                <span>主半徑 R2:</span> <span className="text-blue-400 font-bold">{curve.R2.toFixed(1)} m</span>
-                <span>漸變 R1 (3R2):</span> <span>{curve.R1.toFixed(1)} m</span>
-                <span>漸變 R3 (3R2):</span> <span>{curve.R3.toFixed(1)} m</span>
-                <span>圓弧取樣點:</span> <span>{curve.points.length} 點</span>
-              </div>
-            </div>
-
-            <div className="p-4 bg-blue-500/5 rounded-xl border border-blue-500/10 space-y-3">
-              <div className="flex items-center justify-between">
-                <span className="text-xs text-blue-400 font-bold uppercase tracking-wider">路幅加寬規範</span>
-                <span className="text-[10px] bg-blue-500/10 text-blue-400 border border-blue-500/30 px-1.5 py-0.5 rounded font-mono">
-                  寬度擴充
-                </span>
-              </div>
-              <p className="text-[10px] text-slate-400 leading-normal">
-                依據主彎道 <strong className="text-slate-200">{curve.R2}m</strong> 及當前選擇的
-                <strong className="text-slate-200">「{DESIGN_VEHICLE_LABELS[designVehicle]}」</strong>
-                ，導流車道安全淨寬 w 應為：
-              </p>
-              <p className="text-[9.5px] text-slate-500 leading-snug">
-                加寬值取自內建參考表（近似日本與台灣路口設計資料），送審前請依《公路路線設計規範》或《市區道路及附屬工程設計規範》之設計車輛轉彎資料核對。
-              </p>
-              <div className="text-center py-2 bg-blue-950/20 rounded border border-blue-900/30">
-                <span className="text-xs text-slate-400">建議導流路幅寬</span>
-                <div className="text-xl font-mono font-bold text-blue-400">{curveSuggestedWidth.toFixed(2)} 實體米</div>
-              </div>
-
-              <button
-                id="btn-offset-island"
-                onClick={() => {
-                  onSaveHistory?.();
-                  onGenerateIslandFromCurve(curve);
-                }}
-                className="w-full flex items-center justify-center gap-2 py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-medium text-xs rounded shadow-lg shadow-blue-500/20 transition-all uppercase tracking-wider cursor-pointer font-bold"
-              >
-                <Triangle className="w-3.5 h-3.5" />
-                <span>一鍵生成導流島</span>
-              </button>
-            </div>
-
-            <button
-              id="delete-curve-btn"
-              onClick={() => {
-                onSaveHistory?.();
-                onDeleteElement(selectedElement.id);
-              }}
-              className="w-full py-1.5 bg-red-950/20 text-red-400 border border-red-950/40 hover:bg-red-950/40 text-xs rounded transition-colors"
-            >
-              刪除三心曲線
-            </button>
-          </div>
+          <>
+            <Section title="三心曲線">
+              <Row label="主半徑 R2"><Val>{m(curve.R2, 1)}</Val></Row>
+              <Row label="漸變 R1"><Val>{m(curve.R1, 1)}</Val></Row>
+              <Row label="漸變 R3"><Val>{m(curve.R3, 1)}</Val></Row>
+              <Row label="取樣點"><Val>{curve.points.length}</Val></Row>
+            </Section>
+            <Section title="導流路幅">
+              <Row label="設計車種"><Val>{DESIGN_VEHICLE_LABELS[designVehicle]}</Val></Row>
+              <Row label="建議路幅寬"><Val>{m(calculateWidening(curve.R2, designVehicle))}</Val></Row>
+              <Note>加寬值取自內建參考表，送審前請依《公路路線設計規範》或《市區道路及附屬工程設計規範》核對。</Note>
+            </Section>
+            <Actions>
+              <Btn primary id="btn-offset-island" onClick={() => { onSaveHistory?.(); onGenerateIslandFromCurve(curve); }}>產生導流島</Btn>
+              {del()}
+            </Actions>
+          </>
         );
       }
 
       case 'island': {
-        const island = selectedElement as IslandElement;
+        const island = el as IslandElement;
+        const isGrid = island.hatchPattern === 'cross';
         return (
-          <div className="space-y-4">
-            <div className="p-3 bg-[#1f2229]/40 rounded-lg border border-[#2d3039] space-y-2">
-              <h4 className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
-                {renderPropsIcon(selectedElement.type)}
-                <span>{island.hatchPattern === 'cross' ? '網狀線' : '槽化線（導流島）'}</span>
-              </h4>
-              <div className="grid grid-cols-2 gap-x-2 gap-y-1 font-mono text-[10px] text-slate-400">
-                <span>建議車道寬 w:</span> <span className="text-blue-400 font-bold">{(island.laneWidth ?? 0).toFixed(2)} m</span>
-                <span>設計車種:</span> <span>{DESIGN_VEHICLE_LABELS[island.designVehicle] || '—'}</span>
-                <span>封閉多邊形:</span> <span>{island.points.length} 節點</span>
-                <span>槽化線斜線:</span> <span className={island.hasHatching ? 'text-amber-500 font-semibold' : 'text-slate-500'}>{island.hasHatching ? '開啟' : '關閉'}</span>
-              </div>
-            </div>
-
-            <div className="p-3 bg-[#1f2229]/40 rounded-lg border border-[#2d3039] space-y-2">
-              <label className="text-xs text-slate-400 block font-semibold">槽化島線色設定</label>
-              <div className="flex gap-2">
-                {[
-                  { name: '法規白色', value: '#ffffff' },
-                  { name: '槽化黃色', value: '#FFCC00' }
-                ].map((colorOpt) => (
-                  <button
-                    key={colorOpt.value}
-                    onClick={() => {
-                      onSaveHistory?.();
-                      onUpdateElement({
-                        ...island,
-                        color: colorOpt.value
-                      });
-                    }}
-                    className={`flex-1 py-1.5 text-[10px] rounded border text-center transition-colors cursor-pointer ${
-                      (island.color || '#ffffff') === colorOpt.value
-                        ? 'bg-[#2d3039] border-blue-500/50 text-blue-400 font-medium'
-                        : 'bg-[#1f2229] border-[#2d3039] text-slate-400'
-                    }`}
-                  >
-                    {colorOpt.name}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="p-3 bg-[#1f2229]/40 rounded-lg border border-[#2d3039] space-y-3">
-              <div className="flex items-center justify-between">
-                <label className="text-xs text-slate-400">槽化線填充</label>
-                <button
-                  id="toggle-hatching-btn"
-                  onClick={() => {
-                    onSaveHistory?.();
-                    onUpdateElement({
-                      ...island,
-                      hasHatching: !island.hasHatching
-                    });
-                  }}
-                  className={`w-10 h-5 rounded-full p-0.5 transition-colors cursor-pointer ${
-                    island.hasHatching ? 'bg-cyan-500' : 'bg-zinc-700'
-                  }`}
-                >
-                  <div className={`bg-white w-4 h-4 rounded-full transition-transform ${
-                    island.hasHatching ? 'translate-x-5' : 'translate-x-0'
-                  }`} />
-                </button>
-              </div>
-
-              {island.hasHatching && (
-                <div className="space-y-2">
-                  {[
-                    { label: '斜紋間距', key: 'hatchSpacing', value: island.hatchSpacing ?? (island.hatchPattern === 'cross' ? MARKING_SPEC.gridSpacing : MARKING_SPEC.hatchSpacing), step: 0.05, unit: 'm' },
-                    { label: '斜紋角度', key: 'hatchAngle', value: island.hatchAngle ?? MARKING_SPEC.hatchAngle, step: 5, unit: '°' },
-                  ].map(f => (
-                    <label key={f.key} className="flex items-center justify-between text-[10.5px] text-slate-400">
-                      <span>{f.label}</span>
-                      <span className="flex items-center gap-1">
-                        <input
-                          type="number"
-                          step={f.step}
-                          value={f.value}
-                          onChange={(e) => {
-                            const v = parseFloat(e.target.value);
-                            if (isNaN(v) || (f.key === 'hatchSpacing' && v < 0.1)) return;
-                            onUpdateElement({ ...island, [f.key]: v } as any);
-                          }}
-                          className="w-16 bg-[#1f2229] border border-[#2d3039] px-1.5 py-0.5 rounded text-white text-right font-mono text-xs focus:outline-none focus:border-blue-500"
-                        />
-                        <span className="text-slate-500 w-3">{f.unit}</span>
-                      </span>
-                    </label>
-                  ))}
-                  <p className="text-[10px] text-slate-500 leading-snug">
-                    畫面、PNG、DXF 皆使用相同的間距與角度。預設值沿用原設定，實際線寬與間距請依《道路交通標誌標線號誌設置規則》最新條文核對。
-                  </p>
-                </div>
+          <>
+            <Section title={isGrid ? '網狀線' : '槽化線'}>
+              {layerRow(el)}
+              <Row label="節點數"><Val>{island.points.length}</Val></Row>
+              {!isGrid && <Row label="顏色"><Seg value={(island.color || '#ffffff').toLowerCase() === '#ffffff' ? 'white' : 'yellow'} options={[['white', '白（同向分隔）'], ['yellow', '黃（對向分隔）']]} onChange={v => update({ color: v === 'white' ? '#ffffff' : '#FFCC00' })} /></Row>}
+              {island.laneWidth ? <Row label="建議車道寬"><Val>{m(island.laneWidth)}</Val></Row> : null}
+              {island.designVehicle && <Row label="設計車種"><Val>{DESIGN_VEHICLE_LABELS[island.designVehicle] || '—'}</Val></Row>}
+            </Section>
+            <Section title="斜紋">
+              <Row label="填入斜紋"><Check id="toggle-hatching-btn" checked={island.hasHatching !== false} onChange={v => update({ hasHatching: v })} label="顯示" /></Row>
+              {island.hasHatching !== false && (
+                <>
+                  <Row label="間距"><Num value={island.hatchSpacing ?? (isGrid ? MARKING_SPEC.gridSpacing : MARKING_SPEC.hatchSpacing)} onChange={v => update({ hatchSpacing: v })} min={0.1} max={10} step={0.05} unit="m" /></Row>
+                  <Row label="角度"><Num value={island.hatchAngle ?? MARKING_SPEC.hatchAngle} onChange={v => update({ hatchAngle: v })} min={-180} max={180} step={5} digits={0} unit="°" /></Row>
+                </>
               )}
-            </div>
-
-            <button
-              id="delete-island-btn"
-              onClick={() => {
-                onSaveHistory?.();
-                onDeleteElement(selectedElement.id);
-              }}
-              className="w-full py-2 bg-red-950/20 text-red-400 border border-red-950/40 hover:bg-red-950/40 text-xs rounded transition-colors"
-            >
-              {island.hatchPattern === 'cross' ? '刪除此網狀線' : '刪除此槽化線'}
-            </button>
-          </div>
+            </Section>
+            <Actions>{del()}</Actions>
+          </>
         );
       }
 
       case 'text': {
-        const txt = selectedElement as TextElement;
+        const txt = el as TextElement;
         return (
-          <div className="space-y-4">
-            <div className="p-3 bg-[#1f2229]/40 rounded-lg border border-[#2d3039] space-y-2">
-              <h4 className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
-                {renderPropsIcon(selectedElement.type)}
-                <span>文字標記內容設定</span>
-              </h4>
-              <div className="grid grid-cols-2 gap-x-2 gap-y-1 font-mono text-[10px] text-slate-400">
-                <span>類型:</span> <span className="text-slate-200">文字標記</span>
-                <span>內容:</span> <span className="text-blue-400 font-bold truncate max-w-[120px]">{txt.text || "(未命名)"}</span>
-              </div>
-            </div>
-            <div className="space-y-1.5">
-              <label className="text-xs text-slate-400">工程標記文字</label>
-              <input
-                id="edit-text-input"
-                type="text"
-                value={txt.text}
-                onChange={(e) => {
-                  onUpdateElement({
-                    ...txt,
-                    text: e.target.value
-                  });
-                }}
-                className="w-full bg-[#1f2229] border border-[#2d3039] px-3 py-2 text-xs rounded text-white focus:outline-none focus:border-blue-500"
-              />
-            </div>
-
-            <div className="space-y-1.5">
-              <div className="flex justify-between text-xs">
-                <span className="text-slate-400">文字高度尺寸 (m)</span>
-                <span className="text-blue-400 font-mono">{txt.fontSize.toFixed(1)}m</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <input
-                  id="edit-text-size"
-                  type="range"
-                  min="0.5"
-                  max="5.0"
-                  step="0.1"
-                  value={txt.fontSize}
-                  onChange={(e) => {
-                    onUpdateElement({
-                      ...txt,
-                      fontSize: parseFloat(e.target.value)
-                    });
-                  }}
-                  className="flex-1 accent-blue-500 cursor-pointer"
-                />
-                <input
-                  type="number"
-                  min="0.5"
-                  max="5.0"
-                  step="0.1"
-                  value={parseFloat(txt.fontSize.toFixed(1))}
-                  onChange={(e) => {
-                    let val = parseFloat(e.target.value);
-                    if (!isNaN(val)) {
-                      if (val < 0.5) val = 0.5;
-                      if (val > 5.0) val = 5.0;
-                      onUpdateElement({
-                        ...txt,
-                        fontSize: val
-                      });
-                    }
-                  }}
-                  className="w-16 bg-[#1f2229] border border-[#2d3039] px-1 py-0.5 rounded text-white text-right focus:outline-none focus:border-blue-500 font-mono text-xs"
-                />
-              </div>
-            </div>
-
-            <button
-              id="delete-text-btn"
-              onClick={() => {
-                onSaveHistory?.();
-                onDeleteElement(selectedElement.id);
-              }}
-              className="w-full py-2 bg-red-950/20 text-red-400 border border-red-950/40 hover:bg-red-950/40 text-xs rounded transition-colors"
-            >
-              刪除此文字標記
-            </button>
-          </div>
+          <>
+            <Section title="文字標註">
+              {layerRow(el)}
+              <Row label="內容"><Text id="edit-text-input" value={txt.text} onChange={v => update({ text: v })} /></Row>
+              <Row label="字高"><Num id="edit-text-size" value={txt.fontSize} onChange={v => update({ fontSize: v })} min={0.2} max={20} unit="m" /></Row>
+              <Row label="角度"><Num value={deg(txt.angle || 0)} onChange={v => update({ angle: rad(v) })} min={-180} max={180} step={15} digits={0} unit="°" /></Row>
+              <Row label="位置"><Val>{txt.p.x.toFixed(3)}, {txt.p.y.toFixed(3)}</Val></Row>
+            </Section>
+            <Actions>{del()}</Actions>
+          </>
         );
       }
 
       case 'smart_path': {
-        const sp = selectedElement as any;
-        const activeVeh = sp.designVehicle || designVehicle;
-
-        // Calculate maximum steering angle based on the curve points
-        const tempPts: Point2D[] = [];
-        if (sp.points && sp.points.length > 1) {
-          for (let jj = 0; jj < sp.points.length - 1; jj++) {
-            const pStart = sp.points[jj];
-            const cpStart = sp.cpRight[jj] || pStart;
-            const cpEnd = sp.cpLeft[jj + 1] || sp.points[jj + 1];
-            const pEnd = sp.points[jj + 1];
-            const samples = sampleCubicBezier(pStart, cpStart, cpEnd, pEnd, 30);
-            if (jj === 0) {
-              tempPts.push(...samples);
-            } else {
-              tempPts.push(...samples.slice(1));
-            }
-          }
+        const activeVeh = e.designVehicle || designVehicle;
+        const pts: Point2D[] = [];
+        for (let j = 0; j < (e.points?.length || 0) - 1; j++) {
+          const s = sampleCubicBezier(e.points[j], e.cpRight[j] || e.points[j], e.cpLeft[j + 1] || e.points[j + 1], e.points[j + 1], 30);
+          pts.push(...(j === 0 ? s : s.slice(1)));
         }
-        const maxSteeringAngle = getMaxSteeringAngleForPath(tempPts, activeVeh);
-        const steerLimit = cadVehicle(activeVeh).maxSteerDeg;
-        const isSafe = maxSteeringAngle <= steerLimit;
-
+        const maxSteer = getMaxSteeringAngleForPath(pts, activeVeh) || 0;
+        const limit = cadVehicle(activeVeh).maxSteerDeg;
+        const ok = maxSteer <= limit;
         return (
-          <div className="space-y-4">
-            <div className="p-3 bg-[#1f2229]/40 rounded-lg border border-[#2d3039] space-y-2">
-              <h4 className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
-                {renderPropsIcon(selectedElement.type)}
-                <span>貝茲自由標線 (車流軌跡)</span>
-              </h4>
-              <div className="grid grid-cols-2 gap-x-2 gap-y-1 font-mono text-[10px] text-slate-400">
-                <span>類型:</span> <span className="text-slate-200">自由貝茲車道線</span>
-                <span>設計車種:</span> <span className="text-blue-400 font-bold">{DESIGN_VEHICLE_LABELS[activeVeh]}</span>
-                <span>控制端點數:</span> <span className="text-slate-300">{sp.points?.length || 0} 個</span>
-                <span>最大轉向角:</span> <span className={`${isSafe ? 'text-green-400 font-bold' : 'text-red-400 font-bold'}`}>{maxSteeringAngle ? `${maxSteeringAngle.toFixed(1)}°` : '0°'}</span>
-                <span>最大限制角度:</span> <span className="text-slate-400 font-bold">{steerLimit.toFixed(1)}°</span>
-                <span>檢核車種:</span> <span className="text-slate-400">{cadVehicle(activeVeh).name}</span>
-              </div>
-            </div>
-
-            {/* Custom vehicle selector for this specific swept path */}
-            <div className="space-y-2 p-3 bg-[#1f2229]/40 border border-[#2d3039] rounded-lg">
-              <label className="text-[10.5px] font-bold text-slate-400 block">此軌跡模擬車型</label>
-              <div className="grid grid-cols-3 gap-1 pt-1">
-                {[
-                  { value: 'passenger', label: '小型車' },
-                  { value: 'semi_trailer', label: '大型車' },
-                  { value: 'articulated', label: '聯結車' }
-                ].map((v) => {
-                  const isActive = activeVeh === v.value;
-                  return (
-                    <button
-                      key={v.value}
-                      onClick={() => {
-                        onSaveHistory?.();
-                        onUpdateElement({
-                          ...sp,
-                          designVehicle: v.value as any
-                        });
-                      }}
-                      className={`py-1.5 text-[10.5px] font-bold rounded border transition-all cursor-pointer text-center ${
-                        isActive 
-                          ? 'bg-blue-600 text-white border-blue-500 shadow-sm' 
-                          : 'bg-[#14161c] hover:bg-[#1f2229] border-[#2d3039] text-slate-450'
-                      }`}
-                    >
-                      {v.label}
-                    </button>
-                  );
-                })}
-              </div>
-              <p className="text-[9px] text-slate-500 leading-normal pt-1">
-                {cadVehicleNote(activeVeh)}（與軌跡模擬共用車輛庫；需要完整檢核請用「軌跡模擬」）。
-              </p>
-              {onSimulatePath && (
-                <button id="cad-simulate-path-btn" onClick={() => onSimulatePath(sp)} className="w-full mt-1 py-1.5 text-[11px] font-bold rounded border border-blue-500/40 text-blue-300 hover:bg-blue-500/10 cursor-pointer">
-                  以此路徑進行軌跡模擬檢核 →
-                </button>
-              )}
-            </div>
-
-            <div className={`p-3 rounded-lg border text-xs leading-snug flex flex-col gap-1 ${
-              isSafe 
-                ? 'bg-green-950/20 border-green-800/20 text-green-300' 
-                : 'bg-red-950/20 border-red-800/20 text-red-300'
-            }`}>
-              <div className="font-bold flex items-center gap-1">
-                <span>{isSafe ? '轉角檢核：通過' : '轉角檢核：超過上限'}</span>
-              </div>
-              <p className="text-[10px] text-slate-400">
-                {isSafe 
-                  ? `${DESIGN_VEHICLE_LABELS[activeVeh]}最大轉角未超過 40°。`
-                  : `最大轉角 ${maxSteeringAngle.toFixed(1)}°，超過 40° 上限。`}
-              </p>
-            </div>
-
-            {/* 偏移複製控制面板 */}
-            <div className="space-y-2 p-3 bg-[#1f2229]/40 border border-[#2d3039] rounded-lg">
-              <label className="text-[10.5px] font-bold text-slate-400 block">平行偏移複製標線 (Offset Tool)</label>
-              <div className="flex items-center gap-2 pt-1">
-                <span className="text-xs text-slate-400">間距:</span>
-                <input
-                  type="number"
-                  step="0.1"
-                  min="0.1"
-                  max="10.0"
-                  value={offsetDistance}
-                  onChange={(e) => {
-                    const val = parseFloat(e.target.value);
-                    if (!isNaN(val)) setOffsetDistance(val);
-                  }}
-                  className="w-16 bg-[#1f2229] border border-[#2d3039] px-1.5 py-0.5 rounded text-white text-right font-mono text-xs focus:outline-none focus:border-blue-500"
-                />
-                <span className="text-xs text-slate-500">m</span>
-                <button
-                  type="button"
-                  onClick={() => {
-                    handleOffsetCopy(selectedElement, -offsetDistance);
-                  }}
-                  className="px-2.5 py-1 text-[10px] bg-blue-950/40 border border-blue-500/30 text-blue-400 rounded cursor-pointer hover:bg-blue-900/40"
-                >
-                  向左偏移
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    handleOffsetCopy(selectedElement, offsetDistance);
-                  }}
-                  className="px-2.5 py-1 text-[10px] bg-blue-950/40 border border-blue-500/30 text-blue-400 rounded cursor-pointer hover:bg-blue-900/40"
-                >
-                  向右偏移
-                </button>
-              </div>
-            </div>
-
-            <button
-              id="delete-smartpath-btn"
-              onClick={() => {
-                onSaveHistory?.();
-                onDeleteElement(selectedElement.id);
-              }}
-              className="w-full py-2 bg-red-950/20 text-red-400 border border-red-950/40 hover:bg-red-950/40 hover:text-red-350 text-xs rounded transition-colors"
-            >
-              刪除此曲線標線
-            </button>
-          </div>
+          <>
+            <Section title="車輛軌跡標線">
+              <Row label="設計車種"><Seg value={activeVeh} options={[['passenger', '小型車'], ['semi_trailer', '大型車'], ['articulated', '聯結車']]} onChange={v => update({ designVehicle: v })} /></Row>
+              <Row label="檢核車種"><Val>{cadVehicle(activeVeh).name}</Val></Row>
+              <Row label="節點數"><Val>{e.points?.length || 0}</Val></Row>
+              <Row label="最大轉角"><Val tone={ok ? 'ok' : 'bad'}>{maxSteer.toFixed(1)}°</Val></Row>
+              <Row label="轉角上限"><Val>{limit.toFixed(1)}°</Val></Row>
+              <Row label="轉角檢核"><Val tone={ok ? 'ok' : 'bad'}>{ok ? '通過' : '超過上限'}</Val></Row>
+              <Note>{cadVehicleNote(activeVeh)}。完整掃掠範圍與淨距請用軌跡模擬。</Note>
+            </Section>
+            {onSimulatePath && <Actions><Btn primary id="cad-simulate-path-btn" onClick={() => onSimulatePath(e)}>送到軌跡模擬檢核</Btn></Actions>}
+            {offsetSection(el)}
+            <Actions>{del()}</Actions>
+          </>
         );
       }
 
-      case 'crosswalk': {
-        const cw = selectedElement as any;
-        const lenA = distance(cw.pA1, cw.pA2);
-        const lenB = distance(cw.pB1, cw.pB2);
-
+      case 'crosswalk':
         return (
-          <div className="space-y-4">
-            <div className={`p-3 rounded-lg border space-y-2 ${
-              'bg-[#181a20] border-[#2d3039] text-slate-350'
-            }`}>
-              <h4 className={`text-xs font-semibold flex items-center gap-1.5 ${
-                'text-slate-350'
-              }`}>
-                {renderPropsIcon(selectedElement.type)}
-                <span>行穿線</span>
-              </h4>
-              <p className={`text-[10px] leading-normal ${
-                'text-slate-450'
-              }`}>
-                枕木紋行人穿越道線：線寬及間隔符合公路標線《設置規則》第185條 **40cm (0.4m)** 規範。
-              </p>
-              <div className={`grid grid-cols-2 gap-x-2 gap-y-1 font-mono text-[10px] pt-1 ${
-                'text-slate-400'
-              }`}>
-                <span>起點線長:</span> <span className={'text-slate-200'}>{lenA.toFixed(2)} m</span>
-                <span>終點線長:</span> <span className={'text-slate-200'}>{lenB.toFixed(2)} m</span>
-              </div>
-            </div>
-
-            <div className={`space-y-3 p-3 border rounded-lg ${
-              'bg-[#181a20] border-[#2d3039]'
-            }`}>
-              <div className="space-y-1.5">
-                <div className="flex justify-between text-xs">
-                  <span className={'text-slate-400'}>客製化標線寬度</span>
-                  <span className="text-emerald-500 font-mono font-bold">{(cw.stripeWidth ?? 0.4).toFixed(2)} m</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <input
-                    id="edit-crosswalk-width"
-                    type="range"
-                    min="0.30"
-                    max="0.80"
-                    step="0.05"
-                    value={cw.stripeWidth ?? 0.4}
-                    onChange={(e) => {
-                      onUpdateElement({
-                        ...cw,
-                        stripeWidth: parseFloat(e.target.value)
-                      });
-                    }}
-                    className="flex-1 accent-blue-500 cursor-pointer"
-                  />
-                  <input
-                    type="number"
-                    min="0.30"
-                    max="0.80"
-                    step="0.05"
-                    value={parseFloat((cw.stripeWidth ?? 0.4).toFixed(2))}
-                    onChange={(e) => {
-                      let val = parseFloat(e.target.value);
-                      if (!isNaN(val)) {
-                        if (val < 0.30) val = 0.30;
-                        if (val > 0.80) val = 0.80;
-                        onUpdateElement({
-                          ...cw,
-                          stripeWidth: val
-                        });
-                      }
-                    }}
-                    className={`w-16 border px-1 py-0.5 rounded text-right focus:outline-none focus:border-blue-500 font-mono text-xs ${
-                      'bg-[#1f2229] border-[#2d3039] text-white'
-                    }`}
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-1.5">
-                <div className="flex justify-between text-xs">
-                  <span className={'text-slate-400'}>客製化標線間距</span>
-                  <span className="text-emerald-500 font-mono font-bold">{(cw.stripeGap ?? 0.4).toFixed(2)} m</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <input
-                    id="edit-crosswalk-gap"
-                    type="range"
-                    min="0.30"
-                    max="0.80"
-                    step="0.05"
-                    value={cw.stripeGap ?? 0.4}
-                    onChange={(e) => {
-                      onUpdateElement({
-                        ...cw,
-                        stripeGap: parseFloat(e.target.value)
-                      });
-                    }}
-                    className="flex-1 accent-blue-500 cursor-pointer"
-                  />
-                  <input
-                    type="number"
-                    min="0.30"
-                    max="0.80"
-                    step="0.05"
-                    value={parseFloat((cw.stripeGap ?? 0.4).toFixed(2))}
-                    onChange={(e) => {
-                      let val = parseFloat(e.target.value);
-                      if (!isNaN(val)) {
-                        if (val < 0.30) val = 0.30;
-                        if (val > 0.80) val = 0.80;
-                        onUpdateElement({
-                          ...cw,
-                          stripeGap: val
-                        });
-                      }
-                    }}
-                    className={`w-16 border px-1 py-0.5 rounded text-right focus:outline-none focus:border-blue-500 font-mono text-xs ${
-                      'bg-[#1f2229] border-[#2d3039] text-white'
-                    }`}
-                  />
-                </div>
-              </div>
-            </div>
-
-            <button
-              id="delete-crosswalk-btn"
-              onClick={() => {
-                onSaveHistory?.();
-                onDeleteElement(selectedElement.id);
-              }}
-              className="w-full py-2 bg-red-950/20 text-red-400 border border-red-950/40 hover:bg-red-950/40 hover:text-red-350 text-xs rounded transition-colors"
-            >
-              刪除此行穿線
-            </button>
-          </div>
+          <>
+            <Section title="行人穿越道線">
+              {layerRow(el)}
+              <Row label="起邊長度"><Val>{m(distance(e.pA1, e.pA2))}</Val></Row>
+              <Row label="終邊長度"><Val>{m(distance(e.pB1, e.pB2))}</Val></Row>
+              <Row label="線寬"><Num id="edit-crosswalk-width" value={e.stripeWidth ?? MARKING_SPEC.crosswalkStripeWidth} onChange={v => update({ stripeWidth: v })} min={0.2} max={1} step={0.05} unit="m" /></Row>
+              <Row label="間隔"><Num id="edit-crosswalk-gap" value={e.stripeGap ?? MARKING_SPEC.crosswalkStripeGap} onChange={v => update({ stripeGap: v })} min={0.2} max={1.5} step={0.05} unit="m" /></Row>
+            </Section>
+            <Actions>{del()}</Actions>
+          </>
         );
-      }
 
-      case 'road_text': {
-        const rt = selectedElement as any;
-        const upd = (patch: any) => { onSaveHistory?.(); onUpdateElement({ ...rt, ...patch }); };
+      case 'road_text':
         return (
-          <div className="space-y-4">
-            <div className="p-3 bg-[#1f2229]/40 rounded-lg border border-[#2d3039] space-y-3">
-              <h4 className="text-xs font-semibold text-slate-300">路面標字</h4>
-              <label className="block text-[10.5px] text-slate-400 space-y-1">
-                <span>字樣（順著字頭由上而下閱讀）</span>
-                <input
-                  value={rt.text}
-                  onFocus={() => onSaveHistory?.()}
-                  onChange={(e) => onUpdateElement({ ...rt, text: e.target.value })}
-                  className="w-full bg-[#1f2229] border border-[#2d3039] px-2 py-1 rounded text-white text-sm focus:outline-none focus:border-blue-500"
-                />
-              </label>
-              <div className="flex flex-wrap gap-1">
-                {['慢', '停', '讓', '公車專用', '機慢車優先', '學校', '速限50'].map(t => (
-                  <button key={t} onClick={() => upd({ text: t })} className="px-2 py-0.5 text-[10px] rounded border border-[#2d3039] text-slate-300 hover:border-blue-500/50 cursor-pointer">{t}</button>
-                ))}
-              </div>
-              {[
-                { label: '字高', key: 'charHeight', value: rt.charHeight ?? 2.5, step: 0.1, unit: 'm' },
-                { label: '字距', key: 'charGap', value: rt.charGap ?? 0.6, step: 0.1, unit: 'm' },
-                { label: '寬高比', key: 'widthFactor', value: rt.widthFactor ?? 0.4, step: 0.05, unit: '' },
-              ].map(f => (
-                <label key={f.key} className="flex items-center justify-between text-[10.5px] text-slate-400">
-                  <span>{f.label}</span>
-                  <span className="flex items-center gap-1">
-                    <input type="number" step={f.step} value={f.value} min={0.05}
-                      onFocus={() => onSaveHistory?.()}
-                      onChange={(e) => { const v = parseFloat(e.target.value); if (!isNaN(v) && v > 0) onUpdateElement({ ...rt, [f.key]: v }); }}
-                      className="w-16 bg-[#1f2229] border border-[#2d3039] px-1.5 py-0.5 rounded text-white text-right font-mono text-xs focus:outline-none focus:border-blue-500" />
-                    <span className="w-3 text-slate-500">{f.unit}</span>
-                  </span>
-                </label>
-              ))}
-              <div className="flex gap-2">
-                <button onClick={() => {
-                  // 原地反向：最遠的一格變成插入點，標字位置不動
-                  const s = roadTextSpan(rt), a = rt.angle || 0;
-                  upd({ angle: a + Math.PI, p: { x: rt.p.x + Math.cos(a) * s, y: rt.p.y + Math.sin(a) * s } });
-                }} className="flex-1 py-1.5 text-[10.5px] rounded border border-[#2d3039] bg-[#1f2229] text-slate-300 hover:text-white cursor-pointer">反向 180°</button>
-                <button onClick={() => upd({ color: rt.color === 'yellow' ? 'white' : 'yellow' })} className="flex-1 py-1.5 text-[10.5px] rounded border border-[#2d3039] bg-[#1f2229] text-slate-300 hover:text-white cursor-pointer">{rt.color === 'yellow' ? '改為白色' : '改為黃色'}</button>
-              </div>
-              <p className="text-[9.5px] text-slate-500">字高為沿行車方向的長度，字寬＝字高 × 寬高比。連續英數字（如 50）合為一格。預設為常用值，請依設置規則或地方規範調整。</p>
-            </div>
-            <button onClick={() => { onSaveHistory?.(); onDeleteElement(rt.id); }} className="w-full py-2 bg-red-950/20 text-red-400 border border-red-950/40 hover:bg-red-950/40 text-xs rounded">刪除此標字</button>
-          </div>
+          <>
+            <Section title="路面標字">
+              {layerRow(el)}
+              <Row label="字樣"><Text id="road-text-input" value={e.text} onChange={v => update({ text: v })} /></Row>
+              <Row label="常用字樣">
+                <div className="flex flex-wrap gap-1 py-0.5">
+                  {['慢', '停', '讓', '公車專用', '機慢車優先', '學校', '速限50'].map(t => (
+                    <button key={t} type="button" onClick={() => update({ text: t })} className="px-1.5 h-[19px] text-[11px] cursor-pointer" style={{ border: '1px solid var(--ui-border)', color: 'var(--ui-text)' }}>{t}</button>
+                  ))}
+                </div>
+              </Row>
+              <Row label="字高"><Num value={e.charHeight ?? 2.5} onChange={v => update({ charHeight: v })} min={0.3} max={10} unit="m" /></Row>
+              <Row label="寬高比"><Num value={e.widthFactor ?? 0.4} onChange={v => update({ widthFactor: v })} min={0.1} max={2} step={0.05} /></Row>
+              <Row label="字距"><Num value={e.charGap ?? 0.6} onChange={v => update({ charGap: v })} min={0} max={10} unit="m" /></Row>
+              <Row label="顏色"><Seg value={e.color === 'yellow' ? 'yellow' : 'white'} options={[['white', '白'], ['yellow', '黃']]} onChange={v => update({ color: v })} /></Row>
+              <Row label="行車方向"><Val>{deg(e.angle || 0)}°</Val></Row>
+              <Row label="插入點"><Val>{e.p.x.toFixed(3)}, {e.p.y.toFixed(3)}</Val></Row>
+              <Note>順著字頭由上而下閱讀；插入點為最靠近駕駛人的一字。字寬＝字高 × 寬高比，連續英數字（如 50）合為一格。</Note>
+            </Section>
+            <Actions>
+              <Btn onClick={() => {
+                // 原地反向：最遠的一格變成插入點，標字位置不動
+                const s = roadTextSpan(e), a = e.angle || 0;
+                update({ angle: a + Math.PI, p: { x: e.p.x + Math.cos(a) * s, y: e.p.y + Math.sin(a) * s } });
+              }}>原地反向</Btn>
+              {del()}
+            </Actions>
+          </>
         );
-      }
 
       case 'moto_box':
       case 'moto_turn_box': {
-        const mb = selectedElement as any;
-        const c = getMotoBoxCorners(mb);
+        const c = getMotoBoxCorners(e);
         const width = distance(c[0], c[1]);
         return (
-          <div className="space-y-4">
-            <div className="p-3 bg-[#1f2229]/40 rounded-lg border border-[#2d3039] space-y-3">
-              <h4 className="text-xs font-semibold text-slate-300">{MARKING_NAMES[mb.type]}</h4>
-              <div className="grid grid-cols-2 gap-x-2 gap-y-1 font-mono text-[10px] text-slate-400">
-                <span>寬度（前緣）:</span><span className="text-blue-400 font-bold">{width.toFixed(2)} m</span>
-                <span>面積:</span><span>{(width * mb.depth).toFixed(2)} m²</span>
-              </div>
-              <label className="flex items-center justify-between text-[10.5px] text-slate-400">
-                <span>深度</span>
-                <span className="flex items-center gap-1">
-                  <input type="number" step={0.1} min={0.5} value={Number(mb.depth.toFixed(2))}
-                    onChange={(e) => { const v = parseFloat(e.target.value); if (!isNaN(v) && v >= 0.5) onUpdateElement({ ...mb, depth: v }); }}
-                    className="w-16 bg-[#1f2229] border border-[#2d3039] px-1.5 py-0.5 rounded text-white text-right font-mono text-xs focus:outline-none focus:border-blue-500" />
-                  <span className="text-slate-500">m</span>
-                </span>
-              </label>
-              <label className="block text-[10.5px] text-slate-400 space-y-1">
-                <span>區內文字</span>
-                <input value={mb.label ?? (mb.type === 'moto_turn_box' ? '機車待轉' : '機車停等區')}
-                  onChange={(e) => onUpdateElement({ ...mb, label: e.target.value })}
-                  className="w-full bg-[#1f2229] border border-[#2d3039] px-2 py-1 rounded text-white text-sm focus:outline-none focus:border-blue-500" />
-              </label>
-              <label className="flex items-center justify-between text-[10.5px] text-slate-400">
-                <span>底色填滿（部分縣市採用）</span>
-                <input type="checkbox" checked={!!mb.fill} onChange={(e) => { onSaveHistory?.(); onUpdateElement({ ...mb, fill: e.target.checked }); }} />
-              </label>
-            </div>
-            <button onClick={() => { onSaveHistory?.(); onDeleteElement(mb.id); }} className="w-full py-2 bg-red-950/20 text-red-400 border border-red-950/40 hover:bg-red-950/40 text-xs rounded">刪除此區域</button>
-          </div>
+          <>
+            <Section title={MARKING_NAMES[el.type]}>
+              {layerRow(el)}
+              <Row label="前緣寬度"><Val>{m(width)}</Val></Row>
+              <Row label="深度"><Num value={e.depth} onChange={v => update({ depth: v })} min={0.5} max={20} unit="m" /></Row>
+              <Row label="面積"><Val>{(width * e.depth).toFixed(2)} m²</Val></Row>
+              <Row label="區內文字"><Text value={e.label ?? (el.type === 'moto_turn_box' ? '機車待轉' : '機車停等區')} onChange={v => update({ label: v })} /></Row>
+              <Row label="底色填滿" title="部分縣市採用"><Check checked={!!e.fill} onChange={v => update({ fill: v })} label="填滿" /></Row>
+            </Section>
+            <Actions>{del()}</Actions>
+          </>
         );
       }
 
-      case 'road_arrow': {
-        const arrow = selectedElement as any;
-        const arrowType = arrow.arrowType;
-        const length = arrow.length;
-        const angleDeg = ((Math.round((arrow.angle * 180) / Math.PI) % 360) + 540) % 360 - 180;
-        const arrowLabels: Record<string, string> = {
-          straight: '直行',
-          left: '左轉',
-          right: '右轉',
-          straight_left: '直行左轉',
-          straight_right: '直行右轉'
-        };
-
+      case 'road_arrow':
         return (
-          <div className="space-y-4">
-            <div className={`p-3 rounded-lg border space-y-2 ${
-              'bg-[#181a20] border-[#2d3039] text-slate-350'
-            }`}>
-              <h4 className={`text-xs font-semibold flex items-center gap-1.5 ${
-                'text-slate-350'
-              }`}>
-                {renderPropsIcon(selectedElement.type)}
-                <span>路面指向線</span>
-              </h4>
-              <p className={`text-[10px] leading-normal ${
-                'text-slate-455'
-              }`}>
-                指示車輛行駛方向之指向線標記。放置時會自動對齊車道行車方向。
-              </p>
-              <button
-                id="arrow-flip-btn"
-                onClick={() => {
-                  onSaveHistory?.();
-                  const a = arrow.angle + Math.PI;
-                  onUpdateElement({ ...arrow, angle: Math.atan2(Math.sin(a), Math.cos(a)) });
-                }}
-                className="w-full py-1.5 text-[10.5px] rounded border border-[#2d3039] bg-[#1f2229] text-slate-300 hover:text-white hover:border-blue-500/50 cursor-pointer"
-              >
-                反向 180°
-              </button>
-              <div className={`grid grid-cols-2 gap-x-2 gap-y-1 font-mono text-[10px] pt-1 ${
-                'text-slate-400'
-              }`}>
-                <span>中心坐標 X:</span> <span className={'text-slate-200'}>{arrow.p.x.toFixed(2)} m</span>
-                <span>中心坐標 Y:</span> <span className={'text-slate-200'}>{arrow.p.y.toFixed(2)} m</span>
-              </div>
-            </div>
-
-            <div className={`space-y-3 p-3 border rounded-lg ${
-              'bg-[#1f2229]/40 border-[#2d3039]'
-            }`}>
-              <div className="space-y-1.5 text-xs">
-                <label className={`block font-medium text-slate-400`}>箭頭類型</label>
-                <select
-                  value={arrowType}
-                  onChange={(e) => {
-                    onUpdateElement({
-                      ...arrow,
-                      arrowType: e.target.value as any
-                    });
-                  }}
-                  className={`w-full border px-2 py-1.5 rounded focus:outline-none focus:border-blue-500 text-xs ${
-                    'bg-[#1f2229] border-[#2d3039] text-white'
-                  }`}
-                >
-                  {Object.entries(arrowLabels).map(([val, label]) => (
-                    <option key={val} value={val} className={'bg-[#14161c]'}>{label}</option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="space-y-1 text-xs">
-                <div className="flex justify-between">
-                  <span className={'text-slate-400'}>長度 (m)</span>
-                  <span className={`font-mono font-bold text-slate-200`}>{length.toFixed(1)} m</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="range"
-                    min="1.0"
-                    max="10.0"
-                    step="0.1"
-                    value={length}
-                    onChange={(e) => {
-                      onUpdateElement({
-                        ...arrow,
-                        length: parseFloat(e.target.value)
-                      });
-                    }}
-                    className="flex-1 accent-blue-500 cursor-pointer"
-                  />
-                  <input
-                    type="number"
-                    min="1.0"
-                    max="10.0"
-                    step="0.1"
-                    value={parseFloat(length.toFixed(1))}
-                    onChange={(e) => {
-                      let val = parseFloat(e.target.value);
-                      if (!isNaN(val)) {
-                        if (val < 1.0) val = 1.0;
-                        if (val > 10.0) val = 10.0;
-                        onUpdateElement({
-                          ...arrow,
-                          length: val
-                        });
-                      }
-                    }}
-                    className={`w-16 border px-1 py-0.5 rounded text-right focus:outline-none focus:border-blue-500 font-mono text-xs ${
-                      'bg-[#1f2229] border-[#2d3039] text-white'
-                    }`}
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-1 text-xs">
-                <div className="flex justify-between">
-                  <span className={'text-slate-400'}>旋轉偏角 (度)</span>
-                  <span className={`font-mono font-bold text-slate-200`}>{angleDeg}°</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="range"
-                    min="-180"
-                    max="180"
-                    step="1"
-                    value={angleDeg}
-                    onChange={(e) => {
-                      const rad = (parseFloat(e.target.value) * Math.PI) / 180;
-                      onUpdateElement({
-                        ...arrow,
-                        angle: rad
-                      });
-                    }}
-                    className="flex-1 accent-blue-500 cursor-pointer"
-                  />
-                  <input
-                    type="number"
-                    min="-180"
-                    max="180"
-                    step="1"
-                    value={angleDeg}
-                    onChange={(e) => {
-                      let val = parseFloat(e.target.value);
-                      if (!isNaN(val)) {
-                        if (val < -180) val = -180;
-                        if (val > 180) val = 180;
-                        onUpdateElement({
-                          ...arrow,
-                          angle: (val * Math.PI) / 180
-                        });
-                      }
-                    }}
-                    className={`w-16 border px-1 py-0.5 rounded text-right focus:outline-none focus:border-blue-500 font-mono text-xs ${
-                      'bg-[#1f2229] border-[#2d3039] text-white'
-                    }`}
-                  />
-                </div>
-              </div>
-            </div>
-
-            <button
-              type="button"
-              onClick={() => {
-                onSaveHistory?.();
-                onDeleteElement(selectedElement.id);
-              }}
-              className="w-full py-2 bg-red-950/20 text-red-400 border border-red-950/40 hover:bg-red-950/40 hover:text-red-350 text-xs rounded transition-colors"
-            >
-              刪除此指向線標記
-            </button>
-          </div>
+          <>
+            <Section title="指向線">
+              {layerRow(el)}
+              <Row label="箭頭類型"><Select value={e.arrowType} options={ARROW_LABELS as any} onChange={v => update({ arrowType: v })} /></Row>
+              <Row label="長度"><Num value={e.length} onChange={v => update({ length: v })} min={1} max={10} unit="m" /></Row>
+              <Row label="旋轉角"><Num value={deg(e.angle)} onChange={v => update({ angle: rad(v) })} min={-180} max={180} step={5} digits={0} unit="°" /></Row>
+              <Row label="位置"><Val>{e.p.x.toFixed(3)}, {e.p.y.toFixed(3)}</Val></Row>
+            </Section>
+            <Actions>
+              <Btn id="arrow-flip-btn" onClick={() => { const a = e.angle + Math.PI; update({ angle: Math.atan2(Math.sin(a), Math.cos(a)) }); }}>反向 180°</Btn>
+              {del()}
+            </Actions>
+          </>
         );
-      }
 
-      case 'measurement': {
-        const meas = selectedElement as any;
-        const len = getLineElementLength(meas);
+      case 'measurement':
         return (
-          <div className="space-y-4">
-            <div className={`p-3 rounded-lg border space-y-2 ${
-              'bg-[#181a20] border-[#2d3039] text-slate-350'
-            }`}>
-              <h4 className={`text-xs font-semibold flex items-center gap-1.5 ${
-                'text-slate-350'
-              }`}>
-                <svg viewBox="0 0 24 24" className="w-4 h-4 inline-block shrink-0" fill="none" stroke="currentColor" strokeWidth="1.8">
-                  <path d="M4 12v8M20 12v8M2 14h20" />
-                </svg>
-                <span>標線長度測量</span>
-              </h4>
-              <div className={`grid grid-cols-2 gap-x-2 gap-y-1 font-mono text-[10px] pt-1 ${
-                'text-slate-400'
-              }`}>
-                <span>類型:</span> <span className={'text-slate-200'}>測距工具</span>
-                <span>量測距離:</span> <span className="text-amber-500 font-bold">{len.toFixed(2)} m</span>
-                <span>起點:</span> <span className={'text-slate-200'}>({meas.points?.[0]?.x.toFixed(2)}, {meas.points?.[0]?.y.toFixed(2)})</span>
-                <span>終點:</span> <span className={'text-slate-200'}>({meas.points?.[1]?.x.toFixed(2)}, {meas.points?.[1]?.y.toFixed(2)})</span>
-              </div>
-            </div>
-            <button
-              onClick={() => {
-                onSaveHistory?.();
-                onDeleteElement(selectedElement.id);
-              }}
-              className={`w-full py-2 text-xs rounded transition-colors ${
-                'bg-red-950/20 text-red-400 border border-red-950/40 hover:bg-red-950/40 hover:text-red-300'
-              }`}
-            >
-              刪除此測量標記
-            </button>
-          </div>
+          <>
+            <Section title="測距">
+              <Row label="距離"><Val>{m(getLineElementLength(e))}</Val></Row>
+              {e.points?.[0] && <Row label="起點"><Val>{e.points[0].x.toFixed(3)}, {e.points[0].y.toFixed(3)}</Val></Row>}
+              {e.points?.[1] && <Row label="終點"><Val>{e.points[1].x.toFixed(3)}, {e.points[1].y.toFixed(3)}</Val></Row>}
+            </Section>
+            <Actions>{del()}</Actions>
+          </>
         );
-      }
 
-      case 'angular_dimension': {
-        const angEl = selectedElement as any;
+      case 'angular_dimension':
         return (
-          <div className="space-y-4">
-            <div className={`p-3 rounded-lg border space-y-2 ${
-              'bg-[#181a20] border-[#2d3039] text-slate-350'
-            }`}>
-              <h4 className={`text-xs font-semibold flex items-center gap-1.5 ${
-                'text-slate-350'
-              }`}>
-                <Compass className="w-4 h-4 shrink-0" />
-                <span>夾角角度標註</span>
-              </h4>
-              <div className={`grid grid-cols-2 gap-x-2 gap-y-1 font-mono text-[10px] pt-1 ${
-                'text-slate-400'
-              }`}>
-                <span>類型:</span> <span className={'text-slate-200'}>角度標註</span>
-                <span>計算角度:</span> <span className="text-pink-500 font-bold">{angEl.angleDeg.toFixed(1)}°</span>
-                <span>相交頂點:</span> <span className={'text-slate-200'}>({angEl.center?.x.toFixed(2)}, {angEl.center?.y.toFixed(2)})</span>
-              </div>
-            </div>
-            <button
-              onClick={() => {
-                onSaveHistory?.();
-                onDeleteElement(selectedElement.id);
-              }}
-              className={`w-full py-2 text-xs rounded transition-colors ${
-                'bg-red-950/20 text-red-400 border border-red-950/40 hover:bg-red-950/40 hover:text-red-300'
-              }`}
-            >
-              刪除此角度標註
-            </button>
-          </div>
+          <>
+            <Section title="角度標註">
+              <Row label="夾角"><Val>{e.angleDeg.toFixed(1)}°</Val></Row>
+              {e.center && <Row label="頂點"><Val>{e.center.x.toFixed(3)}, {e.center.y.toFixed(3)}</Val></Row>}
+            </Section>
+            <Actions>{del()}</Actions>
+          </>
         );
-      }
 
       default:
-        return null;
+        return <Note>此物件沒有可調整的參數。</Note>;
     }
   };
 
   return (
-    <>
-      {selectedAnchorsUI}
-      {getInnerProps()}
-    </>
-  );
-};
-
-  return (
     <div
-      id="right-property-panel"
-      className="w-full p-3 flex flex-col select-none text-slate-300"
+      id="props-grid"
+      className="w-full select-none pb-2"
       // 開始修改任何欄位前先記錄一筆復原點（相同內容不會重複記錄）
-      onFocusCapture={(e) => { const t = e.target as HTMLElement; if (t.matches('input, select, textarea')) onSaveHistory?.(); }}
-      onPointerDownCapture={(e) => { const t = e.target as HTMLElement; if (t.matches('input[type="range"], button')) onSaveHistory?.(); }}
+      onFocusCapture={(ev) => { const t = ev.target as HTMLElement; if (t.matches('input, select, textarea')) onSaveHistory?.(); }}
+      onPointerDownCapture={(ev) => { const t = ev.target as HTMLElement; if (t.matches('input[type="checkbox"], button')) onSaveHistory?.(); }}
     >
-      <div className="space-y-5 overflow-y-auto flex-1 pr-1">
-        
-        <div className="space-y-2">
-          {renderSelectedElementProps()}
-        </div>
-
-      </div>
+      {selectedElement ? (
+        <>
+          {anchorsSection}
+          {/* key：切換物件時重設輸入中的暫存值 */}
+          <React.Fragment key={selectedElement.id}>{renderElement(selectedElement)}</React.Fragment>
+        </>
+      ) : renderToolConfig()}
     </div>
   );
 }

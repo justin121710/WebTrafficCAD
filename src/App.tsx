@@ -845,7 +845,7 @@ export default function App() {
           <CadCanvas
             onContextAction={handleContextAction}
             canPaste={canPaste}
-            canvasBackground="#1b1e23"
+            canvasBackground="#1d2127"
             fitRequest={fitRequest}
             onCursorMove={handleCursorMove}
             hideStatusBar
@@ -894,6 +894,7 @@ export default function App() {
                 setDesignVehicle={setDesignVehicle}
                 onUpdateElement={handlePropsUpdateElement}
                 onDeleteElement={handleDeleteElement}
+                onAddElement={(el) => { handleAddElement(el); setSelectedElement(el); }}
                 onGenerateIslandFromCurve={handleGenerateIslandFromCurve}
                 onSimulatePath={handleSimulateSmartPath}
                 onSaveHistory={handleSaveHistoryBeforeDrag}
@@ -998,7 +999,7 @@ export default function App() {
               <a
                 href={exportedImage}
                 download={`TrafficCAD_Blueprint_${new Date().toISOString().slice(0, 10)}.png`}
-                className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs rounded flex items-center gap-1.5 cursor-pointer"
+                className="px-3.5 py-1.5 text-xs rounded flex items-center gap-1.5 cursor-pointer hover:brightness-90" style={{ background: "var(--ui-accent)", color: "var(--ui-accent-text)" }}
               >
                 <Download className="w-3.5 h-3.5" /> 再次下載
               </a>

@@ -40,7 +40,7 @@ input[type="range"] {
   border-radius: 9999px;
   outline: none;
   cursor: pointer;
-  background-color: #2d3039;
+  background-color: #363b44;
 }
 
 /* Webkit (Chrome/Edge/Safari) 滑動按鈕：統一為 14px 藍色圓鈕，白色邊框，垂直置中 */
@@ -50,8 +50,8 @@ input[type="range"]::-webkit-slider-thumb {
   width: 14px !important;
   height: 14px !important;
   border-radius: 50% !important;
-  background-color: #3b82f6 !important; /* 統一為經典藍色 */
-  border: 2px solid #ffffff !important;
+  background-color: #f2f3f5 !important;
+  border: 2px solid #1d2127 !important;
   box-shadow: 0 1.5px 3px rgba(0, 0, 0, 0.35) !important;
   cursor: pointer;
   margin-top: -4px !important; /* (6px/2 - 14px/2 = -4px) 完美居中 */
@@ -67,8 +67,8 @@ input[type="range"]::-moz-range-thumb {
   width: 14px !important;
   height: 14px !important;
   border-radius: 50% !important;
-  background-color: #3b82f6 !important;
-  border: 2px solid #ffffff !important;
+  background-color: #f2f3f5 !important;
+  border: 2px solid #1d2127 !important;
   box-shadow: 0 1.5px 3px rgba(0, 0, 0, 0.35) !important;
   cursor: pointer;
   transition: transform 0.1s ease;
@@ -94,12 +94,12 @@ button.sim-color-picker-btn {
 
 
 
-/* ===================== 製圖桌介面色彩變數 ===================== */
+/* ===================== 製圖桌介面色彩變數（取自 LOGO：炭灰 #1d2127＋米白 #f2f3f5） ===================== */
 .ui-drafting {
-  --ui-bg: #23272e; --ui-surface: #262b33; --ui-surface2: #2f3540; --ui-border: #3b424d;
-  --ui-text: #dde1e6; --ui-strong: #ffffff; --ui-muted: #9aa3ae; --ui-accent: #4aa3ff; --ui-accent-text: #ffffff;
-  --ui-accent-soft: rgba(74, 163, 255, 0.16); --ui-radius: 3px;
-  --ui-menubar: #1b1e23; --ui-ribbon: #2c313a; --ui-cmd: #15181c; --ui-canvas: #1b1e23;
+  --ui-bg: #1d2127; --ui-surface: #22262d; --ui-surface2: #2b3038; --ui-border: #363b44; --ui-border-soft: #2a2e35;
+  --ui-text: #e4e5e8; --ui-strong: #f2f3f5; --ui-muted: #9a9fa8; --ui-accent: #f2f3f5; --ui-accent-text: #1d2127;
+  --ui-accent-soft: rgba(242, 243, 245, 0.10); --ui-radius: 3px; --ui-field: #181b20;
+  --ui-menubar: #181b20; --ui-ribbon: #262a31; --ui-cmd: #15171b; --ui-canvas: #1d2127;
   font-family: 'Noto Sans TC', 'Microsoft JhengHei', 'PingFang TC', system-ui, sans-serif;
 }
 .ui-drafting .font-mono { font-family: 'JetBrains Mono', 'Cascadia Mono', Consolas, ui-monospace, monospace; }
