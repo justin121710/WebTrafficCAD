@@ -27,7 +27,7 @@ import SimTour, { simTourSeen } from './simulation/ui/SimTour';
 import { SIM_TOOLS, SIM_SELECT_DEF } from './simulation/ui/SimToolPalette';
 import { renderToolIcon } from './components/Toolbar';
 import PropsPanel from './components/PropsPanel';
-import CadCanvas, { transformElement, getElementBoundingBox, DrawCursorStyle, DRAW_CURSORS, drawCursorUrl } from './components/CadCanvas';
+import CadCanvas, { transformElement, getElementBoundingBox } from './components/CadCanvas';
 import { exportElementsToDXF } from './dxf';
 import { renderElementsToPng } from './exportPng';
 import { computeQuantities, layerKeyOf, MARKING_NAMES } from './markings';
@@ -122,11 +122,6 @@ export default function App() {
   const [bottomTab, setBottomTab] = useState<'layers' | 'qty'>('layers');
   const [showHelp, setShowHelp] = useState<boolean>(false);
   const [layersCollapsed, setLayersCollapsed] = useState<boolean>(false);
-  const [drawCursor, setDrawCursorState] = useState<DrawCursorStyle>(() => {
-    try { const v = localStorage.getItem('webtrafficcad.drawCursor'); if (v === 'cross' || v === 'pen' || v === 'precision') return v; } catch { /* 無法存取時用預設 */ }
-    return 'cross';
-  });
-  const setDrawCursor = (v: DrawCursorStyle) => { setDrawCursorState(v); try { localStorage.setItem('webtrafficcad.drawCursor', v); } catch { /* ignore */ } };
   const [hiddenLayers, setHiddenLayers] = useState<string[]>([]);
   const [snapToIntersection, setSnapToIntersection] = useState<boolean>(true);
   const [confirmDialog, setConfirmDialog] = useState<{ title: string; message: string; confirmLabel: string; onConfirm: () => void } | null>(null);
@@ -852,7 +847,6 @@ export default function App() {
             fitRequest={fitRequest}
             onCursorMove={handleCursorMove}
             hideStatusBar
-            drawCursor={drawCursor}
             snapToIntersection={snapToIntersection}
             elements={visibleElements}
             onAddElement={handleAddElement}
@@ -1174,18 +1168,6 @@ export default function App() {
         <RibbonCheck id="snap-intersection" label="交點" checked={snapToIntersection} onChange={() => setSnapToIntersection(!snapToIntersection)} />
         <RibbonCheck id="snap-nearest" label="最近點／垂足" checked={snapToNearest} onChange={() => setSnapToNearest(!snapToNearest)} />
         <RibbonCheck id="snap-grid" label="格點" checked={snapToGrid} onChange={() => setSnapToGrid(!snapToGrid)} />
-      </RibbonGroup>
-      <RibbonGroup title="繪製游標">
-        {(Object.keys(DRAW_CURSORS) as DrawCursorStyle[]).map(k => (
-          <button key={k} id={`draw-cursor-${k}`} onClick={() => setDrawCursor(k)} title={`繪製時使用「${DRAW_CURSORS[k].label}」游標`}
-            className="row-span-3 flex flex-col items-center justify-center gap-1 w-[64px] text-[11px] rounded cursor-pointer hover:bg-white/5"
-            style={drawCursor === k ? { background: 'var(--ui-accent-soft)', outline: '1px solid var(--ui-accent)', outlineOffset: -1, color: 'var(--ui-strong)' } : { color: 'var(--ui-text)' }}>
-            <span className="w-9 h-9 flex items-center justify-center rounded" style={{ background: 'var(--ui-canvas)', border: '1px solid var(--ui-border)' }}>
-              <img src={drawCursorUrl(k)} alt="" className="w-8 h-8" />
-            </span>
-            <span className="whitespace-nowrap">{DRAW_CURSORS[k].label}</span>
-          </button>
-        ))}
       </RibbonGroup>
       <RibbonGroup title="底圖">
         {!bgImage ? (

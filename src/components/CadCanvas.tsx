@@ -905,8 +905,6 @@ interface CadCanvasProps {
   onCursorMove?: (x: number, y: number, zoom: number) => void;
   /** 由外層狀態列顯示座標時，隱藏畫布內建的座標列 */
   hideStatusBar?: boolean;
-  /** 繪製工具的游標樣式 */
-  drawCursor?: DrawCursorStyle;
   elements: CadElement[];
   onAddElement: (el: CadElement) => void;
   onUpdateElement: (el: CadElement) => void;
@@ -948,30 +946,18 @@ interface CadCanvasProps {
   setRoadArrowConfig?: (cfg: any) => void;
 }
 
-/**
- * 繪製工具的游標（32×32 SVG，白線加深色描邊，淺色或深色底都看得清楚）。
- * hot：游標熱點，也就是實際點下的位置。
- */
-export type DrawCursorStyle = 'cross' | 'pen' | 'precision';
+/** 游標（白色加深色描邊，淺色或深色底都看得清楚）；hot 為實際點下的位置 */
 const DARK = '#111317', LIGHT = '#f2f3f5';
-export const DRAW_CURSORS: Record<DrawCursorStyle, { label: string; svg: string; hot: [number, number] }> = {
-  cross: {
-    label: '精準十字',
-    hot: [16, 16],
-    svg: `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><path d="M16 2V12.5M16 19.5V30M2 16H12.5M19.5 16H30" stroke="${DARK}" stroke-width="3"/><path d="M16 2V12.5M16 19.5V30M2 16H12.5M19.5 16H30" stroke="${LIGHT}" stroke-width="1"/><rect x="15" y="15" width="2" height="2" fill="${LIGHT}" stroke="${DARK}" stroke-width="0.5"/></svg>`,
-  },
-  pen: {
-    label: '筆尖',
-    hot: [2, 2],
-    svg: `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><path d="M2 2L15 6.5L22 13.5L13.5 22L6.5 15Z" fill="${DARK}" stroke="${LIGHT}" stroke-width="1.3" stroke-linejoin="miter"/><path d="M2 2L9.6 9.6" stroke="${LIGHT}" stroke-width="1.2"/><rect x="9.4" y="9.4" width="3" height="3" fill="none" stroke="${LIGHT}" stroke-width="1.1" transform="rotate(45 10.9 10.9)"/><path d="M15.5 20L20 15.5L23.5 19L19 23.5Z" fill="${LIGHT}" stroke="${DARK}" stroke-width="0.8"/></svg>`,
-  },
-  precision: {
-    label: '十字＋筆尖',
-    hot: [9, 9],
-    svg: `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><path d="M9 1V6.5M9 11.5V17M1 9H6.5M11.5 9H17" stroke="${DARK}" stroke-width="3"/><path d="M9 1V6.5M9 11.5V17M1 9H6.5M11.5 9H17" stroke="${LIGHT}" stroke-width="1"/><path d="M17 17L25 19.5L29.5 24L24 29.5L19.5 25Z" fill="${DARK}" stroke="${LIGHT}" stroke-width="1.1" stroke-linejoin="miter"/><path d="M17 17L21.6 21.6" stroke="${LIGHT}" stroke-width="1"/></svg>`,
-  },
-};
-export const drawCursorUrl = (k: DrawCursorStyle) => `data:image/svg+xml;utf8,${encodeURIComponent(DRAW_CURSORS[k].svg)}`;
+const svgCursor = (svg: string, hx: number, hy: number, fallback: string) =>
+  `url("data:image/svg+xml;utf8,${encodeURIComponent(svg)}") ${hx} ${hy}, ${fallback}`;
+/** 選取：單純的十字 */
+const SELECT_CURSOR = svgCursor(
+  `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><path d="M12 1V23M1 12H23" stroke="${DARK}" stroke-width="3"/><path d="M12 1V23M1 12H23" stroke="${LIGHT}" stroke-width="1"/></svg>`,
+  12, 12, 'crosshair');
+/** 繪製：與「選取」按鈕相同的箭頭，改為實心 */
+const DRAW_CURSOR = svgCursor(
+  `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><path d="M4.037 4.688a.495.495 0 0 1 .651-.651l16 6.5a.5.5 0 0 1-.063.947l-6.124 1.58a2 2 0 0 0-1.438 1.435l-1.579 6.126a.5.5 0 0 1-.947.063z" fill="${LIGHT}" stroke="${DARK}" stroke-width="1.5" stroke-linejoin="round"/></svg>`,
+  4, 4, 'default');
 
 /** 編輯介面（選取、夾點、把手、草稿線、鎖點）統一使用單一顏色 */
 const EDIT = '#4c9eff';
@@ -986,7 +972,6 @@ export default function CadCanvas({
   fitRequest,
   onCursorMove,
   hideStatusBar = false,
-  drawCursor = 'cross',
   elements,
   onAddElement,
   onUpdateElement,
@@ -5471,12 +5456,15 @@ export default function CadCanvas({
     if (isPanning) return 'grabbing';
     if (spacePressed) return 'grab';
     
-    if (appMode === 'simulation') return simInput.cursor();
+    if (appMode === 'simulation') {
+      const c = simInput.cursor();
+      if (c !== 'crosshair') return c;
+      return simStore.ui.tool === 'select' ? SELECT_CURSOR : DRAW_CURSOR;
+    }
 
-    if (activeTool === 'select') return 'crosshair';
+    if (activeTool === 'select') return SELECT_CURSOR;
 
-    const c = DRAW_CURSORS[drawCursor] || DRAW_CURSORS.cross;
-    return `url("${drawCursorUrl(drawCursor)}") ${c.hot[0]} ${c.hot[1]}, crosshair`;
+    return DRAW_CURSOR;
   };
 
   return (
