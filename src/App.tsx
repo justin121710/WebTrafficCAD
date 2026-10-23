@@ -34,11 +34,47 @@ import { computeQuantities, layerKeyOf, MARKING_NAMES } from './markings';
 import { buildCrossroadTemplate } from './templates';
 import { saveAutosave, loadAutosave, clearAutosave } from './autosave';
 import { TOOL_CATEGORIES, ALL_TOOLS } from './ui/toolCatalog';
-import { MenuBar, MenuDef, MenuItem, RibbonTabs, Ribbon, RibbonGroup, RibbonBigButton, RibbonButton, RibbonCheck, StatusBar, StatusToggle } from './ui/Drafting';
-import { LayerPanel, QuantityPanel, ArrowTypeBar, ConfirmDialog, AutosaveBanner, Toggle } from './ui/Panels';
+import { MenuBar, MenuDef, MenuItem, RibbonTabs, Ribbon, RibbonGroup, RibbonBigButton, RibbonButton, RibbonCheck, RibbonField, fieldStyle, StatusBar, StatusToggle } from './ui/Drafting';
+import { LayerPanel, ExportLayerPicker, QuantityPanel, ArrowTypeBar, ConfirmDialog, AutosaveBanner, Toggle } from './ui/Panels';
 import logoUrl from './assets/logo.svg';
 import { PaletteName } from './renderPrimitives';
+import { SheetSize, SheetOrientation, STANDARD_SCALES } from './sheet';
 import { Info, CheckCircle2, AlertTriangle, RotateCcw, RotateCw, Image as ImageIcon, Upload, Trash2, Ruler, X, MousePointer2, Copy, ClipboardPaste, CopyPlus, Maximize, FileCode2, Table, Download, ChevronUp, ChevronDown } from 'lucide-react';
+
+/** 匯出設定（含圖框資料），存在瀏覽器以便下次沿用 */
+interface ExportOptions {
+  palette: PaletteName;
+  includeConstruction: boolean;
+  includeAnnotations: boolean;
+  /** 標準圖紙（圖框＋標題欄） */
+  titleBlock: boolean;
+  includeSimulation: boolean;
+  /** 不匯出的圖層（與畫面顯示分開） */
+  excludedLayers: string[];
+  sheetSize: SheetSize;
+  orientation: SheetOrientation;
+  /** 0 = 自動 */
+  scale: number;
+  northDeg: number;
+  rotateToNorth: boolean;
+  drawingNo: string;
+  designer: string;
+  drafter: string;
+  checker: string;
+}
+const EXPORT_OPTIONS_KEY = 'webtrafficcad.exportOptions';
+const DEFAULT_EXPORT_OPTIONS: ExportOptions = {
+  palette: 'print', includeConstruction: false, includeAnnotations: true, titleBlock: true, includeSimulation: true,
+  excludedLayers: [], sheetSize: 'A3', orientation: 'landscape', scale: 0, northDeg: 0, rotateToNorth: false,
+  drawingNo: '', designer: '', drafter: '', checker: '',
+};
+function loadExportOptions(): ExportOptions {
+  try {
+    const raw = localStorage.getItem(EXPORT_OPTIONS_KEY);
+    if (raw) return { ...DEFAULT_EXPORT_OPTIONS, ...JSON.parse(raw) };
+  } catch { /* 忽略 */ }
+  return DEFAULT_EXPORT_OPTIONS;
+}
 
 export default function App() {
   // App Mode State: 'cad' | 'simulation' (預設為 'cad')
@@ -110,13 +146,11 @@ export default function App() {
   const [bgImage, setBgImage] = useState<any>(null);
   const [exportedImage, setExportedImage] = useState<string | null>(null);
   const [projectName, setProjectName] = useState<string>('未命名路口配置');
-  const [exportOptions, setExportOptions] = useState<{ palette: PaletteName; includeConstruction: boolean; includeAnnotations: boolean; titleBlock: boolean; includeSimulation: boolean }>({
-    palette: 'print',
-    includeConstruction: false,
-    includeAnnotations: true,
-    titleBlock: true,
-    includeSimulation: true,
-  });
+  const [exportOptions, setExportOptions] = useState<ExportOptions>(loadExportOptions);
+  useEffect(() => {
+    try { localStorage.setItem(EXPORT_OPTIONS_KEY, JSON.stringify(exportOptions)); } catch { /* 無痕模式等 */ }
+  }, [exportOptions]);
+  const setExportOpt = <K extends keyof ExportOptions>(key: K, value: ExportOptions[K]) => setExportOptions(prev => ({ ...prev, [key]: value }));
   const [fitRequest, setFitRequest] = useState<number>(0);
   const [ribbonTab, setRibbonTab] = useState<'draw' | 'view' | 'output'>('draw');
   const [bottomTab, setBottomTab] = useState<'layers' | 'qty'>('layers');
@@ -489,7 +523,7 @@ export default function App() {
       if (typeof st.minorGridInterval === 'number') setMinorGridInterval(st.minorGridInterval);
       if (typeof st.majorGridInterval === 'number') setMajorGridInterval(st.majorGridInterval);
       setHiddenLayers(Array.isArray(st.hiddenLayers) ? st.hiddenLayers : []);
-      if (st.exportOptions) setExportOptions(prev => ({ ...prev, ...st.exportOptions }));
+      if (st.exportOptions) setExportOptions(prev => ({ ...prev, ...st.exportOptions, excludedLayers: Array.isArray(st.exportOptions.excludedLayers) ? st.exportOptions.excludedLayers : [] }));
     }
 
     setSelectedElement(null);
@@ -570,7 +604,8 @@ export default function App() {
       return;
     }
     try {
-      const dxfContent = exportElementsToDXF(visibleElements, {
+      const dxfContent = exportElementsToDXF(exportElements, {
+        monochrome: exportOptions.palette === 'mono',
         includeConstruction: exportOptions.includeConstruction,
         includeAnnotations: exportOptions.includeAnnotations,
         extraPrims: simExportPrims(),
@@ -590,11 +625,18 @@ export default function App() {
       return;
     }
     try {
-      const dataUrl = await renderElementsToPng(visibleElements, {
-        palette: exportOptions.palette,
-        includeConstruction: exportOptions.includeConstruction,
-        includeAnnotations: exportOptions.includeAnnotations,
-        titleBlock: exportOptions.titleBlock,
+      const o = exportOptions;
+      const dataUrl = await renderElementsToPng(exportElements, {
+        palette: o.palette,
+        includeConstruction: o.includeConstruction,
+        includeAnnotations: o.includeAnnotations,
+        titleBlock: o.titleBlock,
+        sheetSize: o.sheetSize,
+        orientation: o.orientation,
+        scale: o.scale,
+        northDeg: o.northDeg,
+        rotateToNorth: o.rotateToNorth,
+        info: { drawingNo: o.drawingNo, designer: o.designer, drafter: o.drafter, checker: o.checker },
         title: projectName,
         bgImage,
         extraPrims: simExportPrims(),
@@ -742,6 +784,11 @@ export default function App() {
   const visibleElements = useMemo(
     () => (hiddenLayers.length ? elements.filter(el => !hiddenLayers.includes(layerKeyOf(el))) : elements),
     [elements, hiddenLayers]
+  );
+  /** 匯出的物件：畫面顯示中、且未在匯出設定排除的圖層 */
+  const exportElements = useMemo(
+    () => (exportOptions.excludedLayers.length ? visibleElements.filter(el => !exportOptions.excludedLayers.includes(layerKeyOf(el))) : visibleElements),
+    [visibleElements, exportOptions.excludedLayers]
   );
   // 模擬淨距檢核的障礙物：只取畫面上可見的物件
   const islandIsHard = sim.doc.settings.islandIsHard;
@@ -1201,23 +1248,72 @@ export default function App() {
         <RibbonBigButton id="export-dxf-btn" icon={<FileCode2 />} label="AutoCAD DXF" onClick={handleExportDXF} />
         {isCad && <RibbonBigButton id="export-csv-btn" icon={<Table />} label="數量表 CSV" onClick={handleExportQuantities} />}
       </RibbonGroup>
-      <RibbonGroup title="出圖設定">
-        <label className="flex items-center gap-1.5 h-[24px] px-1.5 text-xs whitespace-nowrap">
-          <span style={{ color: 'var(--ui-muted)' }}>配色</span>
-          <select value={exportOptions.palette} onChange={e => setExportOptions({ ...exportOptions, palette: e.target.value as PaletteName })} className="h-[20px] text-xs rounded outline-none cursor-pointer" style={{ background: 'var(--ui-bg)', color: 'var(--ui-text)', border: '1px solid var(--ui-border)' }}>
-            <option value="print">白底列印</option>
+      <RibbonGroup title="出圖格式">
+        <RibbonCheck id="export-sheet" label="標準圖框與標題欄" checked={exportOptions.titleBlock} onChange={() => setExportOpt('titleBlock', !exportOptions.titleBlock)} />
+        <RibbonField label="圖紙">
+          <select id="export-sheet-size" disabled={!exportOptions.titleBlock} value={exportOptions.sheetSize} onChange={e => setExportOpt('sheetSize', e.target.value as SheetSize)} className="h-[20px] text-xs rounded outline-none cursor-pointer disabled:opacity-40" style={fieldStyle}>
+            {(['A4', 'A3', 'A2', 'A1'] as SheetSize[]).map(k => <option key={k} value={k}>{k}</option>)}
+          </select>
+          <select id="export-orientation" disabled={!exportOptions.titleBlock} value={exportOptions.orientation} onChange={e => setExportOpt('orientation', e.target.value as SheetOrientation)} className="h-[20px] text-xs rounded outline-none cursor-pointer disabled:opacity-40" style={fieldStyle}>
+            <option value="landscape">橫式</option>
+            <option value="portrait">直式</option>
+          </select>
+        </RibbonField>
+        <RibbonField label="比例">
+          <select id="export-scale" disabled={!exportOptions.titleBlock} value={exportOptions.scale} onChange={e => setExportOpt('scale', Number(e.target.value))} className="h-[20px] text-xs rounded outline-none cursor-pointer disabled:opacity-40" style={fieldStyle}>
+            <option value={0}>自動（放得下的最大比例）</option>
+            {STANDARD_SCALES.map(n => <option key={n} value={n}>1:{n}</option>)}
+          </select>
+        </RibbonField>
+        <RibbonField label="配色">
+          <select id="export-palette" value={exportOptions.palette} onChange={e => setExportOpt('palette', e.target.value as PaletteName)} className="h-[20px] text-xs rounded outline-none cursor-pointer" style={fieldStyle}>
+            <option value="print">白底彩色</option>
+            <option value="mono">白底黑白</option>
             <option value="screen">深色簡報</option>
           </select>
-        </label>
-        <RibbonCheck label="圖框、比例尺、指北針" checked={exportOptions.titleBlock} onChange={() => setExportOptions({ ...exportOptions, titleBlock: !exportOptions.titleBlock })} />
-        <RibbonCheck label="尺寸標註" checked={exportOptions.includeAnnotations} onChange={() => setExportOptions({ ...exportOptions, includeAnnotations: !exportOptions.includeAnnotations })} />
-        <RibbonCheck label="輔助線／輔助圓" checked={exportOptions.includeConstruction} onChange={() => setExportOptions({ ...exportOptions, includeConstruction: !exportOptions.includeConstruction })} />
-        <RibbonCheck id="export-include-sim" label="軌跡模擬結果" checked={exportOptions.includeSimulation} onChange={() => setExportOptions({ ...exportOptions, includeSimulation: !exportOptions.includeSimulation })} />
-        {hiddenLayers.length > 0 && <span className="h-[24px] px-1.5 text-[11px] flex items-center whitespace-nowrap" style={{ color: '#f0a92b' }}>{hiddenLayers.length} 個圖層隱藏中，不會匯出</span>}
+        </RibbonField>
       </RibbonGroup>
-      <RibbonGroup title="圖名">
-        <input id="project-name-input" value={projectName} onChange={e => setProjectName(e.target.value)} aria-label="圖名"
-          className="h-[22px] w-48 px-1.5 text-xs rounded outline-none" style={{ background: 'var(--ui-bg)', color: 'var(--ui-text)', border: '1px solid var(--ui-border)' }} />
+      <RibbonGroup title="內容">
+        <ExportLayerPicker
+          elements={elements}
+          hidden={hiddenLayers}
+          excluded={exportOptions.excludedLayers}
+          onChange={v => setExportOpt('excludedLayers', v)}
+          includeSimulation={exportOptions.includeSimulation}
+          onToggleSimulation={() => setExportOpt('includeSimulation', !exportOptions.includeSimulation)}
+          hasSimulation={exportableEntries(simStore).length > 0}
+        />
+        <RibbonCheck label="尺寸標註" checked={exportOptions.includeAnnotations} onChange={() => setExportOpt('includeAnnotations', !exportOptions.includeAnnotations)} />
+        <RibbonCheck label="輔助線／輔助圓" checked={exportOptions.includeConstruction} onChange={() => setExportOpt('includeConstruction', !exportOptions.includeConstruction)} />
+      </RibbonGroup>
+      <RibbonGroup title="方位">
+        <RibbonField label="北方">
+          <input id="export-north-deg" type="number" step={1} value={exportOptions.northDeg} aria-label="北方角度"
+            onChange={e => setExportOpt('northDeg', Number.isFinite(e.target.valueAsNumber) ? e.target.valueAsNumber : 0)}
+            title="北方相對圖面正上方的角度（順時針，度）" className="h-[20px] px-1.5 text-xs rounded outline-none w-[64px]" style={fieldStyle} />
+          <span style={{ color: 'var(--ui-muted)' }}>° 順時針</span>
+        </RibbonField>
+        <RibbonCheck id="export-rotate-north" label="旋轉圖面使北方朝上" checked={exportOptions.rotateToNorth} onChange={() => setExportOpt('rotateToNorth', !exportOptions.rotateToNorth)} />
+        <span className="h-[24px] px-1.5 text-[11px] flex items-center whitespace-nowrap" style={{ color: 'var(--ui-muted)' }}>
+          {exportOptions.rotateToNorth ? '圖面旋轉，指北針朝上（僅 PNG）' : '只轉指北針，圖面不動'}
+        </span>
+      </RibbonGroup>
+      <RibbonGroup title="標題欄">
+        <RibbonField label="圖名">
+          <input id="project-name-input" value={projectName} onChange={e => setProjectName(e.target.value)} aria-label="圖名" className="h-[20px] px-1.5 text-xs rounded outline-none w-40" style={fieldStyle} />
+        </RibbonField>
+        <RibbonField label="圖號">
+          <input id="export-drawing-no" value={exportOptions.drawingNo} onChange={e => setExportOpt('drawingNo', e.target.value)} aria-label="圖號" className="h-[20px] px-1.5 text-xs rounded outline-none w-40" style={fieldStyle} />
+        </RibbonField>
+        <RibbonField label="設計">
+          <input id="export-designer" value={exportOptions.designer} onChange={e => setExportOpt('designer', e.target.value)} aria-label="設計" className="h-[20px] px-1.5 text-xs rounded outline-none w-28" style={fieldStyle} />
+        </RibbonField>
+        <RibbonField label="繪圖">
+          <input id="export-drafter" value={exportOptions.drafter} onChange={e => setExportOpt('drafter', e.target.value)} aria-label="繪圖（繪製人）" placeholder="繪製人" className="h-[20px] px-1.5 text-xs rounded outline-none w-28" style={fieldStyle} />
+        </RibbonField>
+        <RibbonField label="校核">
+          <input id="export-checker" value={exportOptions.checker} onChange={e => setExportOpt('checker', e.target.value)} aria-label="校核" className="h-[20px] px-1.5 text-xs rounded outline-none w-28" style={fieldStyle} />
+        </RibbonField>
       </RibbonGroup>
     </>
   );

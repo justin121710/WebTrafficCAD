@@ -18,6 +18,8 @@ export interface DxfOptions {
   fontFile?: string;
   /** 額外輸出的原語（例如軌跡模擬結果） */
   extraPrims?: Primitive[];
+  /** 黑白：所有圖層顏色設為 7（白／黑） */
+  monochrome?: boolean;
 }
 
 /** 將非 ASCII 字元轉為 DXF Unicode 跳脫序列 */
@@ -53,7 +55,7 @@ export function exportElementsToDXF(elements: CadElement[], options: DxfOptions 
   const usedLayers = new Map<string, number>();
   prims.forEach(p => {
     const def = Object.values(LAYERS).find(l => l.name === p.layer);
-    const color = p.aci ?? (def ? ACI[def.color] : ACI[(p as any).color as MarkColor] ?? 7);
+    const color = opts.monochrome ? 7 : p.aci ?? (def ? ACI[def.color] : ACI[(p as any).color as MarkColor] ?? 7);
     if (!usedLayers.has(p.layer)) usedLayers.set(p.layer, color);
   });
 

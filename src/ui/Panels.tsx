@@ -1,5 +1,5 @@
-import React from 'react';
-import { History } from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
+import { History, Layers, ChevronDown } from 'lucide-react';
 import { CadElement } from '../types';
 import { LAYERS, layerKeyOf, computeQuantities } from '../markings';
 import { PALETTES } from '../renderPrimitives';
@@ -53,6 +53,95 @@ export function LayerPanel({ elements, hidden, onToggle, onShowAll, extra }: { e
       })}
       {extra}
     </div>
+  );
+}
+
+/* ------------------------------------------------------------ 匯出圖層 */
+/**
+ * 選擇要匯出的圖層（與畫面顯示分開）。功能區會捲動裁切，選單以 fixed 定位顯示在按鈕下方。
+ */
+export function ExportLayerPicker({ elements, hidden, excluded, onChange, includeSimulation, onToggleSimulation, hasSimulation }: {
+  elements: CadElement[];
+  hidden: string[];
+  excluded: string[];
+  onChange: (excluded: string[]) => void;
+  includeSimulation: boolean;
+  onToggleSimulation: () => void;
+  hasSimulation: boolean;
+}) {
+  const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const popRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!pos) return;
+    const onDown = (e: PointerEvent) => {
+      const t = e.target as Node;
+      if (!popRef.current?.contains(t) && !btnRef.current?.contains(t)) setPos(null);
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setPos(null); };
+    window.addEventListener('pointerdown', onDown, true);
+    window.addEventListener('keydown', onKey);
+    return () => { window.removeEventListener('pointerdown', onDown, true); window.removeEventListener('keydown', onKey); };
+  }, [pos]);
+
+  const counts = new Map<string, number>();
+  elements.forEach(el => { const k = layerKeyOf(el); counts.set(k, (counts.get(k) || 0) + 1); });
+  const keys = Array.from(counts.keys()).sort((a, b) => (LAYERS[a]?.desc || a).localeCompare(LAYERS[b]?.desc || b, 'zh-Hant'));
+  const exportable = keys.filter(k => !hidden.includes(k));
+  const nOut = exportable.filter(k => !excluded.includes(k)).length;
+  const toggle = (k: string) => onChange(excluded.includes(k) ? excluded.filter(x => x !== k) : [...excluded, k]);
+
+  const rowCls = 'flex items-center gap-2.5 px-2 py-[5px] text-xs rounded cursor-pointer hover:bg-white/5';
+  return (
+    <>
+      <button
+        ref={btnRef}
+        id="export-layers-btn"
+        onClick={() => {
+          if (pos) { setPos(null); return; }
+          const r = btnRef.current!.getBoundingClientRect();
+          setPos({ x: Math.min(r.left, window.innerWidth - 300), y: r.bottom + 4 });
+        }}
+        className="flex items-center gap-1.5 h-[24px] pl-1 pr-1.5 text-xs whitespace-nowrap rounded cursor-pointer hover:bg-white/5 [&_svg]:w-4 [&_svg]:h-4"
+        style={{ color: 'var(--ui-text)', background: pos ? 'var(--ui-accent-soft)' : undefined }}
+      >
+        <Layers />
+        <span>匯出圖層</span>
+        <span className="font-mono text-[10.5px]" style={{ color: 'var(--ui-muted)' }}>{nOut}/{exportable.length}{hasSimulation && includeSimulation ? '+軌跡' : ''}</span>
+        <ChevronDown className="!w-3 !h-3" />
+      </button>
+      {pos && (
+        <div ref={popRef} id="export-layers-popover" className="fixed z-50 w-[288px] max-h-[60vh] overflow-y-auto p-1 rounded shadow-lg"
+          style={{ left: pos.x, top: pos.y, background: 'var(--ui-surface)', border: '1px solid var(--ui-border)', color: 'var(--ui-text)' }}>
+          <div className="flex items-center justify-between px-2 py-1 text-[11px]" style={{ color: 'var(--ui-muted)' }}>
+            <span>勾選要放進圖面的圖層</span>
+            <span className="flex gap-1">
+              <button onClick={() => onChange([])} className="px-1.5 rounded cursor-pointer hover:bg-white/5" style={{ color: 'var(--ui-text)' }}>全選</button>
+              <button onClick={() => onChange(exportable)} className="px-1.5 rounded cursor-pointer hover:bg-white/5" style={{ color: 'var(--ui-text)' }}>全不選</button>
+            </span>
+          </div>
+          <label className={rowCls} style={{ opacity: hasSimulation ? 1 : 0.45 }}>
+            <input id="export-include-sim" type="checkbox" checked={includeSimulation} onChange={onToggleSimulation} className="m-0 cursor-pointer" style={{ accentColor: 'var(--ui-accent)' }} />
+            <span className="flex-1">車流軌跡（模擬結果）</span>
+            <span className="font-mono text-[10px]" style={{ color: 'var(--ui-muted)' }}>{hasSimulation ? 'SIM-*' : '尚無軌跡'}</span>
+          </label>
+          <div className="my-1" style={{ borderTop: '1px solid var(--ui-border)' }} />
+          {keys.length === 0 && <p className="text-xs py-3 text-center" style={{ color: 'var(--ui-muted)' }}>畫布上還沒有物件</p>}
+          {keys.map(k => {
+            const isHidden = hidden.includes(k);
+            const def = LAYERS[k];
+            return (
+              <label key={k} className={rowCls} style={{ opacity: isHidden ? 0.45 : 1 }} title={isHidden ? '圖層在畫面上隱藏中，不會匯出' : undefined}>
+                <input id={`export-layer-${k}`} type="checkbox" disabled={isHidden} checked={!isHidden && !excluded.includes(k)} onChange={() => toggle(k)} className="m-0 cursor-pointer" style={{ accentColor: 'var(--ui-accent)' }} />
+                <span className="w-3 h-3 shrink-0" style={{ background: def ? PALETTES.screen[def.color] : '#888', border: '1px solid var(--ui-border)' }} />
+                <span className="flex-1 truncate">{def?.desc || k}</span>
+                <span className="font-mono text-[10px]" style={{ color: 'var(--ui-muted)' }}>{isHidden ? '隱藏中' : counts.get(k)}</span>
+              </label>
+            );
+          })}
+        </div>
+      )}
+    </>
   );
 }
 

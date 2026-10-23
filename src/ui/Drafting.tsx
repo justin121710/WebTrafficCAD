@@ -213,3 +213,16 @@ export function StatusBar({ coordRef, scaleRef, toggles, right }: {
     </div>
   );
 }
+
+/* ------------------------------------------------------------- 功能區欄位 */
+export const fieldStyle: React.CSSProperties = { background: 'var(--ui-bg)', color: 'var(--ui-text)', border: '1px solid var(--ui-border)' };
+
+/** 欄名＋輸入元件（下拉、文字、數字），欄名固定寬度讓同欄對齊 */
+export function RibbonField({ label, children, labelW = 28 }: { label: string; children: React.ReactNode; labelW?: number; key?: React.Key }) {
+  return (
+    <label className="flex items-center gap-1.5 h-[24px] px-1.5 text-xs whitespace-nowrap">
+      <span className="shrink-0" style={{ color: 'var(--ui-muted)', width: labelW }}>{label}</span>
+      {children}
+    </label>
+  );
+}
