@@ -1,11 +1,12 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="WebTrafficCAD">
-  <title>WebTrafficCAD：斜透視道路＋平面游標（1A）</title>
+  <title>WebTrafficCAD：斜透視道路＋懸停游標（1A）</title>
   <defs><clipPath id="tile"><rect width="64" height="64" rx="12"/></clipPath></defs>
   <g clip-path="url(#tile)">
     <rect width="64" height="64" fill="#1d2127"/>
-    <path d="M10 12H22.6L60.5 64H10Z" fill="#3a3d42"/>
-    <path d="M13.1 12H13.9L15.6 64H11.4Z M21.2 12H22.1L58.5 64H54.5Z" fill="#f2f3f5"/>
-    <path d="M17.8 14.1L18.7 14.1L20.2 18.2L19.1 18.2Z M20.4 22.4L21.7 22.4L24.3 29.7L22.7 29.7Z M24.4 35.4L26.4 35.4L30.3 46.3L27.8 46.3Z M30.1 53.6L32.9 53.6L37.4 66L33.9 66Z" fill="#f2b705"/>
-    <path d="M37 6V28.95L43.08 23.28L47.13 32.33L51.18 30.57L47.26 21.66H55.23Z" fill="#ffffff"/>
+    <path d="M9.1 12H25L70 64H5.8Z" fill="#3a3d42"/>
+    <path d="M9.6 12H10.4L12.2 64H7.8Z M23.55 12H24.45L68 64H64Z" fill="#f2f3f5"/>
+    <path d="M17.38 14.08L18.3 14.08L20.11 18.24L18.93 18.24Z M20.48 22.4L21.92 22.4L25.08 29.68L23.2 29.68Z M25.33 35.4L27.57 35.4L32.32 46.32L29.4 46.32Z M32.12 53.6L35.48 53.6L40.87 66L36.75 66Z" fill="#f2b705"/>
+    <path d="M30 31L30 53.95L36.08 48.28L40.12 57.33L44.17 55.57L40.26 46.66L48.23 46.66Z" fill="#000000" fill-opacity="0.4"/>
+    <path d="M26 24L26 46.95L32.08 41.28L36.12 50.33L40.17 48.57L36.26 39.66L44.23 39.66Z" fill="#ffffff"/>
   </g>
 </svg>
